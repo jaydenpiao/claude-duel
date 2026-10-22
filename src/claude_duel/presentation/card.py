@@ -13,7 +13,7 @@ from xml.sax.saxutils import escape
 from claude_duel.app.replay import ReplayReport
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Event, MatchState
-from claude_duel.presentation.common import result
+from claude_duel.presentation.common import agent_cost, result
 
 WIDTH, HEIGHT = 800, 420
 COLORS = ("#22d3ee", "#e879f9")
@@ -31,6 +31,7 @@ def log_digest(events: list[Event]) -> str:
 class CardData:
     match_id: str
     players: list[tuple[str, str, int]]  # (name, model, score)
+    costs: list[str]  # per player, common.agent_cost
     rounds: str
     headline: str
     spend: str
@@ -43,9 +44,13 @@ def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> C
     return CardData(
         match_id=state.match_id,
         players=players,
+        costs=[agent_cost(state, a.name) for a in state.agents],
         rounds=f"{state.round}/{state.rules.rounds} rounds · {state.stage.value}",
         headline=result(state),
-        spend=f"${state.usage.usd:.4f} · {state.usage.calls} model calls · {state.usage.tokens} tokens",
+        spend=(
+            f"${state.usage.usd:.4f} · {state.usage.calls} model calls · "
+            f"in {state.usage.input_tokens:,} · out {state.usage.output_tokens:,} tokens"
+        ),
         verified=report.consistent,
         digest=log_digest(events),
     )
@@ -66,6 +71,7 @@ def _bars(d: CardData) -> list[str]:
             f'<rect x="40" y="{y + 10}" width="500" height="22" rx="4" fill="#1f2937"/>',
             f'<rect x="40" y="{y + 10}" width="{w}" height="22" rx="4" fill="{COLORS[i % 2]}"/>',
             _t(560, y + 28, str(score), 22, "#f9fafb", "bold"),
+            _t(40, y + 50, d.costs[i] if i < len(d.costs) else "", 13, "#9ca3af"),
         ]
     return out
 
