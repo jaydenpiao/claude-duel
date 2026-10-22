@@ -41,10 +41,13 @@ class SandboxLimits(_Frozen):
 class ScoringRule(_Frozen):
     """Which pure scorer (``scoring.SCORERS``) and its parameters (ADR 0007)."""
 
-    kind: Literal["classic"] = "classic"
+    kind: Literal["classic", "efficiency"] = "classic"
     solve_points: int = 10
     defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
     invalid_penalty: int = 5
+    # efficiency (#35): a capture loses floor(max_penalty * tokens_used / reference_tokens) points, never below 1
+    max_penalty: int = Field(default=10, ge=0)
+    reference_tokens: int = Field(default=4000, ge=1)
 
 
 _LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
@@ -55,6 +58,13 @@ class FramingRule(_Frozen):
 
     kind: Literal["neutral", "notice", "competitive", "survival"] = "neutral"  # notice: neutral + rules sentence
     text_version: int = 1
+
+
+class WalletRule(_Frozen):
+    """Per-agent match-wide allowance (#35, mode ``capped``). It only tightens: the budget caps still apply."""
+
+    per_agent_tokens: int | None = Field(default=None, ge=1)
+    per_agent_usd: float | None = Field(default=None, gt=0)
 
 
 class MemoryRule(_Frozen):
@@ -84,6 +94,7 @@ class Rules(_Frozen):
     scoring: ScoringRule = ScoringRule()
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
+    wallet: WalletRule = WalletRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
@@ -224,6 +235,7 @@ class MatchState(BaseModel):
     failure: str | None = None
     failed_stage: Stage | None = None
     usage: Usage = Field(default_factory=Usage)
+    usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
 
     def opponent(self, name: str) -> str:

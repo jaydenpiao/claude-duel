@@ -18,6 +18,10 @@ Depends on: design-rules-abstraction.md (`Rules.token_cap`, scorer `efficiency`)
 - Tokenizers differ across vendors, so token counts aren't comparable. **Resolved: score in $ and display tokens.** `efficiency.unit = "usd"` (default) | `"tokens"` (same-vendor studies only).
 - The discount must never make giving up better than capturing: a capture is always >= 1 point, and defense awards are unchanged.
 
+## Built (#35, first PR)
+- `capped` (token or $ wallets, strictest wins, `app/allowance.py`) and `efficiency` scored on recorded tokens (`scoring.efficiency`).
+- Not yet: the `usd` unit with prices pinned in `match_created`, and `CompletionRequest.max_output_tokens`.
+
 ## Fit
 - Agent wallets live in the existing `Usage` model, per agent (`MatchState.usage_by_agent`, folded from `call_charged.agent`, which is already in the event).
 - `CostBudget.check` remains the safety cap. The wallet is a game rule in `app/allowance.py`. They are separate on purpose (safety vs. scoring).

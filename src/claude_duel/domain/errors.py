@@ -75,3 +75,7 @@ class SandboxRefusedError(DuelError):
 
 class DeadlineExceededError(DuelError):
     """The match used up ``rules.match_deadline_s`` of recorded provider time (#13)."""
+
+
+class WalletEmptyError(DuelError):
+    """An agent's per-match wallet (``rules.wallet``) is spent; its builds forfeit and its attacks stop."""
