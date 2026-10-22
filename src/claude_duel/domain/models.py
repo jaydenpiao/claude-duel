@@ -70,7 +70,7 @@ class WalletRule(_Frozen):
 class MemoryRule(_Frozen):
     """Between-round memory (#19): what each agent is shown about earlier rounds (domain/memory.py)."""
 
-    kind: Literal["none", "summary"] = "none"
+    kind: Literal["none", "summary", "summary+scratchpad"] = "none"
     max_chars: int = Field(default=3000, ge=200, le=20_000)  # about 750 tokens
     source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
 
@@ -236,6 +236,7 @@ class MatchState(BaseModel):
     failed_stage: Stage | None = None
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
+    notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
 
     def opponent(self, name: str) -> str:
         a, b = self.agents
