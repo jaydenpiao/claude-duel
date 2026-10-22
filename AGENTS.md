@@ -66,3 +66,8 @@ All checks green locally and in CI, coverage >= 90%, new behaviour and failure c
 
 ## Skills
 [add-provider](.agents/skills/add-provider/SKILL.md) · [add-challenge-type](.agents/skills/add-challenge-type/SKILL.md) · [run-smoke-match](.agents/skills/run-smoke-match/SKILL.md) · [cut-release](.agents/skills/cut-release/SKILL.md) · [debug-failed-match](.agents/skills/debug-failed-match/SKILL.md) · [review-checklist](.agents/skills/review-checklist/SKILL.md)
+
+## Tracking
+- All work lives on the [Claude Duel board](https://github.com/users/jaydenpiao/projects/1) (Status, Priority, Size, Area, Source, Iteration).
+- Bots file GitHub issues with a type label (`bug`, `security`, `feature`, `game-mode`, `tech-debt`, `docs`, `demo`, `research`) plus one `area:*` label, add them to the board, and set Source to themselves. Security items are P0/P1. Link the spec file in the body and search for duplicates first.
+- PRs reference their issue with `Closes #N`.
