@@ -301,7 +301,9 @@ class MatchEngine:
         self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
     def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
-        return CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
+        cap = state.rules.wallet.max_output_tokens
+        request = CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
+        return request if cap is None else request.model_copy(update={"max_tokens": min(request.max_tokens, cap)})
 
     def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
         """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe; a capture means too easy."""
@@ -409,15 +411,16 @@ class MatchEngine:
     def _attempt(
         self, state: MatchState, agent: str, spec: ChallengeSpec, flag: str, completion: Completion
     ) -> AttackAttempt:
+        micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         try:
             payload = agents.parse_attack(completion.text).payload
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
-            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens)
+            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
         run = self._run_challenge(spec.source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
-        return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens)
+        return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 
     # -- stage 4: score ---------------------------------------------------
     def _score(self, state: MatchState) -> None:
