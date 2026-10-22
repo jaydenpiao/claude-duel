@@ -223,8 +223,17 @@ def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
 
 
 def _ratings(settings: Settings, boot: int, fmt: str) -> int:
-    log = build_event_log(settings)
-    table = ratings(results(fold(mid, log.read(mid)) for mid in log.ids()), boot=boot)
+    logs = build_event_log(settings)
+    states, skipped = [], []
+    for mid in logs.ids():
+        try:
+            states.append(fold(mid, logs.read(mid)))
+        except DuelError as exc:  # arch round 3: one bad or newer log never aborts the table
+            skipped.append(mid)
+            log(_LOG, logging.WARNING, "ratings: skipped unreadable match log", match_id=mid, error=str(exc))
+    if skipped:
+        print(f"ratings: {len(skipped)} log(s) skipped: {', '.join(skipped)}", file=sys.stderr)
+    table = ratings(results(states), boot=boot)
     if fmt == "json":
         print(json.dumps([dataclasses.asdict(r) for r in table]))
         return 0
