@@ -15,7 +15,6 @@ from claude_duel.app.container import (
 )
 from claude_duel.app.series import SpendCap, check_caps, pinned, play_series
 from claude_duel.config import Settings
-from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
 from claude_duel.domain.errors import MatchNotFoundError
@@ -37,7 +36,9 @@ def play_tournament(
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
         }
-        events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=tr.TOURNAMENT_CREATED, trace_id=tournament_id, data=data)]
+        events = [
+            Event(v=tr.TOURNAMENT_SCHEMA_VERSION, seq=0, type=tr.TOURNAMENT_CREATED, trace_id=tournament_id, data=data)
+        ]
         log.append(tournament_id, events[0])
     state = tr.fold(tournament_id, events)
     settings = pinned(settings, state.rules, state.limits, tournament_id)
@@ -66,7 +67,7 @@ def play_tournament(
         log.append(
             tournament_id,
             Event(
-                v=ev.SCHEMA_VERSION,
+                v=tr.TOURNAMENT_SCHEMA_VERSION,
                 seq=seq,
                 type=tr.PAIRING_FINISHED,
                 trace_id=tournament_id,
@@ -81,7 +82,8 @@ def play_tournament(
         data = {"points": state.pool_points}
         seq = len(state.pairings) + 1
         log.append(
-            tournament_id, Event(v=ev.SCHEMA_VERSION, seq=seq, type=tr.POOL_SCORED, trace_id=tournament_id, data=data)
+            tournament_id,
+            Event(v=tr.TOURNAMENT_SCHEMA_VERSION, seq=seq, type=tr.POOL_SCORED, trace_id=tournament_id, data=data),
         )
     return state
 
