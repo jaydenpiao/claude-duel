@@ -53,7 +53,7 @@ _LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
 class FramingRule(_Frozen):
     """The one paragraph of system text that frames the match (app/framings.py); nothing else differs."""
 
-    kind: Literal["neutral", "competitive", "survival"] = "neutral"
+    kind: Literal["neutral", "notice", "competitive", "survival"] = "neutral"  # notice: neutral + rules sentence
     text_version: int = 1
 
 
