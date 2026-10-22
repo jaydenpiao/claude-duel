@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.cli import main
-from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits, Stage
+from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits, Stage
 from claude_duel.domain.ratings import ELO_START, Result, bradley_terry, elo, entrant, ratings, results
 
 
@@ -79,3 +80,32 @@ def test_cli_ratings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: py
     assert {r["games"] for r in rows} == {1}
     assert main(["--config", str(cfg), "ratings", "--boot", "0"]) == 0
     assert "95% ci" in capsys.readouterr().out
+
+
+def test_elo_folds_in_recorded_order_golden() -> None:  # #137: three matches created in a known order
+    rs = [Result("zzz", "a", "b", 1.0, 0), Result("mmm", "b", "c", 1.0, 1), Result("aaa", "a", "c", 0.0, 2)]
+    want = {"a": 1500.0, "b": 1500.0, "c": 1500.0}
+    for x in rs:  # the hand fold, in creation order
+        e = 1 / (1 + 10 ** ((want[x.b] - want[x.a]) / 400))
+        want[x.a] += 32 * (x.score_a - e)
+        want[x.b] -= 32 * (x.score_a - e)
+    for _ in range(5):
+        random.shuffle(rs)  # shuffling log/file order leaves Elo unchanged
+        assert elo(rs) == pytest.approx(want)
+    assert elo(rs) != pytest.approx(elo([Result(r.match_id, r.a, r.b, r.score_a) for r in rs]))
+
+
+def test_series_games_sort_numerically_with_decider_after_its_game() -> None:
+    ids = [f"s-g{i}" for i in range(10, 0, -1)] + ["s-g2-sd"]
+    got = [r.match_id for r in sorted((Result(i, "a", "b", 1.0) for i in ids), key=lambda r: r.order)]
+    assert got[:4] == ["s-g1", "s-g2", "s-g2-sd", "s-g3"]
+    assert got[-1] == "s-g10"
+
+
+def test_store_assigns_created_seq(tmp_path: Path) -> None:
+    log = FileEventLog(tmp_path)
+    for m in ("m-b", "m-a"):
+        log.append(m, Event(seq=0, type="match_created", trace_id="t", data={}))
+        log.append(m, Event(seq=1, type="x", trace_id="t", data={}))
+    assert [log.read(m)[0].data["created_seq"] for m in ("m-b", "m-a")] == [0, 1]
+    assert "created_seq" not in log.read("m-a")[1].data

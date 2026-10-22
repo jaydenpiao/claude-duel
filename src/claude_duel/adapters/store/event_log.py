@@ -45,8 +45,18 @@ class FileEventLog:
             expected = events[-1].seq + 1 if events else 0
             if event.seq != expected:
                 raise EventLogCorruptError(f"event seq {event.seq} != expected {expected}")
+            if event.seq == 0 and event.type == "match_created" and "created_seq" not in event.data:
+                event = event.model_copy(update={"data": {**event.data, "created_seq": self._next_created_seq()}})
             record = {"prev": prev, "hash": _digest(prev, event), "event": _wire(event)}
             jsonl.append(fd, (json.dumps(record, sort_keys=True) + "\n").encode())
+
+    def _next_created_seq(self) -> int:
+        """Monotonic match-creation counter for this store (#137): Elo folds matches in this order."""
+        with jsonl.locked(self._root / ".created_seq", exclusive=True) as fd:
+            lines, _ = jsonl.read_complete(fd)
+            n = int(lines[-1]) + 1 if lines else 0
+            jsonl.append(fd, f"{n}\n".encode())
+        return n
 
     def ids(self) -> list[str]:
         """Every log id in the store, sorted."""
