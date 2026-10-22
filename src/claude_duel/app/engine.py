@@ -139,7 +139,7 @@ class MatchEngine:
 
         An event that can't be applied never reaches the log, so it can't poison resume or replay.
         """
-        event = Event(seq=state.last_seq + 1, type=kind, trace_id=current_trace_id(), data=data)
+        event = Event(v=ev.SCHEMA_VERSION, seq=state.last_seq + 1, type=kind, trace_id=current_trace_id(), data=data)
         ev.apply(state.model_copy(deep=True), event)
         self._log.append(state.match_id, event)
         ev.apply(state, event)

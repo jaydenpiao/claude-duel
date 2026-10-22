@@ -129,6 +129,7 @@ class Usage(BaseModel):
 
 
 class Event(_Frozen):
+    v: int = Field(default=0, ge=0, description="payload schema version (events.SCHEMA_VERSION); 0 = pre-versioning")
     seq: int
     type: str
     trace_id: str
