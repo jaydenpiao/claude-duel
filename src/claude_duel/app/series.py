@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import (
     build_budget,
+    build_driver_lock,
     build_event_log,
     build_ledger,
     build_series_log,
@@ -38,6 +39,19 @@ def play_series(
     caps: tuple[SpendCap, ...] = (),
 ) -> sr.SeriesState:
     """Play games until the series is decided. Resuming keeps the saved agents, seed and rule."""
+    with build_driver_lock(settings, series_id, "series"):  # one driver per id; a second fails fast
+        return _play_series(settings, series_id, rule, metrics, observer, budget, caps)
+
+
+def _play_series(
+    settings: Settings,
+    series_id: str,
+    rule: sr.SeriesRule,
+    metrics: Metrics,
+    observer: EventObserver | None,
+    budget: CostBudget | None,
+    caps: tuple[SpendCap, ...],
+) -> sr.SeriesState:
     log = build_series_log(settings)
     events = log.read(series_id)
     if not events:
