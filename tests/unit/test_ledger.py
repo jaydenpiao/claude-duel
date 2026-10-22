@@ -74,7 +74,7 @@ def test_replaced_file_is_refolded(tmp_path: Path) -> None:
 def test_zero_cost_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
     path = tmp_path / "l.jsonl"
     budget = CostBudget(BudgetLimits(), FileSpendLedger(path), DEFAULT_PRICES)
-    budget.charge(new_state(), FAKE_MODEL, Completion(text="", input_tokens=10, output_tokens=5))
+    budget.charge(new_state().match_id, FAKE_MODEL, Completion(text="", input_tokens=10, output_tokens=5))
     entry = json.loads(path.read_text())
     assert entry["usd"] == 0.0
     assert entry["model"] == FAKE_MODEL

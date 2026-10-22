@@ -1,4 +1,4 @@
-"""Match orchestration: drives the lifecycle, checkpointing every unit of work."""
+"""Match orchestration: drives the lifecycle; every change is an event, appended then applied."""
 
 from __future__ import annotations
 
@@ -9,16 +9,37 @@ from collections.abc import Mapping
 
 from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
+from claude_duel.domain import events as ev
 from claude_duel.domain import policy
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
-from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, Event, MatchState, Stage, Validation
-from claude_duel.domain.scoring import add_scores, score_round
-from claude_duel.domain.state_machine import TERMINAL, next_stage, transition
+from claude_duel.domain.models import (
+    Attack,
+    AttackAttempt,
+    Challenge,
+    ChallengeSpec,
+    Event,
+    MatchState,
+    Stage,
+    Validation,
+)
+from claude_duel.domain.scoring import score_round
+from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
-from claude_duel.ports import Completion, CompletionRequest, LLMProvider, MatchStore, Metrics, RunResult, Sandbox
+from claude_duel.ports import (
+    Completion,
+    CompletionRequest,
+    EventLog,
+    LLMProvider,
+    MatchStore,
+    Metrics,
+    RunResult,
+    Sandbox,
+)
 
 _LOG = logging.getLogger(__name__)
+CAPTURED = "<flag captured>"
+MALFORMED = "<malformed>"
 
 
 def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
@@ -32,6 +53,7 @@ class MatchEngine:
         providers: Mapping[str, LLMProvider],
         sandbox: Sandbox,
         store: MatchStore,
+        event_log: EventLog,
         metrics: Metrics,
         budget: CostBudget,
         models: Mapping[str, str],
@@ -41,26 +63,24 @@ class MatchEngine:
         self._providers = providers
         self._sandbox = sandbox
         self._store = store
+        self._log = event_log
         self._metrics = metrics
 
     # -- lifecycle -------------------------------------------------------
     def run(self, state: MatchState) -> MatchState:
         self._budget.check_lifetime()
         with self._store.lock(state.match_id), trace():
+            self._sync(state)
+            if state.stage is Stage.FAILED:
+                self._checkpoint(state, ev.MATCH_RECOVERED)
             while state.stage not in TERMINAL:
                 started, stage = time.monotonic(), state.stage.value
                 try:
                     self._execute_stage(state)
                 except Exception as exc:
-                    state.failure = f"{type(exc).__name__}: {redact(str(exc))}"
-                    transition(state, Stage.FAILED)
-                    self._emit(state, "match_failed", reason=state.failure)
-                    self._store.save(state)
+                    self._checkpoint(state, ev.MATCH_FAILED, reason=f"{type(exc).__name__}: {redact(str(exc))}")
                     raise
-                target = next_stage(state)
-                self._emit(state, "stage_completed", stage=state.stage.value, next=target.value)
-                transition(state, target)
-                self._store.save(state)
+                self._checkpoint(state, ev.STAGE_CHANGED, to=next_stage(state).value)
                 self._metrics.timing("stage.seconds", time.monotonic() - started, stage=stage)
             log(
                 _LOG,
@@ -72,6 +92,16 @@ class MatchEngine:
             )
         return state
 
+    def _sync(self, state: MatchState) -> None:
+        """Create the log for a new match, or apply events a crash left out of the snapshot."""
+        if state.last_seq < 0:
+            self._checkpoint(state, ev.MATCH_CREATED, **ev.created_data(state))
+            return
+        for event in self._log.read(state.match_id):
+            if event.seq > state.last_seq:
+                ev.apply(state, event)
+        self._store.save(state)
+
     def _execute_stage(self, state: MatchState) -> None:
         handler = {
             Stage.PENDING: lambda s: None,
@@ -82,21 +112,26 @@ class MatchEngine:
         }[state.stage]
         handler(state)
 
-    def _emit(self, state: MatchState, kind: str, **data: object) -> None:
-        state.events.append(Event(seq=len(state.events), type=kind, trace_id=current_trace_id(), data=data))
+    def _record(self, state: MatchState, kind: str, **data: object) -> None:
+        """Append to the durable log first, then apply: the log is the source of truth."""
+        event = Event(seq=state.last_seq + 1, type=kind, trace_id=current_trace_id(), data=data)
+        self._log.append(state.match_id, event)
+        ev.apply(state, event)
 
     def _checkpoint(self, state: MatchState, kind: str, **data: object) -> None:
-        self._emit(state, kind, **data)
+        self._record(state, kind, **data)
         self._store.save(state)
         self._metrics.incr(f"unit.{kind}")
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
-        """Single choke point for paid calls: budget check, call, charge."""
+        """Single choke point for paid calls: budget check, call, charge, checkpoint."""
         self._budget.check(state)
         started = time.monotonic()
         completion = self._providers[agent].complete(request)
         self._metrics.timing("provider.seconds", time.monotonic() - started, agent=agent, purpose=request.purpose)
-        self._budget.charge(state, self._models[agent], completion)
+        model = self._models[agent]
+        usd = self._budget.charge(state.match_id, model, completion)
+        self._checkpoint(state, ev.CALL_CHARGED, agent=agent, model=model, tokens=completion.total_tokens, usd=usd)
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
@@ -115,23 +150,18 @@ class MatchEngine:
                 cid = challenge_id(state.match_id, state.round, agent.name, index)
                 if cid in state.challenges:
                     continue  # idempotent resume
-                spec, reason = self._author(state, agent.name, index)
-                state.challenges[cid] = Challenge(
-                    id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason
-                )
-                self._checkpoint(
-                    state,
-                    "challenge_built",
-                    challenge_id=cid,
-                    author=agent.name,
-                    forfeit=reason,
-                    difficulty=spec.difficulty if spec else None,
-                )
+                spec, reason = self._author(state, cid, agent.name, index)
+                ch = Challenge(id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason)
+                self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
-    def _author(self, state: MatchState, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
-        """Provider errors propagate and fail the stage (resumable); only model faults forfeit."""
-        error: str | None = None
-        for _ in range(state.rules.max_format_retries + 1):
+    def _author(self, state: MatchState, cid: str, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
+        """Provider errors propagate and fail the stage (resumable); only model faults forfeit.
+
+        Each rejected answer is checkpointed, so a resumed build continues from the last retry.
+        """
+        errors = state.build_errors.get(cid, [])
+        while len(errors) <= state.rules.max_format_retries:
+            error = errors[-1] if errors else None
             prompt = agents.build_prompt(agent, state.round, index, state.rules, error)
             completion = self._call(
                 state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
@@ -139,9 +169,10 @@ class MatchEngine:
             try:
                 return agents.parse_challenge(completion.text), None
             except MalformedOutputError as exc:
-                error = str(exc)
                 self._metrics.incr("model.malformed", purpose="build")
-        return None, f"malformed: {error}"
+                self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=str(exc))
+                errors = state.build_errors[cid]
+        return None, f"malformed: {errors[-1]}"
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
@@ -149,8 +180,8 @@ class MatchEngine:
             if ch.id in state.validations:
                 continue
             ok, reason = self._check(state, ch)
-            state.validations[ch.id] = Validation(challenge_id=ch.id, valid=ok, reason=reason)
-            self._checkpoint(state, "challenge_validated", challenge_id=ch.id, valid=ok, reason=reason)
+            v = Validation(challenge_id=ch.id, valid=ok, reason=reason)
+            self._checkpoint(state, ev.CHALLENGE_VALIDATED, validation=v.model_dump(mode="json"))
 
     def _check(self, state: MatchState, ch: Challenge) -> tuple[bool, str]:
         if ch.spec is None:
@@ -176,62 +207,48 @@ class MatchEngine:
             key = f"{ch.id}:{attacker}"
             if key in state.attacks:
                 continue
-            a = self._solve(state, ch, attacker)
-            state.attacks[key] = a
-            self._checkpoint(
-                state,
-                "challenge_attacked",
-                challenge_id=ch.id,
-                attacker=attacker,
-                solved=a.solved,
-                attempts=a.attempts,
-                tokens=a.tokens_used,
-                reason=a.reason,
-            )
+            attack = self._solve(state, ch, key, attacker)
+            self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
-    def _solve(self, state: MatchState, ch: Challenge, attacker: str) -> Attack:
+    def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str) -> Attack:
+        """Attempts are checkpointed one by one; a resumed attack replays history instead of re-paying."""
         spec = ch.spec
         assert spec is not None, "only valid challenges are attacked"
         flag = derive_flag(state.secret, ch.id)
-        history: list[tuple[str, str]] = []
-        tokens = 0
-
-        def result(solved: bool, reason: str) -> Attack:
-            return Attack(
-                challenge_id=ch.id,
-                attacker=attacker,
-                solved=solved,
-                attempts=len(history),
-                tokens_used=tokens,
-                reason=reason,
-            )
-
-        while len(history) < state.rules.max_attempts:
+        while True:
+            history = state.attempts.get(key, [])
+            tokens = sum(a.tokens for a in history)
+            if history and history[-1].output == CAPTURED:
+                return Attack.of(ch.id, attacker, history, solved=True, reason="flag captured")
+            if len(history) >= state.rules.max_attempts:
+                return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
             if tokens >= state.rules.attack_token_budget:
-                return result(False, "token budget exhausted")
+                return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
+            pairs = [(a.payload, a.output) for a in history]
             prompt = agents.attack_prompt(
-                attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, history
+                attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, pairs
             )
             assert_no_flag(prompt, flag, "attack prompt")
             completion = self._call(
                 state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
             )
-            tokens += completion.total_tokens
-            try:
-                payload = agents.parse_attack(completion.text).payload
-            except MalformedOutputError as exc:
-                self._metrics.incr("model.malformed", purpose="attack")
-                history.append(("<malformed>", str(exc)))
-                continue
-            run = self._run_challenge(spec, payload, flag, state, "attack")
-            if flag in run.stdout:
-                history.append((payload, "<flag captured>"))
-                return result(True, "flag captured")
-            history.append((payload, redact(run.stdout, (flag,))[:500]))
-        return result(False, "attempts exhausted")
+            attempt = self._attempt(state, spec, flag, completion)
+            self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
+
+    def _attempt(self, state: MatchState, spec: ChallengeSpec, flag: str, completion: Completion) -> AttackAttempt:
+        try:
+            payload = agents.parse_attack(completion.text).payload
+        except MalformedOutputError as exc:
+            self._metrics.incr("model.malformed", purpose="attack")
+            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens)
+        run = self._run_challenge(spec, payload, flag, state, "attack")
+        output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
+        return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens)
 
     # -- stage 4: score ---------------------------------------------------
     def _score(self, state: MatchState) -> None:
+        if state.round in state.scored_rounds:
+            return  # idempotent resume
         delta = score_round(
             state.round,
             [a.name for a in state.agents],
@@ -240,5 +257,4 @@ class MatchEngine:
             state.attacks,
             state.rules,
         )
-        state.scores = add_scores(state.scores, delta)
-        self._emit(state, "round_scored", round=state.round, delta=delta, totals=state.scores)
+        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)

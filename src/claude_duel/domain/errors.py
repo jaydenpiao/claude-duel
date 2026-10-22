@@ -66,3 +66,7 @@ class MatchNotFoundError(DuelError):
 
 class ConfigError(DuelError):
     """Invalid configuration."""
+
+
+class EventLogCorruptError(DuelError):
+    """The append-only event log was edited, truncated mid-chain or reordered."""

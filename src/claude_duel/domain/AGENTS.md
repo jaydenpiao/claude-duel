@@ -11,5 +11,5 @@ Pure rules. No I/O, no adapters, no logging. Root context: [AGENTS.md](../../../
 
 Gotchas
 - Value models are frozen with `extra="forbid"`; adding a field to `MatchState` breaks loading old state files unless it has a default.
-- Changing scoring changes replay results for old matches; replay recomputes scores from stored validations and attacks and compares them to the last `round_scored` event.
+- Changing scoring changes replay results for old matches; replay folds the event log (`events.fold`), recomputes each `round_scored` delta and diffs the folded state against the snapshot. `events.py` holds the event types and `apply`, the only place match state changes; add a handler there for any new event type.
 - Loosening `policy.py` widens what runs in the sandbox; needs a security review.

@@ -6,7 +6,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from claude_duel.domain.models import MatchState, SandboxLimits
+from claude_duel.domain.models import Event, MatchState, SandboxLimits
 
 Purpose = Literal["build", "attack"]
 
@@ -75,3 +75,11 @@ class SpendLedger(Protocol):
     def total_usd(self) -> float: ...
 
     def record(self, match_id: str, model: str, tokens: int, usd: float) -> None: ...
+
+
+class EventLog(Protocol):
+    """Append-only per-match event log; the source of truth for replay (ADR 0004)."""
+
+    def append(self, match_id: str, event: Event) -> None: ...
+
+    def read(self, match_id: str) -> list[Event]: ...

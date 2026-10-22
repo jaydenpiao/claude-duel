@@ -11,7 +11,7 @@
 `PENDING -> BUILD -> VALIDATE -> ATTACK -> SCORE -> (BUILD next round | COMPLETE)`; any stage may go to `FAILED`. Transitions are enforced by `domain/state_machine.py`.
 
 ## Idempotency
-Each unit has a key (`build:r1:alice:0`, `attack:r1:bob:<challenge>`). The engine skips units already recorded and checkpoints after each one, so resume never repeats paid model calls for finished work.
+Each unit has a key (`build:r1:alice:0`, `attack:r1:bob:<challenge>`). The engine skips units already recorded and checkpoints after each one, so resume never repeats paid model calls for finished work. Every change is an event in the hash-chained `<id>.events.jsonl` (ADR 0004), including each attack attempt, so a crash mid-attack resumes at the next attempt.
 
 ## Flags
 `flag = DUEL{hmac_sha256(match_secret, challenge_id)[:32]}`. The secret is generated per match and stored only in the state file (never logged).

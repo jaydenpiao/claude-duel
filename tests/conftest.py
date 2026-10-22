@@ -10,6 +10,7 @@ import pytest
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.docker_sandbox import docker_probe
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
+from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
@@ -32,6 +33,11 @@ def store(store_root: Path) -> FileMatchStore:
 
 
 @pytest.fixture
+def event_log(store_root: Path) -> FileEventLog:
+    return FileEventLog(store_root)
+
+
+@pytest.fixture
 def new_state() -> Callable[..., MatchState]:
     def make(match_id: str = "m1", **rules: int) -> MatchState:
         return MatchState(
@@ -46,7 +52,7 @@ def new_state() -> Callable[..., MatchState]:
 
 
 @pytest.fixture
-def make_engine(store: FileMatchStore, store_root: Path) -> Callable[..., MatchEngine]:
+def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path) -> Callable[..., MatchEngine]:
     def make(
         providers: dict[str, LLMProvider] | None = None,
         metrics: InMemoryMetrics | None = None,
@@ -57,6 +63,7 @@ def make_engine(store: FileMatchStore, store_root: Path) -> Callable[..., MatchE
             providers,
             SubprocessSandbox(),
             store,
+            event_log,
             metrics or InMemoryMetrics(),
             CostBudget(budget or BudgetLimits(), FileSpendLedger(store_root / "ledger.jsonl"), DEFAULT_PRICES),
             {"alice": "fake-1", "bob": "fake-1"},

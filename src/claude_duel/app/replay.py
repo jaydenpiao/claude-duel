@@ -1,11 +1,14 @@
-"""Deterministic replay: recompute scores from persisted facts and compare to the log."""
+"""Deterministic replay: fold the hash-chained event log and compare it with the snapshot (ADR 0004)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from claude_duel.domain.models import MatchState
+from claude_duel.domain import events as ev
+from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, score_round
+
+_COMPARED = ("stage", "round", "challenges", "validations", "attacks", "attempts", "scores", "usage")
 
 
 @dataclass(frozen=True)
@@ -13,22 +16,29 @@ class ReplayReport:
     consistent: bool
     recomputed: dict[str, int]
     recorded: dict[str, int]
+    mismatches: list[str]
     transcript: list[str]
 
 
-def replay(state: MatchState) -> ReplayReport:
-    totals: dict[str, int] = {}
-    rounds = sorted({c.round for c in state.challenges.values()})
-    names = [a.name for a in state.agents]
-    for r in rounds:
-        totals = add_scores(
-            totals, score_round(r, names, state.challenges.values(), state.validations, state.attacks, state.rules)
-        )
-    recorded: dict[str, int] = {}
-    for ev in state.events:
-        if ev.type == "round_scored":
-            raw = ev.data.get("totals")
-            if isinstance(raw, dict):
-                recorded = {str(k): int(v) for k, v in raw.items()}
-    transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in state.events]
-    return ReplayReport(consistent=totals == recorded, recomputed=totals, recorded=recorded, transcript=transcript)
+def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
+    """Fold events from scratch, rescore every round from folded facts, and diff against the snapshot.
+
+    Only events the snapshot has seen are compared; a crash can leave the log ahead (``duel resume`` catches up).
+    """
+    events = [e for e in events if e.seq <= snapshot.last_seq]
+    folded = ev.fold(snapshot.match_id, events)
+    mismatches = [f"snapshot.{name}" for name in _COMPARED if getattr(folded, name) != getattr(snapshot, name)]
+    names = [a.name for a in folded.agents]
+    recomputed: dict[str, int] = {}
+    for event in events:
+        if event.type != ev.ROUND_SCORED:
+            continue
+        r = int(str(event.data["round"]))
+        delta = score_round(r, names, folded.challenges.values(), folded.validations, folded.attacks, folded.rules)
+        if delta != event.data["delta"]:
+            mismatches.append(f"round {r} score")
+        recomputed = add_scores(recomputed, delta)
+    if recomputed != folded.scores:
+        mismatches.append("total score")
+    transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in events]
+    return ReplayReport(not mismatches, recomputed, folded.scores, mismatches, transcript)

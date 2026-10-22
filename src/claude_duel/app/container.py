@@ -10,6 +10,7 @@ from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
+from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import CostBudget
@@ -55,12 +56,17 @@ def build_store(settings: Settings) -> FileMatchStore:
     return FileMatchStore(settings.store_dir)
 
 
+def build_event_log(settings: Settings) -> FileEventLog:
+    return FileEventLog(settings.store_dir)
+
+
 def build_engine(settings: Settings, metrics: Metrics, store: FileMatchStore) -> MatchEngine:
     agents = settings.agents
     return MatchEngine(
         {a.name: make_provider(a, settings, metrics) for a in agents},
         make_sandbox(settings, agents),
         store,
+        build_event_log(settings),
         metrics,
         CostBudget(settings.budget, FileSpendLedger(settings.store_dir / "ledger.jsonl"), settings.prices),
         {a.name: settings.model_for(a) for a in agents},

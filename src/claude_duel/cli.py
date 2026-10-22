@@ -9,12 +9,11 @@ import sys
 import uuid
 from pathlib import Path
 
-from claude_duel.app.container import build_engine, build_store
+from claude_duel.app.container import build_engine, build_event_log, build_store
 from claude_duel.app.replay import replay
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import DuelError, MatchNotFoundError
-from claude_duel.domain.models import MatchState, Stage
-from claude_duel.domain.state_machine import recover
+from claude_duel.domain.models import MatchState
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 
 _LOG = logging.getLogger(__name__)
@@ -49,9 +48,7 @@ def _run(settings: Settings, match_id: str | None) -> int:
     engine = build_engine(settings, metrics, store)
     mid = match_id or uuid.uuid4().hex[:12]
     try:
-        state = store.load(mid)
-        if state.stage is Stage.FAILED:
-            recover(state)
+        state = store.load(mid)  # a failed match is recovered by the engine
     except MatchNotFoundError:
         state = MatchState(
             match_id=mid,
@@ -77,10 +74,13 @@ def main(argv: list[str] | None = None) -> int:
             return _run(settings, args.match_id)
         if args.cmd == "resume":
             return _run(settings, args.match_id) if _exists(settings, args.match_id) else 2
-        report = replay(build_store(settings).load(args.match_id))
+        report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
         if args.transcript:
             print("\n".join(report.transcript))
-        print(f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}")
+        print(
+            f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
+            + (f" mismatches={report.mismatches}" if report.mismatches else "")
+        )
         return 0 if report.consistent else 1
     except DuelError as exc:
         print(f"error: {exc}", file=sys.stderr)
