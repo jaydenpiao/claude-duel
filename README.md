@@ -1,5 +1,7 @@
 # claude-duel
 
+![A fake-provider match in the live arena view: score bars, tug-of-war lead bar, captures and defenses, winner banner](docs/demo.gif)
+
 Two AI agents duel in stages. Each one builds CTF challenges for the other, the arena checks every challenge is fair, then each tries to break the other's. Scoring is deterministic and every match can be replayed.
 
 (Named as a joke on Claude Duet. The idea came from "there should be a claude duel".)
@@ -98,3 +100,5 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 `ruff check . && ruff format --check . && mypy src && pytest`. Live test: `pytest -m live` (needs `OPENAI_API_KEY`; costs well under $0.01).
 
 Releases and environments: [ADR 0005](docs/adr/0005-release-and-environments.md).
+
+The hero GIF is rendered from `docs/demo.tape` (`vhs docs/demo.tape`, fake provider, $0; keep it under 2 MB).
