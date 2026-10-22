@@ -57,6 +57,14 @@ class FramingRule(_Frozen):
     text_version: int = 1
 
 
+class MemoryRule(_Frozen):
+    """Between-round memory (#19): what each agent is shown about earlier rounds (domain/memory.py)."""
+
+    kind: Literal["none", "summary"] = "none"
+    max_chars: int = Field(default=3000, ge=200, le=20_000)  # about 750 tokens
+    source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
+
+
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
 
 
@@ -71,6 +79,7 @@ class Rules(_Frozen):
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()
     framing: FramingRule = FramingRule()
+    memory: MemoryRule = MemoryRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
