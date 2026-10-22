@@ -22,7 +22,7 @@ A **match** stays exactly what it is today: N rounds, one event log, one `MatchS
 - Series: `domain/series.py` + `app/series.py`, `duel series --games N`; logs as `<id>.series.jsonl`. Not yet: the sudden-death 1-round tiebreak (a game tied on score and attack tokens is drawn), tournaments and ratings (#39).
 
 ## Built (#39, first PR)
-- Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Not yet: tournaments (round robin / Swiss) and the `decay` scorer.
+- Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Tournaments: `domain/tournament.py` + `app/tournament.py`, `duel tournament` (second PR). Not yet: the `decay` scorer; it needs one challenge attacked by several entrants, which no format produces yet (every match has its own challenges).
 
 ## Cost
 A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.45; double round robin ~$0.90. A Swiss of 8 entrants x 5 rounds is 20 matches, ~$0.60. Add `series_max_usd` (default $2) checked before each game against the ledger.

@@ -79,6 +79,11 @@ def build_series_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir, suffix=".series.jsonl")
 
 
+def build_tournament_log(settings: Settings) -> FileEventLog:
+    """Tournament logs (#39), ``<tournament_id>.tournament.jsonl``, same hash chain."""
+    return FileEventLog(settings.store_dir, suffix=".tournament.jsonl")
+
+
 def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 

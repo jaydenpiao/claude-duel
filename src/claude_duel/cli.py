@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay, card, estimate, series, ratings."""
+"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
 from claude_duel.app.series import play_series, verify_series
 from claude_duel.app.session import play
+from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
@@ -72,6 +73,9 @@ def _parser() -> argparse.ArgumentParser:
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
+    tour = sub.add_parser("tournament", help="play or resume the config's [tournament] (round robin or Swiss)")
+    tour.add_argument("--tournament-id", help="explicit id (re-running an existing id resumes it)")
+    tour.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -144,6 +148,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "estimate": lambda: _estimate(settings, args.mode, args.model),
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
+        "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
     }
     if args.cmd in handlers:
@@ -208,6 +213,29 @@ def _ratings(settings: Settings, boot: int, fmt: str) -> int:
     for r in table:
         print(f"{r.entrant:<32}{r.games:>6}{r.bt:>7.0f}{f'{r.lo:.0f}-{r.hi:.0f}':>14}{r.elo:>7.0f}")
     return 0
+
+
+def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
+    if settings.tournament is None:
+        raise ConfigError("no [tournament] table in the config (needs at least 3 entrants)")
+    state = play_tournament(settings, tournament_id, settings.tournament, InMemoryMetrics())
+    finished = state.next_pair() is None
+    if fmt == "json":
+        out = {
+            "tournament_id": tournament_id,
+            "format": state.rule.kind(),
+            "finished": finished,
+            "standings": state.table(),
+            "pairings": [p.model_dump() for p in state.pairings],
+        }
+        print(json.dumps(out))
+    else:
+        for p in state.pairings:
+            print(f"round {p.round}: {p.a} v {p.b} -> {p.winner or 'draw'}")
+        print(f"tournament {tournament_id} ({state.rule.kind()}){'' if finished else ' unfinished'}:")
+        for rank, (name, points) in enumerate(state.table(), 1):
+            print(f"{rank:>3}. {name:<24}{points:g}")
+    return 0 if finished else 1
 
 
 def _card(settings: Settings, match_id: str, out: Path | None) -> int:
