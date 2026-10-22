@@ -52,45 +52,50 @@ spend: $0.0000 this match · $0.0031 of $50 burned
 ────────────────────────────────────────────────
 round 2/2
 ────────────────────────────────────────────────
-alice built a challenge guarding the arena's flag: Front door
+alice built a challenge guarding the arena's flag: Mirror
+  difficulty 1 · 5 lines
+  │ import sys
+  │ data = sys.stdin.read().strip()
+  │ if data == "elddir"[::-1]:
+  │ … (+1 lines)
+alice built a challenge guarding the arena's flag: Knock
+  difficulty 2 · 11 lines
+  │ import base64
+  │ import binascii
+  │ import sys
+  │ … (+7 lines)
+bob built a challenge guarding the arena's flag: Arithmetic gate
+  difficulty 2 · 8 lines
+  │ import sys
+  │ data = sys.stdin.read().strip()
+  │ parts = data.split()
+  │ … (+4 lines)
+bob built a challenge guarding the arena's flag: Front door
   difficulty 1 · 5 lines
   │ import sys
   │ data = sys.stdin.read().strip()
   │ if data == "open-sesame":
   │ … (+1 lines)
-alice built a challenge guarding the arena's flag: Preimage
-  difficulty 3 · 6 lines
-  │ import hashlib
-  │ import sys
-  │ data = sys.stdin.read().strip()
-  │ … (+2 lines)
-bob built a challenge guarding the arena's flag: Preimage
-  difficulty 3 · 6 lines
-  │ import hashlib
-  │ import sys
-  │ data = sys.stdin.read().strip()
-  │ … (+2 lines)
-bob built a challenge guarding the arena's flag: Preimage
-  difficulty 3 · 6 lines
-  │ import hashlib
-  │ import sys
-  │ data = sys.stdin.read().strip()
-  │ … (+2 lines)
-arena check on alice's 'Front door': solvable ✓
-arena check on alice's 'Preimage': solvable ✓
-arena check on bob's 'Preimage': solvable ✓
-arena check on bob's 'Preimage': solvable ✓
-bob attacks 'Front door' (try 1/4)… no flag
-bob attacks 'Front door' (try 2/4)… no flag
-bob attacks 'Front door' (try 3/4)… captured the flag ✓ +18
-bob attacks 'Preimage' (try 1/4)… captured the flag ✓ +60
-alice attacks 'Preimage' (try 1/4)… no flag
-alice attacks 'Preimage' (try 2/4)… captured the flag ✓ +59
-alice attacks 'Preimage' (try 1/4)… no flag
-alice attacks 'Preimage' (try 2/4)… captured the flag ✓ +59
-scoreboard after round 2: alice 150  bob 93
+arena check on alice's 'Mirror': solvable ✓
+arena check on alice's 'Knock': solvable ✓
+arena check on bob's 'Arithmetic gate': solvable ✓
+arena check on bob's 'Front door': solvable ✓
+bob attacks 'Mirror' (try 1/4)… no flag
+bob attacks 'Mirror' (try 2/4)… captured the flag ✓ +19
+bob attacks 'Knock' (try 1/4)… no flag
+bob attacks 'Knock' (try 2/4)… no flag
+bob attacks 'Knock' (try 3/4)… no flag
+bob attacks 'Knock' (try 4/4)… no flag
+  → defended (attempts exhausted), alice +24
+alice attacks 'Arithmetic gate' (try 1/4)… captured the flag ✓ +40
+alice attacks 'Front door' (try 1/4)… no flag
+alice attacks 'Front door' (try 2/4)… no flag
+alice attacks 'Front door' (try 3/4)… no flag
+alice attacks 'Front door' (try 4/4)… no flag
+  → defended (attempts exhausted), bob +12
+scoreboard after round 2: alice 96  bob 46
 spend: $0.0000 this match · $0.0031 of $50 burned
 
 ────────────────────────────────────────────────
-winner: alice · alice 150  bob 93
-27 model calls · 5210 tokens · $0.0000 this match · $0.0031 of $50 burned
+winner: alice · alice 96  bob 46
+30 model calls · 7764 tokens · $0.0000 this match · $0.0031 of $50 burned

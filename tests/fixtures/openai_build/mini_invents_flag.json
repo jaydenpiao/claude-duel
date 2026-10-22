@@ -1,0 +1,5 @@
+{
+ "model": "gpt-4.1-mini",
+ "note": "recorded 2026-10-21 smoke-1: invents FLAG literal",
+ "content": "{\"title\": \"Secret Flag Checker\", \"description\": \"Reads a single line from stdin and prints the global FLAG only if the input matches the secret key derived from a SHA256 hash puzzle.\", \"source\": \"import sys\\nimport hashlib\\n\\nFLAG = \\\"FLAG{congratulations_you_found_the_secret_input!}\\\"\\n\\nsecret_hash = \\\"5e884898da28047151d0e56f8dc6292773603d0d6aabbddf\\\" \\\\\\n              \\\"a3a7a6e7f8a9e9e7a\\\"\\n\\ninput_line = sys.stdin.readline().rstrip('\\\\n')\\n\\n# The secret input is the string whose SHA256 hex digest starts with the secret_hash prefix\\n# For this challenge, the secret input is 'password'\\n\\nif hashlib.sha256(input_line.encode()).hexdigest().startswith(secret_hash):\\n    print(FLAG)\\n\", \"reference_payload\": \"password\\n\", \"difficulty\": 2}"
+}

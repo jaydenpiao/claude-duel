@@ -1,0 +1,5 @@
+{
+ "model": "gpt-4.1-nano",
+ "note": "recorded 2026-10-21 smoke-1: invents FLAG, uses __name__ guard",
+ "content": "{\"title\": \"Flag Retriever\", \"description\": \"A Python program that reads input from stdin and prints the global FLAG only for the correct input.\", \"source\": \"import sys\\n\\nFLAG = 'CTF{example_flag_12345}'\\n\\ndef main():\\n    data = sys.stdin.read()\\n    # The correct input is a JSON string with a specific key-value pair\\n    try:\\n        payload = json.loads(data)\\n        if payload.get('key') == 'secret_value':\\n            print(FLAG)\\n    except Exception:\\n        pass\\n\\nif __name__ == '__main__':\\n    main()\\n\", \"reference_payload\": \"{\\\"key\\\": \\\"secret_value\\\"}\", \"difficulty\": 2}"
+}

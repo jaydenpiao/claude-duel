@@ -40,6 +40,7 @@ from claude_duel.ports import (
 
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
+REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
 
 def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
@@ -156,11 +157,13 @@ class MatchEngine:
                 self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
     def _author(self, state: MatchState, cid: str, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
-        """Provider errors propagate and fail the stage (resumable); only model faults forfeit.
-
-        Each rejected answer is checkpointed, so a resumed build continues from the last retry.
+        """Repair loop: a malformed or invalid answer is fed back (with the reason) for up to
+        ``rules.max_format_retries`` more paid, budgeted calls. Provider errors propagate and fail the
+        stage (resumable). Each rejection is checkpointed, so a resumed build continues from the last retry.
+        The last invalid answer is kept, so validation records why it failed.
         """
         errors = state.build_errors.get(cid, [])
+        last: ChallengeSpec | None = None
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(agent, state.round, index, state.rules, error)
@@ -168,12 +171,18 @@ class MatchEngine:
                 state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
             )
             try:
-                return agents.parse_challenge(completion.text), None
+                last = agents.parse_challenge(completion.text)
+                problem = self._problem(state, cid, state.round, last)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
-                self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=str(exc))
-                errors = state.build_errors[cid]
-        return None, f"malformed: {errors[-1]}"
+                problem = f"malformed: {exc}"
+            if problem is None:
+                return last, None
+            if not problem.startswith("malformed"):
+                self._metrics.incr("model.invalid", purpose="build")
+            self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
+            errors = state.build_errors[cid]
+        return (last, None) if last is not None else (None, errors[-1])
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
@@ -187,17 +196,27 @@ class MatchEngine:
     def _check(self, state: MatchState, ch: Challenge) -> tuple[bool, str]:
         if ch.spec is None:
             return False, ch.forfeit_reason or "forfeit"
-        rejected = policy.check(ch.spec, state.rules.max_source_bytes(ch.round))
+        problem = self._problem(state, ch.id, ch.round, ch.spec)
+        return (False, problem) if problem else (True, "ok")
+
+    def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
+        """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
+        rejected = policy.check(spec, state.rules.max_source_bytes(round_no))
         if rejected:
-            return False, rejected
-        flag = derive_flag(state.secret, ch.id)
-        ref = self._run_challenge(ch.spec, ch.spec.reference_payload, flag, state, "validate")
+            return rejected
+        flag = derive_flag(state.secret, cid)
+        ref = self._run_challenge(spec, spec.reference_payload, flag, state, "validate")
         if flag not in ref.stdout:
-            return False, "reference payload does not reveal flag" + (" (timeout)" if ref.timed_out else "")
-        empty = self._run_challenge(ch.spec, "", flag, state, "validate")
+            seen = redact(ref.stdout, (flag,)).strip()[:REF_OUTPUT_CHARS]
+            return (
+                "reference payload does not reveal flag"
+                + (" (timeout)" if ref.timed_out else "")
+                + (f"; it printed {seen!r}" if seen else "; it printed nothing")
+            )
+        empty = self._run_challenge(spec, "", flag, state, "validate")
         if flag in empty.stdout:
-            return False, "trivial: empty input reveals flag"
-        return True, "ok"
+            return "trivial: empty input reveals flag"
+        return None
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
