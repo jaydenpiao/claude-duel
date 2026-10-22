@@ -130,6 +130,12 @@ class Rules(_Frozen):
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
     )
     variety: bool = Field(default=False, description="themes, past designs and repeat check for authors (#79)")
+    integrity_control: bool = Field(
+        default=False, description="rerun every payload on a control that never prints the flag; a capture is a leak"
+    )
+    attacker_solver: bool = Field(
+        default=False, description="attackers may send a sandboxed solver (throwaway flag); its stdout is the payload"
+    )
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()
