@@ -7,7 +7,7 @@ Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to i
 - `flags.py`: `derive_flag`, `assert_no_flag`, `redact`, `scrub` (the only redactor), `FLAG_PATTERN` (`DUEL{hex}`).
 - `policy.py`: static AST check of challenge (and solver) source, plus `answer_exposed` (hidden-answer rule, ADR 0006).
 - `events.py`: event types, one typed payload model per type, `SCHEMA_VERSION`, `payload()` validation, `apply`/`fold` (ADR 0004). `attack_started` (key, try_no) is emitted before each attack call for presentation; its handler changes no state, so logs written before it existed replay identically.
-- `modes.py`: `MODES` presets (plain `Rules`: classic, quick, gated, checked, efficiency, capped, blitz); `config.load_settings` applies `[rules] mode` / `DUEL_MODE` first, then the config's own fields.
+- `modes.py`: `MODES` presets (plain `Rules`: classic, quick, gated, checked, efficiency, capped, blitz). Every scored preset (scoring kind other than `classic`) carries a token clock (#67, enforced by `test_scored_clock.py`), so latency never decides a result; `match_deadline_s` is only a failing backstop. `config.load_settings` applies `[rules] mode` / `DUEL_MODE` first, then the config's own fields.
 - `variety.py`: check-form variety (#79): seeded per-challenge `theme`, the author's `past_designs` in the build prompt, `repeat_reason` rejects a reused title or source. On via `rules.variety` (preset `checked`).
 - `contract.py`: the `check` challenge form (`compose`, `WRAPPER`, `solver_program`; ADR 0010).
 - `findings.py`: tamper detector (`scan_build`, `scan_payload`); logged as `finding_flagged`, never scored (ADR 0008). `policy.reason_code` gives rejection reasons a machine code.
