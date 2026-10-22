@@ -8,7 +8,7 @@ on:
 permissions: {}
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: read
     steps:
@@ -20,7 +20,7 @@ jobs:
       - name: dependency vulnerabilities (runtime + dev, pinned as installed)
         run: uv pip freeze --exclude-editable > /tmp/req.txt && .venv/bin/pip-audit --strict --disable-pip --no-deps -r /tmp/req.txt
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: read
     steps:
@@ -33,7 +33,7 @@ jobs:
           docker run --rm -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0="*" \
             -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --exit-code 1
   codeql:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: read
       actions: read # codeql reads its own workflow run
@@ -55,7 +55,7 @@ jobs:
           jq -r '.runs[].results[] | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine) \(.message.text)"' sarif/*.sarif
           test "$n" -eq 0
   image:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: read
     steps:
