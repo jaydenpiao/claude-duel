@@ -12,6 +12,7 @@ from claude_duel.app.container import (
     build_store,
     build_tournament_log,
     pin_agents,
+    pin_entrants,
 )
 from claude_duel.app.series import SpendCap, check_caps, pinned, play_series
 from claude_duel.config import Settings
@@ -42,7 +43,7 @@ def play_tournament(
     if not events:
         data: dict[str, object] = {
             "seed": settings.seed or game_seed(tournament_id, 0),
-            "rule": rule.model_dump(mode="json"),
+            "rule": rule.model_copy(update={"entrants": pin_entrants(settings, rule.entrants)}).model_dump(mode="json"),
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
         }
