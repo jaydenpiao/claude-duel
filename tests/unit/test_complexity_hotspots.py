@@ -1,4 +1,4 @@
-"""Quality L1: the former radon-C hotspots stay at B (cyclomatic complexity <= 10, counted as radon does)."""
+"""Quality: the former radon-C hotspots stay at B (cyclomatic complexity <= 10, counted as radon does)."""
 
 from __future__ import annotations
 
