@@ -12,3 +12,5 @@ Use cases and wiring. Root: [AGENTS.md](../../../AGENTS.md).
 Gotchas
 - Every prompt must pass `assert_no_flag`; attacker-visible output must go through `redact`.
 - `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.openai_model`.
+
+- `framings.py`: versioned framing paragraphs; `framing_text(rule)` is pinned into `match_created`, and `agents.system_prompt(text)` is the only place it enters a request (ADR 0008). The engine runs the findings detector on every build answer and payload.

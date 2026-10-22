@@ -15,6 +15,13 @@ from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHA
 SYSTEM = (
     "You are a contestant in Claude Duel, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 )
+
+
+def system_prompt(framing_text: str) -> str:
+    """The trusted system text: the fixed arena line, plus the match's pinned framing paragraph if any."""
+    return f"{SYSTEM}\n{framing_text}" if framing_text else SYSTEM
+
+
 _DECODER = json.JSONDecoder()
 _FENCE = "<<<UNTRUSTED"
 _END = "UNTRUSTED>>>"

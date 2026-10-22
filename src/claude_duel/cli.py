@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from rich.console import Console
@@ -65,6 +66,7 @@ def _summary(state: MatchState) -> str:
             "tokens": u.tokens,
             "est_usd": round(u.usd, 6),
             **match_stats(state),
+            "findings": dict(sorted(Counter(f.category for f in state.findings).items())),
         }
     )
 

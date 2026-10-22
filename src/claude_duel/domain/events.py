@@ -18,6 +18,7 @@ from claude_duel.domain.models import (
     AttackAttempt,
     Challenge,
     Event,
+    Finding,
     MatchState,
     Rules,
     SandboxLimits,
@@ -38,6 +39,7 @@ CHALLENGE_VALIDATED = "challenge_validated"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
+FINDING_FLAGGED = "finding_flagged"
 
 SCHEMA_VERSION = 1  # Event.v of new events; 0 = written before versioning (same payload shapes)
 
@@ -48,6 +50,7 @@ class _Payload(BaseModel):
 
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
+    framing_text: str = ""  # absent before framings
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
@@ -99,6 +102,14 @@ class ChallengeAttacked(_Payload):
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+
+
+class FindingFlagged(_Payload):
+    finding: Finding
+
+
+def _flagged(state: MatchState, p: FindingFlagged) -> None:
+    state.findings.append(p.finding)
 
 
 def _created(state: MatchState, p: MatchCreated) -> None:
@@ -161,6 +172,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
+    FINDING_FLAGGED: (FindingFlagged, _flagged),
 }
 
 
@@ -185,6 +197,7 @@ def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
         "seed": state.seed,
+        "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
         "limits": state.limits.model_dump(mode="json"),
@@ -204,7 +217,9 @@ def initial_state(match_id: str, created: Event) -> MatchState:
     if created.type != MATCH_CREATED:
         raise EventLogCorruptError("event log does not start with match_created")
     p = cast(MatchCreated, payload(created))
-    return MatchState(match_id=match_id, seed=p.seed, agents=p.agents, rules=p.rules, limits=p.limits)
+    return MatchState(
+        match_id=match_id, seed=p.seed, framing_text=p.framing_text, agents=p.agents, rules=p.rules, limits=p.limits
+    )
 
 
 def fold(match_id: str, events: Iterable[Event]) -> MatchState:

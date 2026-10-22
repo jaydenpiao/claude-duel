@@ -50,6 +50,13 @@ class ScoringRule(_Frozen):
 _LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
 
 
+class FramingRule(_Frozen):
+    """The one paragraph of system text that frames the match (app/framings.py); nothing else differs."""
+
+    kind: Literal["neutral", "competitive", "survival"] = "neutral"
+    text_version: int = 1
+
+
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
 
 
@@ -63,6 +70,7 @@ class Rules(_Frozen):
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()
+    framing: FramingRule = FramingRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
@@ -157,6 +165,17 @@ class Usage(BaseModel):
     usd: float = 0.0
 
 
+class Finding(_Frozen):
+    """A detector hit (domain/findings.py). Logged for review; never changes scores."""
+
+    agent: str
+    round: int
+    category: str
+    severity: str
+    rule_id: str
+    excerpt: str
+
+
 class Event(_Frozen):
     v: int = Field(default=0, ge=0, description="payload schema version (events.SCHEMA_VERSION); 0 = pre-versioning")
     seq: int
@@ -172,6 +191,8 @@ class MatchState(BaseModel):
 
     match_id: str
     secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file (M2)
+    framing_text: str = ""  # pinned framing paragraph from match_created ("" = neutral)
+    findings: list[Finding] = Field(default_factory=list)
     seed: str = ""  # deterministic tie-break/pairing seed, logged in match_created ("" in pre-0007 logs)
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
