@@ -453,7 +453,8 @@ class MatchEngine:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
-        run = self._run_challenge(spec.source, payload, flag, state, "attack")
+        source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
+        run = self._run_challenge(source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 
