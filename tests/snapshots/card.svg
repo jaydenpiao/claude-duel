@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420" font-family="ui-monospace, Menlo, monospace">
+<rect width="800" height="420" rx="16" fill="#111827"/>
+<text x="40" y="60" font-size="28" fill="#f9fafb" font-weight="bold">claude duel · alice vs bob</text>
+<text x="40" y="95" font-size="16" fill="#9ca3af" font-weight="normal">match snap · 2/2 rounds · complete</text>
+<text x="40" y="150" font-size="18" fill="#22d3ee" font-weight="bold">alice (gpt-4.1-nano)</text>
+<rect x="40" y="160" width="500" height="22" rx="4" fill="#1f2937"/>
+<rect x="40" y="160" width="500" height="22" rx="4" fill="#22d3ee"/>
+<text x="560" y="178" font-size="22" fill="#f9fafb" font-weight="bold">96</text>
+<text x="40" y="220" font-size="18" fill="#e879f9" font-weight="bold">bob (gpt-4.1-mini)</text>
+<rect x="40" y="230" width="500" height="22" rx="4" fill="#1f2937"/>
+<rect x="40" y="230" width="0" height="22" rx="4" fill="#e879f9"/>
+<text x="560" y="248" font-size="22" fill="#f9fafb" font-weight="bold">-5</text>
+<text x="40" y="320" font-size="22" fill="#fde047" font-weight="bold">winner: alice · alice 96  bob -5</text>
+<text x="40" y="355" font-size="16" fill="#9ca3af" font-weight="normal">$0.0031 · 30 model calls · 9696 tokens</text>
+<text x="40" y="390" font-size="16" fill="#86efac" font-weight="normal">replay verified ✓ · log 0123456789abcdef</text>
+</svg>
