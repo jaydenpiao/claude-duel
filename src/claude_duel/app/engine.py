@@ -349,6 +349,7 @@ class MatchEngine:
                 self._memory(state, attacker),
             )
             assert_no_flag(prompt, flag, "attack prompt")
+            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
             completion = self._call(state, attacker, self._request(state, prompt, "attack"))
             attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
