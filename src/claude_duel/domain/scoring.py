@@ -54,21 +54,33 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     return scores
 
 
-def _discounted(facts: RoundFacts, rule: ScoringRule, award: Callable[[int, int, ScoringRule], int]) -> dict[str, int]:
-    """Classic, with each capture's value replaced by ``award(full, tokens_used, rule)``; defenses unchanged."""
+def _discounted(
+    facts: RoundFacts,
+    rule: ScoringRule,
+    award: Callable[[int, int, ScoringRule], int],
+    cost: Callable[[Attack, ScoringRule], int] = lambda atk, _rule: atk.tokens_used,
+) -> dict[str, int]:
+    """Classic, with each capture's value replaced by ``award(full, cost(attack), rule)``; defenses unchanged."""
     scores = classic(facts, rule)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
-            scores[atk.attacker] -= full - award(full, atk.tokens_used, rule)
+            scores[atk.attacker] -= full - award(full, cost(atk, rule), rule)
     return scores
 
 
 def efficiency(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     """Classic, except a capture is discounted by the attack's recorded tokens (never below 1; defenses unchanged)."""
-    return _discounted(facts, rule, efficiency_award)
+    return _discounted(facts, rule, efficiency_award, cost_used)
+
+
+def cost_used(atk: Attack, rule: ScoringRule) -> int:
+    """The attack's cost in efficiency units, as reference_tokens-scaled tokens (``unit="usd"`` rescales micro-$)."""
+    if rule.unit == "usd":
+        return atk.usd_micros * rule.reference_tokens // rule.reference_usd_micros
+    return atk.tokens_used
 
 
 def timed(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:

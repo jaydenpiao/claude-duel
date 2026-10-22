@@ -48,6 +48,9 @@ class ScoringRule(_Frozen):
     # efficiency (#35): a capture loses floor(max_penalty * tokens_used / reference_tokens) points, never below 1
     max_penalty: int = Field(default=10, ge=0)
     reference_tokens: int = Field(default=4000, ge=1)
+    # efficiency unit (#35): "tokens" (same-vendor) or "usd" (cross-vendor: recorded micro-$)
+    unit: Literal["tokens", "usd"] = "tokens"
+    reference_usd_micros: int = Field(default=2000, ge=1)
     # timed (#36): a capture loses min(full - 1, floor(max_penalty * min(1, tokens_used / par_tokens)))
     par_tokens: int = Field(default=8000, ge=1)
 
@@ -67,6 +70,7 @@ class WalletRule(_Frozen):
 
     per_agent_tokens: int | None = Field(default=None, ge=1)
     per_agent_usd: float | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, ge=16)  # per-call output cap, so one call can't drain a wallet
 
 
 class ClockRule(_Frozen):
@@ -169,6 +173,7 @@ class AttackAttempt(_Frozen):
     payload: str
     output: str
     tokens: int
+    usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
 
     @property
     def captured(self) -> bool:
@@ -182,6 +187,7 @@ class Attack(_Frozen):
     attempts: int
     tokens_used: int
     reason: str
+    usd_micros: int = 0
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
@@ -191,6 +197,7 @@ class Attack(_Frozen):
             solved=solved,
             attempts=len(history),
             tokens_used=sum(a.tokens for a in history),
+            usd_micros=sum(a.usd_micros for a in history),
             reason=reason,
         )
 
