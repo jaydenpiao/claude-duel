@@ -10,8 +10,8 @@ from collections.abc import Mapping
 from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
+from claude_duel.domain import contract, findings, memory, policy
 from claude_duel.domain import events as ev
-from claude_duel.domain import findings, memory, policy
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
@@ -23,6 +23,7 @@ from claude_duel.domain.models import (
     Event,
     Finding,
     MatchState,
+    SandboxLimits,
     Stage,
     Validation,
 )
@@ -45,6 +46,7 @@ from claude_duel.ports import (
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
@@ -179,9 +181,11 @@ class MatchEngine:
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
-    def _run_challenge(self, source: str, stdin: str, flag: str, state: MatchState, purpose: str) -> RunResult:
+    def _run_challenge(
+        self, source: str, stdin: str, flag: str, state: MatchState, purpose: str, limits: SandboxLimits | None = None
+    ) -> RunResult:
         started = time.monotonic()
-        result = self._sandbox.run(source, stdin, flag, state.limits)
+        result = self._sandbox.run(source, stdin, flag, limits or state.limits)
         self._metrics.timing("sandbox.seconds", time.monotonic() - started, purpose=purpose)
         if result.killed_reason:
             self._metrics.incr("sandbox.killed", reason=result.killed_reason)
@@ -214,7 +218,9 @@ class MatchEngine:
             completion = self._call(state, agent, self._request(state, prompt, "build"))
             try:
                 last = agents.parse_challenge(completion.text)
-                last, problem = self._assess(state, cid, agent, last)
+                last, problem = self._shape(state, last)
+                if problem is None:
+                    last, problem = self._assess(state, cid, agent, last)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -240,6 +246,14 @@ class MatchEngine:
             return False, ch.forfeit_reason or "forfeit"
         problem = self._problem(state, ch.id, ch.round, ch.spec)
         return (False, problem) if problem else (True, "ok")
+
+    @staticmethod
+    def _shape(state: MatchState, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+        """In the check form, wrap the author's check(s) in the arena's I/O (domain/contract.py)."""
+        if state.rules.challenge_form != "check":
+            return spec, None
+        source, problem = contract.compose(spec.source)
+        return spec.model_copy(update={"source": source}), problem
 
     def _assess(self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """Solver, policy and runs, difficulty gate; then the tamper detector on the answer (logged only)."""
@@ -281,10 +295,20 @@ class MatchEngine:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
         if not spec.solver:
             return spec, None
-        rejected = policy.check_source(spec.solver, state.rules.max_source_bytes(state.round))
+        program, cap = spec.solver, state.rules.max_source_bytes(state.round)
+        if state.rules.challenge_form == "check":
+            program, cap = contract.solver_program(spec.source, spec.solver), 2 * cap
+        rejected = policy.check_source(program, cap)  # the whole program that runs, definitions included
         if rejected:
             return spec, f"solver: {rejected}"
-        out = self._run_challenge(spec.solver, "", derive_flag(state.secret, cid), state, "solve_reference")
+        lim = state.limits
+        slow = lim.model_copy(
+            update={
+                "wall_seconds": lim.wall_seconds * SOLVER_TIME_FACTOR,
+                "cpu_seconds": lim.cpu_seconds * SOLVER_TIME_FACTOR,
+            }
+        )
+        out = self._run_challenge(program, "", derive_flag(state.secret, cid), state, "solve_reference", slow)
         payload = out.stdout.strip()
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
@@ -293,6 +317,8 @@ class MatchEngine:
 
     def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
+        if spec.solver and not spec.reference_payload.strip():
+            return "no reference input: the solver never printed one"
         rejected = policy.check(spec, state.rules.max_source_bytes(round_no))
         if rejected:
             return rejected

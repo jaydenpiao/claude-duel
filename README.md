@@ -18,6 +18,7 @@ uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
 duel run --match-id demo            # fake provider, no network, free; live arena view on a terminal
 duel run --view arena --pace 0.15   # animated scoreboard, slowed down to watch (or --view commentary)
 duel run --format json              # one JSON summary instead (scripts, CI)
+duel card demo [--out card.svg]     # shareable SVG card: models, score, rounds, spend, replay-verified log hash
 duel replay demo --transcript       # refold the event log and verify scores
 duel resume demo                    # continue a crashed or aborted match
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
@@ -62,7 +63,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
 
-**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`); any other `[rules]` field overrides it.
+**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, ADR 0010); any other `[rules]` field overrides it.
 
 **Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
 
