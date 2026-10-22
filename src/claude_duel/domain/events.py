@@ -47,6 +47,7 @@ class _Payload(BaseModel):
 
 
 class MatchCreated(_Payload):
+    seed: str = ""  # absent before ADR 0007
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
@@ -69,6 +70,7 @@ class CallCharged(_Payload):
     model: str
     tokens: int
     usd: float
+    elapsed_ms: int = 0  # provider latency, measured once (absent before ADR 0007)
 
 
 class BuildRejected(_Payload):
@@ -182,6 +184,7 @@ def payload(event: Event) -> _Payload:
 def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
+        "seed": state.seed,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
         "limits": state.limits.model_dump(mode="json"),
@@ -201,7 +204,7 @@ def initial_state(match_id: str, created: Event) -> MatchState:
     if created.type != MATCH_CREATED:
         raise EventLogCorruptError("event log does not start with match_created")
     p = cast(MatchCreated, payload(created))
-    return MatchState(match_id=match_id, secret="", agents=p.agents, rules=p.rules, limits=p.limits)
+    return MatchState(match_id=match_id, seed=p.seed, agents=p.agents, rules=p.rules, limits=p.limits)
 
 
 def fold(match_id: str, events: Iterable[Event]) -> MatchState:

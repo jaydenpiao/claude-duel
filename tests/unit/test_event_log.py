@@ -136,3 +136,22 @@ def test_newer_schema_is_rejected() -> None:
 def test_bad_payload_is_corruption(type_: str, data: dict[str, object]) -> None:
     with pytest.raises(EventLogCorruptError, match="bad payload"):
         ev.payload(_event(1, type_, **data))
+
+
+def test_match_created_logs_seed_and_calls_log_latency(
+    make_engine: Callable[..., MatchEngine], new_state: Callable[..., MatchState], event_log: FileEventLog
+) -> None:
+    s = new_state()
+    s.seed = "abc123"
+    state = make_engine().run(s)
+    events = event_log.read(state.match_id)
+    assert ev.initial_state(state.match_id, events[0]).seed == "abc123"
+    charged = [e for e in events if e.type == ev.CALL_CHARGED]
+    assert charged
+    assert all(isinstance(e.data["elapsed_ms"], int) for e in charged)
+
+
+def test_pre_0007_payloads_still_fold() -> None:
+    created = _event(0, ev.MATCH_CREATED, agents=[{"name": "a"}, {"name": "b"}], rules={"solve_points": 9}, limits={})
+    state = ev.initial_state("m", created)
+    assert (state.seed, state.rules.scoring.solve_points, state.rules.mode) == ("", 9, "classic")

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
+from claude_duel.domain.modes import preset
 
 
 class Settings(BaseModel):
@@ -25,6 +26,7 @@ class Settings(BaseModel):
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
     openai_model: str = "gpt-4.1-nano"
+    seed: str | None = None  # match seed; default sha256(match_id)[:16]
     gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
     prices: dict[str, tuple[float, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
@@ -53,6 +55,7 @@ _ENV_RULES = {
     "DUEL_ROUNDS": "rounds",
     "DUEL_MAX_ATTEMPTS": "max_attempts",
     "DUEL_CHALLENGES_PER_ROUND": "challenges_per_round",
+    "DUEL_MODE": "mode",
     "DUEL_TOKEN_BUDGET": "attack_token_budget",
 }
 
@@ -70,6 +73,16 @@ def _overlay(target: dict[str, Any], mapping: dict[str, str], env: dict[str, str
             target[key] = env[var]
 
 
+def _with_preset(rules: dict[str, Any]) -> dict[str, Any]:
+    """Preset first, then the config's own fields (shallow: a given section such as ``scoring`` replaces it)."""
+    name = str(rules.get("mode", "classic"))
+    try:
+        base = preset(name)
+    except KeyError as exc:
+        raise ConfigError(str(exc.args[0])) from exc
+    return base.model_dump() | rules
+
+
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
     data: dict[str, Any] = {}
@@ -84,6 +97,8 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         _overlay(nested, mapping, env)
         if nested:
             data[section] = nested
+    if "rules" in data:
+        data["rules"] = _with_preset(data["rules"])
     if env.get("DUEL_DOCKER"):
         data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
     if env.get("OPENAI_API_KEY"):
