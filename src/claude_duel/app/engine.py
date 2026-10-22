@@ -416,6 +416,7 @@ class MatchEngine:
                 pairs,
                 self._memory(state, attacker),
                 self._scratch(state),
+                state.rules.retry_hint,
             )
             assert_no_flag(prompt, flag, "attack prompt")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)

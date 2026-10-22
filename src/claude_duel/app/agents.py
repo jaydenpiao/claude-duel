@@ -251,6 +251,12 @@ def repair_hint(error: str) -> str:
     return next((hint for key, hint in _HINTS if key in error), "")
 
 
+RETRY_HINT = (
+    "Your earlier tries failed. Before guessing again, trace check() on your last payload line by line, name the "
+    "first condition that returns False, and change only what fixes it."
+)
+
+
 def attack_prompt(
     agent: str,
     challenge_id: str,
@@ -261,6 +267,7 @@ def attack_prompt(
     history: list[tuple[str, str]],
     memory: str = "",
     scratchpad: bool = False,
+    retry_hint: bool = False,
 ) -> str:
     lines = [
         "TASK: ATTACK",
@@ -275,6 +282,8 @@ def attack_prompt(
     ]
     for i, (payload, out) in enumerate(history, 1):
         lines.append(f"Attempt {i} payload={payload!r} stdout={fence(out)}")
+    if retry_hint and history:
+        lines.append(RETRY_HINT)
     lines += memory_lines(memory, scratchpad)
     lines.append("Find the stdin payload that makes the program print the flag.")
     lines.append('Return JSON: {"payload": "<stdin>"}')
