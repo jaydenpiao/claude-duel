@@ -119,6 +119,7 @@ class Rules(_Frozen):
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
     )
+    variety: bool = Field(default=False, description="themes, past designs and repeat check for authors (#79)")
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()

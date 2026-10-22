@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy
+from claude_duel.domain import contract, findings, memory, policy, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
@@ -219,13 +219,23 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
-                agent, state.round, index, state.rules, error, last, self._memory(state, agent), self._scratch(state)
+                agent,
+                state.round,
+                index,
+                state.rules,
+                error,
+                last,
+                self._memory(state, agent),
+                self._scratch(state),
+                tuple(variety.prompt_lines(state, agent, index)) if state.rules.variety else (),
             )
             completion = self._call(state, agent, self._request(state, prompt, "build"))
             self._note(state, agent, completion.text)
             try:
                 last = agents.parse_challenge(completion.text)
                 last, problem = self._shape(state, last)
+                if problem is None and state.rules.variety:
+                    problem = variety.repeat_reason(state, agent, last)
                 if problem is None:
                     last, problem = self._assess(state, cid, agent, last)
             except MalformedOutputError as exc:
