@@ -1,0 +1,16 @@
+claude duel · alice (fake-1) vs bob (fake-1)
+round 2/2 · match snap
+
+alice ██████████████████████████████████████████████████    96 ▁█
+bob   ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    46 ▁█
+alice ━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
+
+now: match over
+🛡 bob defended 'Front door' +12
+· ⚔ bob captured alice's flag ✓ +19
+· 🛡 alice defended 'Knock' +24
+· ⚔ alice captured bob's flag ✓ +40
+· 🛡 bob defended 'Front door' +12
+· after round 2: alice 96  bob 46 · alice leads
+$0.0000 this match · $0.0031 of $50 burned
+🏆 winner: alice · alice 96  bob 46
