@@ -383,9 +383,9 @@ class MatchEngine:
             tokens = sum(a.tokens for a in history)
             if history and history[-1].captured:
                 return Attack.of(ch.id, attacker, history, solved=True, reason="flag captured")
-            if len(history) >= state.rules.max_attempts:
+            if len(history) >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
-            if tokens >= state.rules.attack_token_budget:
+            if tokens >= state.attack_token_budget(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
             if (empty := allowance.empty(state, attacker)) is not None:
                 return Attack.of(ch.id, attacker, history, solved=False, reason=empty)

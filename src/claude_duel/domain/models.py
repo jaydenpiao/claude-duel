@@ -22,11 +22,24 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class Handicap(_Frozen):
+    """Per-agent limit tweaks for cross-tier pairings (#38); pinned with the agents in ``match_created``."""
+
+    attempts_delta: int = Field(default=0, ge=-49, le=49)  # added to rules.max_attempts (floor 1)
+    token_budget_mult: float = Field(default=1.0, gt=0, le=10)  # scales rules.attack_token_budget
+    bank_mult: float = Field(default=1.0, gt=0, le=10)  # scales rules.clock.bank_tokens
+    score_offset: int = Field(default=0, ge=-1000, le=1000)  # added to this agent's match total for the result
+
+    def is_set(self) -> bool:
+        return self != Handicap()
+
+
 class AgentSpec(_Frozen):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     provider: str = "fake"
     model: str | None = Field(default=None, description="None means the provider's configured default")
     skill: int = Field(default=2, ge=0, description="fake provider only")
+    handicap: Handicap = Handicap()
 
 
 class SandboxLimits(_Frozen):
@@ -259,6 +272,19 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+
+    def handicap(self, name: str) -> Handicap:
+        return next((a.handicap for a in self.agents if a.name == name), Handicap())
+
+    def max_attempts(self, name: str) -> int:
+        return max(1, self.rules.max_attempts + self.handicap(name).attempts_delta)
+
+    def attack_token_budget(self, name: str) -> int:
+        return max(1, int(self.rules.attack_token_budget * self.handicap(name).token_budget_mult))
+
+    def final_scores(self) -> dict[str, int]:
+        """Totals plus each agent's ``score_offset``: what decides the result (raw ``scores`` stay replayable)."""
+        return {a.name: self.scores.get(a.name, 0) + a.handicap.score_offset for a in self.agents}
 
     def opponent(self, name: str) -> str:
         a, b = self.agents
