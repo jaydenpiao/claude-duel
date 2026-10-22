@@ -1,6 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.models import Rules, ScoringRule, WalletRule
+from claude_duel.domain.models import ClockRule, Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {
     "classic": Rules(),
@@ -9,6 +9,9 @@ MODES: dict[str, Rules] = {
     "checked": Rules(mode="checked", challenge_form="check", max_format_retries=3),
     "efficiency": Rules(mode="efficiency", scoring=ScoringRule(kind="efficiency")),
     "capped": Rules(mode="capped", wallet=WalletRule(per_agent_tokens=30_000)),
+    "blitz": Rules(
+        mode="blitz", clock=ClockRule(bank_tokens=40_000, increment_tokens=500), scoring=ScoringRule(kind="timed")
+    ),
 }
 
 
