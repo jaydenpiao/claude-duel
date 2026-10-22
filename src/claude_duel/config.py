@@ -35,6 +35,8 @@ class Settings(BaseModel):
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
+    database_url: SecretStr | None = None  # DATABASE_URL: results DB owner, for `duel sync` (ADR 0012)
+    export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
@@ -73,6 +75,11 @@ _ENV_BUDGET = {
     "DUEL_MATCH_MAX_TOKENS": "match_max_tokens",
     "DUEL_RUN_MAX_CALLS": "run_max_calls",
     "DUEL_LIFETIME_MAX_USD": "lifetime_max_usd",
+}
+_ENV_SECRETS = {
+    "OPENAI_API_KEY": "openai_api_key",
+    "DATABASE_URL": "database_url",
+    "EXPORT_DATABASE_URL": "export_database_url",
 }
 _ENV_SECTIONS = {"rules": _ENV_RULES, "budget": _ENV_BUDGET}
 ENV_VARS = (*_ENV_SCALARS, *_ENV_RULES, *_ENV_BUDGET, "DUEL_DOCKER")  # every DUEL_* knob; README must list all
@@ -116,8 +123,9 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         data["rules"] = _with_preset(data["rules"])
     if env.get("DUEL_DOCKER"):
         data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
-    if env.get("OPENAI_API_KEY"):
-        data["openai_api_key"] = env["OPENAI_API_KEY"]
+    for var, key in _ENV_SECRETS.items():
+        if env.get(var):
+            data[key] = env[var]
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:

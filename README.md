@@ -26,6 +26,8 @@ duel tournament                     # round robin (<= 6) or Swiss over the confi
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match
 duel estimate [--mode capped]       # offline worst-case $ per match for each preset (no API calls)
 duel resume demo                    # continue a crashed or aborted match
+duel sync [--rebuild]               # load verified event logs into the results DB (DATABASE_URL, ADR 0012)
+duel export [--out public.json]     # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
@@ -67,6 +69,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
+| Secrets reaching the results DB or a public page | `duel sync` never opens `*.secret`, stores only an allowlist of event fields (no source, payloads, solver output, notes, flags) run through `scrub`; `duel export` reads only `public_v` views as `duel_exporter` (read-only, no owner/writer rights, refused otherwise), keeps whitelisted columns and scans the result before writing. Neon is not exposed publicly in v1 (ADR 0012) |
 
 **Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. Every call is budget-capped and ledgered like a match; see [docs/design/benchmark.md](docs/design/benchmark.md).
 
@@ -98,7 +101,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 | `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
 
-`OPENAI_API_KEY` is read from the environment only.
+`OPENAI_API_KEY`, `DATABASE_URL` (results DB owner, for `duel sync`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed.
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),

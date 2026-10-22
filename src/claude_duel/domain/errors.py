@@ -79,3 +79,7 @@ class DeadlineExceededError(DuelError):
 
 class WalletEmptyError(DuelError):
     """An agent's per-match wallet (``rules.wallet``) is spent; its builds forfeit and its attacks stop."""
+
+
+class HistoryRewrittenError(DuelError):
+    """``duel sync`` found an event hash in the results database that its log no longer has; it halts (ADR 0012)."""

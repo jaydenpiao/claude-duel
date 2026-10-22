@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+from pydantic import SecretStr
+
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
 from claude_duel.adapters.providers.openai import OpenAIProvider
@@ -14,6 +16,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.postgres import PostgresResults, PublicReader, connect, migrate
 from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
@@ -144,3 +147,21 @@ def build_engine(
         models,
         observer,
     )
+
+
+def _db_url(secret: SecretStr | None, var: str) -> str:
+    if secret is None:
+        raise ConfigError(f"{var} is not set")
+    return secret.get_secret_value()
+
+
+def build_results(settings: Settings) -> PostgresResults:
+    """Connect with ``DATABASE_URL`` and apply pending migrations."""
+    conn = connect(_db_url(settings.database_url, "DATABASE_URL"))
+    migrate(conn)
+    return PostgresResults(conn)
+
+
+def build_public_reader(settings: Settings) -> PublicReader:
+    """Connect with ``EXPORT_DATABASE_URL``; ``PublicReader`` refuses any role that could write."""
+    return PublicReader(connect(_db_url(settings.export_database_url, "EXPORT_DATABASE_URL")))

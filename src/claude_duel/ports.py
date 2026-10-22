@@ -88,3 +88,28 @@ class EventLog(Protocol):
 
 EventObserver = Callable[[Event], None]
 """Called with each event after it is durably appended (e.g. the CLI commentary)."""
+
+
+Row = dict[str, object]
+
+
+class ResultsStore(Protocol):
+    """Derived results index fed by ``duel sync`` (ADR 0012); rebuildable from the event logs."""
+
+    def stored_hashes(self, match_id: str) -> set[str]: ...
+
+    def ingest(self, tables: dict[str, list[Row]]) -> int: ...
+
+    def start_run(self) -> int: ...
+
+    def reject(self, run_id: int, match_id: str, reason: str) -> None: ...
+
+    def finish_run(self, run_id: int, counts: dict[str, int], ratings: list[Row]) -> None: ...
+
+    def clear(self) -> None: ...
+
+
+class PublicSource(Protocol):
+    """The read-only public views, read by a role that cannot write (ADR 0012)."""
+
+    def export(self) -> dict[str, list[Row]]: ...
