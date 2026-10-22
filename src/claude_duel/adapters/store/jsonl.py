@@ -39,3 +39,10 @@ def read_complete(fd: int, offset: int = 0) -> tuple[list[bytes], int]:
     data = os.read(fd, max(size - offset, 0))
     complete = data[: data.rfind(b"\n") + 1]
     return [line for line in complete.splitlines() if line.strip()], offset + len(complete)
+
+
+def truncate_torn_tail(fd: int, complete_end: int) -> None:
+    """Drop bytes after the last complete line (a crash mid-write) and fsync, so the next append starts clean."""
+    if os.fstat(fd).st_size > complete_end:
+        os.ftruncate(fd, complete_end)
+        os.fsync(fd)
