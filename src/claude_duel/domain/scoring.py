@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 
-from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, Rules, Validation
+from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, Validation
 
 
 def score_round(
@@ -43,3 +43,19 @@ def defense_award(spec: ChallengeSpec, round_no: int, rules: Rules) -> int:
 def add_scores(total: Mapping[str, int], delta: Mapping[str, int]) -> dict[str, int]:
     keys = sorted(set(total) | set(delta))
     return {k: total.get(k, 0) + delta.get(k, 0) for k in keys}
+
+
+def match_stats(state: MatchState) -> dict[str, float]:
+    """Outcome rates for run reports: how many challenges validated, and how attacks on them ended."""
+    built = len(state.challenges)
+    valid = sum(v.valid for v in state.validations.values())
+    attacks = list(state.attacks.values())
+    captures = sum(a.solved for a in attacks)
+    return {
+        "challenges": built,
+        "valid": valid,
+        "valid_rate": round(valid / built, 3) if built else 0.0,
+        "captures": captures,
+        "defenses": len(attacks) - captures,
+        "capture_rate": round(captures / len(attacks), 3) if attacks else 0.0,
+    }

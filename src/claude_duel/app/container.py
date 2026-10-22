@@ -14,7 +14,7 @@ from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import CostBudget, check_model_allowed
-from claude_duel.app.engine import MatchEngine
+from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
@@ -64,6 +64,13 @@ def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 
 
+def gate_agent(settings: Settings, agents: tuple[AgentSpec, AgentSpec]) -> AgentSpec:
+    """The difficulty-gate probe: the cheap gate model when the match uses real models, else a weak fake."""
+    if all(a.provider == "fake" for a in agents):
+        return AgentSpec(name=GATE, provider="fake", skill=0)
+    return AgentSpec(name=GATE, provider="openai", model=settings.gate_model)
+
+
 def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
     """Agents with their effective model written in, so a saved match never depends on later config."""
     a, b = (agent.model_copy(update={"model": settings.model_for(agent)}) for agent in settings.agents)
@@ -80,13 +87,19 @@ def build_engine(
     """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps."""
     for agent in agents:
         check_model_allowed(settings.model_for(agent), settings.prices)
+    providers = {a.name: make_provider(a, settings, metrics) for a in agents}
+    models = {a.name: settings.model_for(a) for a in agents}
+    if settings.rules.difficulty_gate:
+        probe = gate_agent(settings, agents)
+        check_model_allowed(settings.model_for(probe), settings.prices)
+        providers[GATE], models[GATE] = make_provider(probe, settings, metrics), settings.model_for(probe)
     return MatchEngine(
-        {a.name: make_provider(a, settings, metrics) for a in agents},
+        providers,
         make_sandbox(settings, agents),
         store,
         build_event_log(settings),
         metrics,
         CostBudget(settings.budget, build_ledger(settings), settings.prices),
-        {a.name: settings.model_for(a) for a in agents},
+        models,
         observer,
     )

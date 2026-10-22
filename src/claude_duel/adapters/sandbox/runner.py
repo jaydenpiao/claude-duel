@@ -6,7 +6,7 @@ The runner exposes the flag to challenge code as the global ``FLAG`` and hands
 the rest of stdin to the challenge as ``sys.stdin``. Defence in depth behind the
 AST policy: challenge code gets only ``SAFE_BUILTINS``, an ``__import__`` limited to
 the policy's pure modules, and module stand-ins without submodules or private names, and a ``sys`` stand-in
-exposing only ``stdin``/``stdout``.
+exposing only ``stdin``/``stdout``/``exit``.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ RUNNER = (
     "    return types.SimpleNamespace(**{k: v for k, v in vars(m).items()\n"
     "                                    if not k.startswith('_') and not isinstance(v, types.ModuleType)})\n"
     "_mods = {_m: _proxy(__import__(_m)) for _m in _h.pop('imports')}\n"
-    "_mods['sys'] = types.SimpleNamespace(stdin=io.StringIO(sys.stdin.read()), stdout=sys.stdout)\n"
+    "_mods['sys'] = types.SimpleNamespace(stdin=io.StringIO(sys.stdin.read()), stdout=sys.stdout, exit=sys.exit)\n"
     "def _imp(name, globals=None, locals=None, fromlist=(), level=0):\n"
     "    if level or name not in _mods:\n"
     "        raise ImportError(name)\n"
@@ -35,7 +35,14 @@ RUNNER = (
     "_g = {'__name__': '__main__', '__builtins__': _b, 'FLAG': _h.pop('flag')}\n"
     "_c = compile(_h.pop('source'), '<challenge>', 'exec')\n"
     "del _h\n"
-    "exec(_c, _g)\n"
+    "try:\n"
+    "    exec(_c, _g)\n"
+    "except Exception as _e:\n"  # type and line only: a message could quote FLAG
+    "    _t = _e.__traceback__\n"
+    "    while _t.tb_next:\n"
+    "        _t = _t.tb_next\n"
+    "    print(f'error: {type(_e).__name__} at line {_t.tb_lineno}')\n"
+    "    sys.exit(1)\n"
 )
 PYTHON_FLAGS = ("-I", "-S", "-c", RUNNER)
 

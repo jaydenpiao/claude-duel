@@ -25,7 +25,7 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import score_round
+from claude_duel.domain.scoring import match_stats, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
 from claude_duel.ports import (
@@ -42,6 +42,8 @@ from claude_duel.ports import (
 
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
+GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
 
@@ -95,6 +97,7 @@ class MatchEngine:
                 match_id=state.match_id,
                 stage=state.stage.value,
                 scores=state.scores,
+                **match_stats(state),
             )
         return state
 
@@ -161,9 +164,9 @@ class MatchEngine:
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
-    def _run_challenge(self, spec: ChallengeSpec, stdin: str, flag: str, state: MatchState, purpose: str) -> RunResult:
+    def _run_challenge(self, source: str, stdin: str, flag: str, state: MatchState, purpose: str) -> RunResult:
         started = time.monotonic()
-        result = self._sandbox.run(spec.source, stdin, flag, state.limits)
+        result = self._sandbox.run(source, stdin, flag, state.limits)
         self._metrics.timing("sandbox.seconds", time.monotonic() - started, purpose=purpose)
         if result.killed_reason:
             self._metrics.incr("sandbox.killed", reason=result.killed_reason)
@@ -190,13 +193,16 @@ class MatchEngine:
         last: ChallengeSpec | None = None
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
-            prompt = agents.build_prompt(agent, state.round, index, state.rules, error)
+            prompt = agents.build_prompt(agent, state.round, index, state.rules, error, last)
             completion = self._call(
-                state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
+                state,
+                agent,
+                CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build"),
             )
             try:
                 last = agents.parse_challenge(completion.text)
-                problem = self._problem(state, cid, state.round, last)
+                last, problem = self._solve_reference(state, cid, last)
+                problem = problem or self._problem(state, cid, state.round, last) or self._gate(state, cid, last)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -223,21 +229,46 @@ class MatchEngine:
         problem = self._problem(state, ch.id, ch.round, ch.spec)
         return (False, problem) if problem else (True, "ok")
 
+    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
+        """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe; a capture means too easy."""
+        if not state.rules.difficulty_gate:
+            return None
+        prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
+        completion = self._call(state, GATE, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack"))
+        solved = self._attempt(state, spec, derive_flag(state.secret, cid), completion).captured
+        self._metrics.incr("gate.solved" if solved else "gate.held")
+        return GATE_REJECTION if solved else None
+
+    def _solve_reference(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+        """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
+        if not spec.solver:
+            return spec, None
+        rejected = policy.check_source(spec.solver, state.rules.max_source_bytes(state.round))
+        if rejected:
+            return spec, f"solver: {rejected}"
+        out = self._run_challenge(spec.solver, "", derive_flag(state.secret, cid), state, "solve_reference")
+        payload = out.stdout.strip()
+        if not payload or out.exit_code or out.timed_out:
+            status = "timeout" if out.timed_out else f"exit {out.exit_code}"
+            return spec, f"solver failed ({status}); it printed {payload[:REF_OUTPUT_CHARS]!r}"
+        return spec.model_copy(update={"reference_payload": payload}), None
+
     def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
         rejected = policy.check(spec, state.rules.max_source_bytes(round_no))
         if rejected:
             return rejected
         flag = derive_flag(state.secret, cid)
-        ref = self._run_challenge(spec, spec.reference_payload, flag, state, "validate")
+        ref = self._run_challenge(spec.source, spec.reference_payload, flag, state, "validate")
         if flag not in ref.stdout:
             seen = redact(ref.stdout, (flag,)).strip()[:REF_OUTPUT_CHARS]
             return (
                 "reference payload does not reveal flag"
                 + (" (timeout)" if ref.timed_out else "")
+                + (f" (exit {ref.exit_code}: it crashed or raised)" if ref.exit_code else "")
                 + (f"; it printed {seen!r}" if seen else "; it printed nothing")
             )
-        empty = self._run_challenge(spec, "", flag, state, "validate")
+        empty = self._run_challenge(spec.source, "", flag, state, "validate")
         if flag in empty.stdout:
             return "trivial: empty input reveals flag"
         return None
@@ -285,7 +316,7 @@ class MatchEngine:
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens)
-        run = self._run_challenge(spec, payload, flag, state, "attack")
+        run = self._run_challenge(spec.source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens)
 

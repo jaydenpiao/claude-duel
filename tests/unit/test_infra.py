@@ -10,10 +10,11 @@ from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.app import agents
-from claude_duel.config import load_settings
+from claude_duel.app.container import gate_agent
+from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, MalformedOutputError, MatchLockedError, MatchNotFoundError
 from claude_duel.domain.flags import derive_flag
-from claude_duel.domain.models import Rules, SandboxLimits
+from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.observability import JsonFormatter, NullMetrics, log, trace
 from tests.helpers import any_source
 
@@ -136,3 +137,10 @@ def test_docker_memory_swap_equals_memory() -> None:  # M5: no swap beyond the m
     argv = DockerSandbox().argv("duel-x", SandboxLimits(memory_mb=96))
     assert argv[argv.index("--memory") + 1] == "96m"
     assert argv[argv.index("--memory-swap") + 1] == "96m"
+
+
+def test_gate_probe_is_cheap_model_or_weak_fake() -> None:
+    fake = (AgentSpec(name="alice"), AgentSpec(name="bob"))
+    assert gate_agent(Settings(), fake).skill == 0
+    real = (AgentSpec(name="alice", provider="openai"), fake[1])
+    assert gate_agent(Settings(gate_model="gpt-4.1-nano"), real).model == "gpt-4.1-nano"

@@ -19,6 +19,6 @@ Each unit has a key (`build:r1:alice:0`, `attack:r1:bob:<challenge>`). The engin
 ## Scoring (per round r, multiplier m=r)
 - invalid/forfeited challenge: author `-invalid_penalty*m`
 - solved: attacker `+solve_points*difficulty*m - (attempts-1)`, floored at 1
-- valid and unsolved: author `+defense_points*difficulty*m`
+- valid and unsolved: author `+defense_points*difficulty*m` (defense_points >= solve_points, ADR 0006)
 
 See ADRs in `docs/adr/`.

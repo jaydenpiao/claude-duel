@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ast
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from claude_duel.adapters.providers.fake import TEMPLATES
 from claude_duel.domain import policy
 from claude_duel.domain.errors import FlagLeakError, InvalidTransitionError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
@@ -18,14 +21,16 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import add_scores, score_round
+from claude_duel.domain.scoring import add_scores, defense_award, match_stats, score_round, solve_award
 from claude_duel.domain.state_machine import next_stage, transition
 
 SRC = 'import sys\nif sys.stdin.read() == "x":\n    print(FLAG)\n'
 
 
 def spec(source: str = SRC, difficulty: int = 1) -> ChallengeSpec:
-    return ChallengeSpec(title="t", description="d", source=source, reference_payload="x", difficulty=difficulty)
+    return ChallengeSpec(
+        title="t", description="d", source=source, reference_payload="hidden-input", difficulty=difficulty
+    )
 
 
 def state(rounds: int = 2) -> MatchState:
@@ -88,6 +93,31 @@ class TestPolicy:
         assert policy.check(spec(), 4096) is None
 
     @pytest.mark.parametrize(
+        ("source", "payload"),
+        [
+            ('k = "open-sesame"', "open-sesame"),  # literal
+            ('k = "emases-nepo"', "open-sesame"),  # reversed
+            ('k = "6F70656E"', "open"),  # hex, any case
+            ('k = "b3Blbg"', "open"),  # base64, padding stripped
+            ('k = b"knock knock"', "a25vY2sga25vY2s="),  # the payload is base64 of a literal
+            ('k = "op" + "en-s"', "open-s"),  # split across literals
+            ("k = (114, 115, 104, 113)", "open"),  # char codes + 3
+            ("k = [104, 119, 98, 105]", "open"),  # char codes ^ 7
+            ("k = (110, 101, 112, 111)", "open"),  # reversed char codes
+        ],
+    )
+    def test_rejects_exposed_answer(self, source: str, payload: str) -> None:
+        assert "appears in the source" in (policy.answer_exposed(ast.parse(source), payload) or "")
+
+    @pytest.mark.parametrize("payload", ["DDRR", "radar", "1000 337"])
+    def test_accepts_derived_answers(self, payload: str) -> None:
+        sources = {t.payload: t.source for t in TEMPLATES}
+        assert policy.answer_exposed(ast.parse(sources[payload]), payload) is None
+
+    def test_rejects_short_answer(self) -> None:
+        assert "at least" in (policy.answer_exposed(ast.parse("x = 1"), " ab ") or "")
+
+    @pytest.mark.parametrize(
         ("source", "needle"),
         [
             ("import socket\n", "import not allowed"),
@@ -128,8 +158,13 @@ class TestScoring:
     def test_solved_rewards_attacker(self) -> None:
         assert _round(valid=True, solved=True, attempts=3) == {"a": 0, "b": 18}
 
+    @given(st.integers(1, 3), st.integers(1, 3), st.integers(1, 50))
+    def test_defense_worth_at_least_any_capture(self, difficulty: int, round_no: int, attempts: int) -> None:
+        ch = spec(difficulty=difficulty)
+        assert defense_award(ch, round_no, Rules()) >= solve_award(ch, round_no, attempts, Rules())
+
     def test_defended_rewards_author(self) -> None:
-        assert _round(valid=True, solved=False) == {"a": 12, "b": 0}
+        assert _round(valid=True, solved=False) == {"a": 20, "b": 0}
 
     def test_forfeit(self) -> None:
         ch = Challenge(id="c", round=1, author="a", spec=None, forfeit_reason="x")
@@ -142,3 +177,13 @@ class TestScoring:
     @given(st.dictionaries(st.text(max_size=3), st.integers()), st.dictionaries(st.text(max_size=3), st.integers()))
     def test_add_scores_commutative(self, x: dict[str, int], y: dict[str, int]) -> None:
         assert add_scores(x, y) == add_scores(y, x)
+
+
+def test_match_stats_rates() -> None:
+    s = state()
+    s.challenges = {i: Challenge(id=i, round=1, author="a", spec=spec()) for i in ("c1", "c2")}
+    s.validations = {"c1": Validation(challenge_id="c1", valid=True, reason="ok")}
+    s.attacks = {"c1:b": Attack(challenge_id="c1", attacker="b", attempts=2, tokens_used=1, solved=False, reason="x")}
+    assert match_stats(s) == {
+        "challenges": 2, "valid": 1, "valid_rate": 0.5, "captures": 0, "defenses": 1, "capture_rate": 0.0
+    }  # fmt: skip
