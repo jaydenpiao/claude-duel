@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
-from claude_duel.domain.models import Attack, Challenge, Event, Handicap, MatchState, Validation
+from claude_duel.domain.models import Attack, Challenge, Event, Handicap, MatchState, Usage, Validation
 from claude_duel.domain.scoring import defense_award, solve_award
 
 SNIPPET_LINES = 3
@@ -124,6 +124,26 @@ def handicap_text(h: Handicap) -> str:
 
 def spend(s: MatchState, lifetime_usd: float, key_limit_usd: float) -> str:
     return f"${s.usage.usd:.4f} this match · ${lifetime_usd:.4f} of ${key_limit_usd:g} burned"
+
+
+def _per(usd: float, n: int) -> str:
+    return f"${usd / n:.4f}" if n else "—"
+
+
+def agent_cost(s: MatchState, name: str) -> str:
+    """One agent's tokens in/out (thinking share), dollars, and dollars per capture and per defense.
+
+    Per capture: the agent's attack spend over its captures. Per defense: the rest of its spend (builds and
+    repairs) over its challenges that held. Every call is counted, failed or not."""
+    u = s.usage_by_agent.get(name) or Usage()
+    mine = [a for a in s.attacks.values() if a.attacker == name]
+    attack_usd = sum(a.usd_micros for a in mine) / 1_000_000
+    captures = sum(a.solved for a in mine)
+    defenses = sum(not a.solved and s.challenges[a.challenge_id].author == name for a in s.attacks.values())
+    return (
+        f"in {u.input_tokens:,} · out {u.output_tokens:,} (think {u.reasoning_tokens:,}) · ${u.usd:.4f} · "
+        f"{_per(attack_usd, captures)}/capture · {_per(max(u.usd - attack_usd, 0.0), defenses)}/defense"
+    )
 
 
 def leader(s: MatchState) -> str | None:

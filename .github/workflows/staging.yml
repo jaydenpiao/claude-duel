@@ -6,7 +6,7 @@ on:
 permissions: {}
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: read
     environment: staging

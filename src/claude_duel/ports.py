@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from claude_duel.domain.models import Event, MatchState, SandboxLimits
 
@@ -19,6 +19,10 @@ class CompletionRequest(BaseModel):
     purpose: Purpose
     max_tokens: int = 1500
     temperature: float = 0.0
+    reasoning_effort: str | None = None  # vendor effort level (low/medium/high); None = vendor default
+    json_schema: dict[str, Any] | None = Field(
+        default=None, description="strict answer schema; adapters send it as the vendor's structured-output mode"
+    )
 
 
 class Completion(BaseModel):
@@ -26,6 +30,8 @@ class Completion(BaseModel):
     text: str
     input_tokens: int
     output_tokens: int
+    reasoning_tokens: int = 0  # thinking/reasoning tokens, already inside output_tokens and billed as output
+    truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
 
     @property
     def total_tokens(self) -> int:
@@ -75,7 +81,11 @@ class Metrics(Protocol):
 class SpendLedger(Protocol):
     def total_usd(self) -> float: ...
 
-    def record(self, match_id: str, model: str, tokens: int, usd: float) -> None: ...
+    def spent_usd(self, prefix: str) -> float: ...
+
+    def reserve(self, match_id: str, model: str, usd: float) -> str: ...
+
+    def record(self, match_id: str, model: str, tokens: int, usd: float, settles: str | None = None) -> None: ...
 
 
 class EventLog(Protocol):

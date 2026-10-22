@@ -29,6 +29,6 @@ def test_unlisted_model_is_refused_from_config_and_env(tmp_path: Path) -> None:
 
 def test_every_allowed_model_passes() -> None:
     for model in DEFAULT_PRICES:
-        check_model_allowed(model)
+        check_model_allowed(model, allow_premium=True)
     with pytest.raises(ConfigError):
         check_model_allowed("gpt-5")
