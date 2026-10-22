@@ -1,5 +1,8 @@
 """Persistent append-only spend ledger (JSON lines), shared by every match, run and process.
 
+R3-6: ``reserve`` appends a worst-case entry before a provider call; the charge that follows carries
+``settles`` and cancels it. A crash in between leaves the reservation counted (over, never under).
+
 All reads and appends hold ``flock`` on the ledger file, so totals are consistent
 across concurrent processes. Readers fold only the bytes appended since their last read.
 """
@@ -9,7 +12,9 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from pathlib import Path
+from typing import Any
 
 from claude_duel.adapters.store import jsonl
 
@@ -20,6 +25,7 @@ class FileSpendLedger:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._offset = 0
         self._total = 0.0
+        self._open: dict[str, float] = {}
 
     def total_usd(self) -> float:
         """Lifetime spend as currently on disk, including other processes' entries."""
@@ -27,21 +33,47 @@ class FileSpendLedger:
             self._catch_up(fd)
         return self._total
 
-    def record(self, match_id: str, model: str, tokens: int, usd: float) -> None:
-        entry = {"ts": time.time(), "match_id": match_id, "model": model, "tokens": tokens, "usd": usd}
+    def reserve(self, match_id: str, model: str, usd: float) -> str:
+        """Count ``usd`` now, before the call; ``record(..., settles=id)`` replaces it with the real cost."""
+        rid = uuid.uuid4().hex
+        self._append({"ts": time.time(), "match_id": match_id, "model": model, "tokens": 0, "usd": usd, "reserve": rid})
+        return rid
+
+    def record(self, match_id: str, model: str, tokens: int, usd: float, settles: str | None = None) -> None:
+        entry: dict[str, object] = {
+            "ts": time.time(),
+            "match_id": match_id,
+            "model": model,
+            "tokens": tokens,
+            "usd": usd,
+        }
+        if settles:
+            entry["settles"] = settles
+        self._append(entry)
+
+    def _append(self, entry: dict[str, object]) -> None:
         with jsonl.locked(self._path, exclusive=True) as fd:
             jsonl.append(fd, (json.dumps(entry) + "\n").encode())
             self._catch_up(fd)
 
     def _catch_up(self, fd: int) -> None:
         if os.fstat(fd).st_size < self._offset:  # truncated or replaced: refold from the start
-            self._offset, self._total = 0, 0.0
+            self._offset, self._total, self._open = 0, 0.0, {}
         lines, self._offset = jsonl.read_complete(fd, self._offset)
-        self._total += sum(_usd(line) for line in lines)
+        for line in lines:
+            entry = _entry(line)
+            if entry is None:
+                continue  # torn line from a crash; never counted
+            usd = float(entry["usd"])
+            self._total += usd - self._open.pop(str(entry.get("settles", "")), 0.0)
+            if "reserve" in entry:
+                self._open[str(entry["reserve"])] = usd
 
 
-def _usd(raw: bytes) -> float:
+def _entry(raw: bytes) -> dict[str, Any] | None:
     try:
-        return float(json.loads(raw)["usd"])
+        entry = json.loads(raw)
+        float(entry["usd"])
     except (ValueError, KeyError, TypeError):
-        return 0.0  # torn line from a crash; never counted
+        return None
+    return entry if isinstance(entry, dict) else None

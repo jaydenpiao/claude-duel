@@ -183,12 +183,17 @@ class MatchEngine:
             raise DeadlineExceededError(
                 f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
             )
+        model = self._models[agent]
+        reservation = self._budget.reserve(state.match_id, model, request)  # R3-6: a crash keeps it counted
         started = time.monotonic()
-        completion = self._providers[agent].complete(request)
+        try:
+            completion = self._providers[agent].complete(request)
+        except Exception:
+            self._budget.release(state.match_id, model, reservation)
+            raise
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
-        model = self._models[agent]
-        usd = self._budget.charge(state.match_id, model, completion)
+        usd = self._budget.charge(state.match_id, model, completion, reservation)
         self._checkpoint(
             state,
             ev.CALL_CHARGED,
