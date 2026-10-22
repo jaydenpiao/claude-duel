@@ -1,12 +1,14 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.models import Rules
+from claude_duel.domain.models import Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {
     "classic": Rules(),
     "quick": Rules(mode="quick", rounds=1, challenges_per_round=1),
     "gated": Rules(mode="gated", difficulty_gate=True),
     "checked": Rules(mode="checked", challenge_form="check", max_format_retries=3),
+    "efficiency": Rules(mode="efficiency", scoring=ScoringRule(kind="efficiency")),
+    "capped": Rules(mode="capped", wallet=WalletRule(per_agent_tokens=30_000)),
 }
 
 

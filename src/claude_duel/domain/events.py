@@ -23,6 +23,7 @@ from claude_duel.domain.models import (
     Rules,
     SandboxLimits,
     Stage,
+    Usage,
     Validation,
 )
 from claude_duel.domain.scoring import add_scores
@@ -142,6 +143,10 @@ def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.tokens += p.tokens
     state.usage.usd += p.usd
     state.usage.elapsed_ms += p.elapsed_ms
+    mine = state.usage_by_agent.setdefault(p.agent, Usage())
+    mine.calls += 1
+    mine.tokens += p.tokens
+    mine.usd += p.usd
 
 
 def _rejected(state: MatchState, p: BuildRejected) -> None:

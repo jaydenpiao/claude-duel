@@ -7,12 +7,12 @@ import logging
 import time
 from collections.abc import Mapping
 
-from claude_duel.app import agents
+from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, memory, policy
 from claude_duel.domain import events as ev
-from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError
+from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
     CAPTURED,
@@ -157,7 +157,8 @@ class MatchEngine:
         self._metrics.incr(f"unit.{kind}")
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
-        """Single choke point for paid calls: budget check, call, charge, checkpoint."""
+        """Single choke point for paid calls: wallet, then budget caps (strictest wins), call, charge, checkpoint."""
+        allowance.check(state, agent)
         self._budget.check(state)
         if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
             raise DeadlineExceededError(
@@ -198,7 +199,10 @@ class MatchEngine:
                 cid = challenge_id(state.match_id, state.round, agent.name, index)
                 if cid in state.challenges:
                     continue  # idempotent resume
-                spec, reason = self._author(state, cid, agent.name, index)
+                try:
+                    spec, reason = self._author(state, cid, agent.name, index)
+                except WalletEmptyError as exc:
+                    spec, reason = None, str(exc)
                 ch = Challenge(id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason)
                 self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
@@ -363,6 +367,8 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
             if tokens >= state.rules.attack_token_budget:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
+            if (empty := allowance.empty(state, attacker)) is not None:
+                return Attack.of(ch.id, attacker, history, solved=False, reason=empty)
             pairs = [(a.payload, a.output) for a in history]
             prompt = agents.attack_prompt(
                 attacker,
