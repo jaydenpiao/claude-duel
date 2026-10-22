@@ -35,21 +35,26 @@ To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `
 ```mermaid
 flowchart LR
   CLI[cli.py] --> C[container.py<br/>composition root]
+  CLI --> DR[series / tournament<br/>bench / estimate / ratings]
+  DR --> C
   C --> E[MatchEngine]
-  E --> SM[state machine]
-  E --> SC[scoring]
-  E --> PO[policy + flags]
+  E --> D[domain: state machine, scoring,<br/>policy + flags, memory, findings]
   E --> B[CostBudget]
   E -->|LLMProvider| P{{providers}}
   P --> F[Fake]
-  P --> R[Retrying] --> O[OpenAI]
+  P --> R[Retrying] --> O[OpenAI / Anthropic]
   E -->|Sandbox| S{{sandboxes}}
   S --> SP[subprocess + rlimits]
-  S --> D[Docker no-network]
+  S --> DK[Docker no-network<br/>gVisor runtime, ADR 0011]
   E -->|MatchStore| ST[(atomic JSON + lock)]
+  E -->|EventLog| EL[(hash-chained events.jsonl)]
+  E -->|Metrics| M[(jsonl metrics)]
   B -->|SpendLedger| L[(ledger.jsonl)]
+  E -->|EventObserver| OB[observers]
+  OB --> PR[presentation:<br/>arena, commentary]
+  EL --> RP[replay + card]
 ```
-Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
+Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
 
 ## Cost controls
 - Code-defined allowlist of low-cost models (`app/budget.py:DEFAULT_PRICES`); config cannot add models or change prices.
