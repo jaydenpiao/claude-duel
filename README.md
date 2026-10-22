@@ -80,6 +80,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
 | `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-4.1-nano` |
+| `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
 | `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-4.1-nano` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
@@ -102,7 +103,10 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
-`gpt-4.1-mini` (0.40/1.60).
+`gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
+Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `claude-fable-5-1` (10/50), `gpt-6-astra` (10/50). Prices pinned 2026-10-22 from https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing.
+
+`provider = "anthropic"` uses `ANTHROPIC_API_KEY` (env only, never in config). Prompt caching is off and cache tokens are billed at the full input rate, so accounting matches OpenAI.
 
 **Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.
 
