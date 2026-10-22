@@ -45,6 +45,7 @@ from claude_duel.ports import (
 
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
+TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
@@ -204,6 +205,8 @@ class MatchEngine:
             elapsed_ms=round(elapsed * 1000),
             input_tokens=completion.input_tokens,
             output_tokens=completion.output_tokens,
+            reasoning_tokens=completion.reasoning_tokens,
+            truncated=completion.truncated,
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
@@ -256,9 +259,11 @@ class MatchEngine:
                 self._scratch(state),
                 tuple(variety.prompt_lines(state, agent, index)) if state.rules.variety else (),
             )
-            completion = self._call(state, agent, self._request(state, prompt, "build"))
+            completion = self._complete(state, agent, prompt, "build")
             self._note(state, agent, completion.text)
             try:
+                if completion.truncated:
+                    raise MalformedOutputError(TRUNCATED)
                 last = agents.parse_challenge(completion.text)
                 last, problem = self._shape(state, last)
                 if problem is None and state.rules.variety:
@@ -359,10 +364,26 @@ class MatchEngine:
             assert_no_flag(note, f, "note")
         self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
+    def _complete(self, state: MatchState, agent: str, prompt: str, purpose: Purpose) -> Completion:
+        """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
+        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``."""
+        completion = self._call(state, agent, self._request(state, prompt, purpose))
+        if completion.truncated:
+            self._metrics.incr("model.truncated", purpose=purpose)
+            completion = self._call(state, agent, self._request(state, f"{prompt}\n\n{agents.TRUNCATED_HINT}", purpose))
+        return completion
+
     def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
         cap = state.rules.wallet.max_output_tokens
-        request = CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
-        return request if cap is None else request.model_copy(update={"max_tokens": min(request.max_tokens, cap)})
+        tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+        return CompletionRequest(
+            system=agents.system_prompt(state.framing_text),
+            prompt=prompt,
+            purpose=purpose,
+            max_tokens=tokens,
+            reasoning_effort=state.rules.reasoning_effort,
+            json_schema=agents.ANSWER_SCHEMAS[purpose],
+        )
 
     def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe. A capture means too easy: in
@@ -471,7 +492,7 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
-            completion = self._call(state, attacker, self._request(state, prompt, "attack"))
+            completion = self._complete(state, attacker, prompt, "attack")
             self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
@@ -481,12 +502,15 @@ class MatchEngine:
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         try:
+            if completion.truncated:
+                raise MalformedOutputError(TRUNCATED)
             payload = agents.parse_attack(completion.text).payload
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
-        run = self._run_challenge(spec.source, payload, flag, state, "attack")
+        source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
+        run = self._run_challenge(source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 

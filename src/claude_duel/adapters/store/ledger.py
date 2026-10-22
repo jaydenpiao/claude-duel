@@ -25,7 +25,14 @@ class FileSpendLedger:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._offset = 0
         self._total = 0.0
-        self._open: dict[str, float] = {}
+        self._open: dict[str, tuple[str, float]] = {}  # reservation id -> (match id, usd)
+        self._by_match: dict[str, float] = {}
+
+    def spent_usd(self, prefix: str) -> float:
+        """Spend of every match whose id starts with ``prefix`` (a series or tournament), failed games included."""
+        with jsonl.locked(self._path, exclusive=False) as fd:
+            self._catch_up(fd)
+        return sum(v for k, v in self._by_match.items() if k.startswith(prefix))
 
     def total_usd(self) -> float:
         """Lifetime spend as currently on disk, including other processes' entries."""
@@ -58,16 +65,19 @@ class FileSpendLedger:
 
     def _catch_up(self, fd: int) -> None:
         if os.fstat(fd).st_size < self._offset:  # truncated or replaced: refold from the start
-            self._offset, self._total, self._open = 0, 0.0, {}
+            self._offset, self._total, self._open, self._by_match = 0, 0.0, {}, {}
         lines, self._offset = jsonl.read_complete(fd, self._offset)
         for line in lines:
             entry = _entry(line)
             if entry is None:
                 continue  # torn line from a crash; never counted
+            mid = str(entry.get("match_id", ""))
             usd = float(entry["usd"])
-            self._total += usd - self._open.pop(str(entry.get("settles", "")), 0.0)
+            _, held = self._open.pop(str(entry.get("settles", "")), ("", 0.0))
+            self._total += usd - held
+            self._by_match[mid] = self._by_match.get(mid, 0.0) + usd - held
             if "reserve" in entry:
-                self._open[str(entry["reserve"])] = usd
+                self._open[str(entry["reserve"])] = (mid, usd)
 
 
 def _entry(raw: bytes) -> dict[str, Any] | None:

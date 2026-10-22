@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed
+from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed, vendor_of
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.domain.modes import preset
@@ -35,6 +35,9 @@ class Settings(BaseModel):
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-haiku-5-5"
+    anthropic_api_key: SecretStr | None = None
+    allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
@@ -44,6 +47,8 @@ class Settings(BaseModel):
         """The single place an agent's effective model is resolved."""
         if agent.provider == "fake":
             return FAKE_MODEL
+        if agent.provider == "anthropic":
+            return agent.model or self.anthropic_model
         return agent.model or self.openai_model
 
 
@@ -54,6 +59,7 @@ _ENV_SCALARS = {
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_OPENAI_MODEL": "openai_model",
+    "DUEL_ANTHROPIC_MODEL": "anthropic_model",
     "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
     "DUEL_PROVIDER_MAX_RETRIES": "provider_max_retries",
@@ -116,13 +122,18 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         data["rules"] = _with_preset(data["rules"])
     if env.get("DUEL_DOCKER"):
         data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
-    if env.get("OPENAI_API_KEY"):
-        data["openai_api_key"] = env["OPENAI_API_KEY"]
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        if env.get(var):
+            data[var.lower()] = env[var]
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
     check_model_allowed(settings.openai_model)
+    check_model_allowed(settings.anthropic_model)
     for agent in settings.agents:
-        check_model_allowed(settings.model_for(agent))
+        model = settings.model_for(agent)
+        check_model_allowed(model, settings.allow_premium)
+        if vendor_of(model) != agent.provider:
+            raise ConfigError(f"agent {agent.name!r}: model {model!r} is not a {agent.provider} model")
     return settings

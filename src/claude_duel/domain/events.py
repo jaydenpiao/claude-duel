@@ -79,6 +79,8 @@ class CallCharged(_Payload):
     elapsed_ms: int = 0  # provider latency, measured once (absent before ADR 0007)
     input_tokens: int = 0  # split of ``tokens`` for the token clock (#36); absent in older logs
     output_tokens: int = 0
+    reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
+    truncated: bool = False
 
 
 class BuildRejected(_Payload):
@@ -158,6 +160,10 @@ def _charged(state: MatchState, p: CallCharged) -> None:
     mine.calls += 1
     mine.tokens += p.tokens
     mine.usd += p.usd
+    for u in (state.usage, mine):
+        u.input_tokens += p.input_tokens
+        u.output_tokens += p.output_tokens
+        u.reasoning_tokens += p.reasoning_tokens
     clock = state.rules.clock
     split = p.output_tokens + p.input_tokens // clock.input_divisor
     mine.clock_tokens += split if (p.input_tokens or p.output_tokens) else p.tokens

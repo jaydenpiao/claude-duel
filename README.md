@@ -68,9 +68,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
 
-**Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. It runs fake agents only for now; see [docs/design/benchmark.md](docs/design/benchmark.md).
+**Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. Every call is budget-capped and ledgered like a match; see [docs/design/benchmark.md](docs/design/benchmark.md).
 
-**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries and a retry hint, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less); any other `[rules]` field overrides it.
+**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries, a retry hint and why a failed try was rejected, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less); any other `[rules]` field overrides it.
 
 **Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
 
@@ -80,6 +80,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
 | `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-4.1-nano` |
+| `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
 | `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-4.1-nano` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
@@ -102,7 +103,14 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
-`gpt-4.1-mini` (0.40/1.60).
+`gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
+Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `gpt-6-astra` (10/50). Prices pinned 2026-10-22 from https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing.
+
+**Output cap and thinking** (#145): `[rules] max_output_tokens` (default 1500, reasoning included) and `[rules] reasoning_effort` (`low`/`medium`/`high`, default vendor default) go to every agent identically. Both vendors get the same strict answer schema as structured output. A reply cut off at the cap gets exactly one call asking for brevity; a second cut-off is the failure reason `truncated`. Thinking/reasoning tokens are logged per call (`reasoning_tokens`) and billed as output.
+
+**Tokens and cost per agent** (#146): the arena, the per-round and final commentary, and the replay card show each agent's tokens in, tokens out (with the thinking/reasoning share, already billed as output), dollars, `$/capture` (its attack spend over its captures) and `$/defense` (its remaining build spend over its challenges that held). Every call counts, including failed or truncated ones; `—` means none yet.
+
+`provider = "anthropic"` uses `ANTHROPIC_API_KEY` (env only, never in config). Prompt caching is off and cache tokens are billed at the full input rate, so accounting matches OpenAI.
 
 **Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.
 
