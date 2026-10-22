@@ -12,7 +12,7 @@ from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import events as ev
 from claude_duel.domain import findings, memory, policy
-from claude_duel.domain.errors import MalformedOutputError
+from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
     CAPTURED,
@@ -157,6 +157,10 @@ class MatchEngine:
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: budget check, call, charge, checkpoint."""
         self._budget.check(state)
+        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
+            raise DeadlineExceededError(
+                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
+            )
         started = time.monotonic()
         completion = self._providers[agent].complete(request)
         elapsed = time.monotonic() - started

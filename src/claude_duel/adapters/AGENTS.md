@@ -5,7 +5,7 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 ## providers/
 - `fake.py`: deterministic offline opponent; `skill` controls difficulty. Default for tests, CI and staging.
 - `openai.py`: httpx client; `raise_for_status` maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
-- `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota errors are not retried.
+- `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota errors are not retried. It fails fast when a retry-after is above the backoff cap or the next try would pass the per-call deadline (`deadline_s`, `Settings.provider_call_deadline`, 120s; the clock is injectable for tests).
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 
 ## sandbox/

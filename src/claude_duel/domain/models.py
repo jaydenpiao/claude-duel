@@ -75,6 +75,7 @@ class Rules(_Frozen):
     challenges_per_round: int = Field(default=2, ge=1, le=10)
     max_attempts: int = Field(default=4, ge=1, le=50)
     attack_token_budget: int = Field(default=20_000, ge=1)
+    match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()
@@ -172,6 +173,7 @@ class Usage(BaseModel):
     calls: int = 0
     tokens: int = 0
     usd: float = 0.0
+    elapsed_ms: int = 0  # recorded provider time; the match deadline is measured on it, so resume keeps it
 
 
 class Finding(_Frozen):

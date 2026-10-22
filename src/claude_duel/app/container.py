@@ -31,7 +31,12 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
         if settings.openai_api_key is None:
             raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
         inner = OpenAIProvider(settings.openai_api_key, settings.model_for(agent), timeout=settings.provider_timeout)
-        return RetryingProvider(inner, metrics, max_retries=settings.provider_max_retries)
+        return RetryingProvider(
+            inner,
+            metrics,
+            max_retries=settings.provider_max_retries,
+            deadline_s=settings.provider_call_deadline,
+        )
     raise ConfigError(f"unknown provider {agent.provider!r}")
 
 
