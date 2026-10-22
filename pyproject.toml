@@ -54,8 +54,8 @@ branch = true
 
 [tool.vulture]
 paths = ["src", "tests"]
-# framework hooks (pydantic, pytest, logging.Formatter) and a persisted match fact
-ignore_names = ["model_config", "pytestmark", "format", "tokens_used"]
+# framework hooks (pydantic, pytest, logging.Formatter) and persisted match facts read by replay/later modes
+ignore_names = ["model_config", "pytestmark", "format", "tokens_used", "elapsed_ms", "rules_version"]
 ignore_decorators = ["@model_validator", "@field_validator"]
 min_confidence = 60
 
