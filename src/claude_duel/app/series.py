@@ -52,7 +52,7 @@ def play_series(
             decider_settings = game_settings.model_copy(
                 update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
             )
-            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer)
+            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget)
             if decider.stage is not Stage.COMPLETE:
                 return state
         game = sr.game_of(n, match, decider)
