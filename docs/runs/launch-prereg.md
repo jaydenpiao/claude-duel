@@ -7,15 +7,30 @@ Written before any launch spend (#148). Nothing here has been run on real models
 In a symmetric staged CTF (each side builds a challenge the arena proves solvable, then attacks the other's),
 does the strongest Anthropic model beat the strongest OpenAI model on captures and defenses?
 
-## Arms (one tier is chosen before the run; the choice is recorded here and not changed after)
-| tier | Anthropic | OpenAI | price $/M in/out (both) |
-|---|---|---|---|
-| flagship | claude-fable-5-1 | gpt-6-astra | 10 / 50 |
-| premium | claude-opus-5-5 | gpt-5.6-sol | 4 / 20 |
-| mid | claude-sonnet-5-5 | gpt-6.1-sol | 2 / 10 |
-| smoke | claude-haiku-5-5 | gpt-6-luna | 0.10 / 0.50 |
+## Arms (chosen by the owner before any launch spend; not changed after)
+Pinned in [launch-arms.toml](launch-arms.toml). N counts **paired seeds**: each seed is played twice with the
+seats swapped, so an arm is 2N matches. Arms run in this order, each only after the previous one finished
+and replay-verified:
 
-Prices match at every tier, so cost is not a hidden handicap.
+| order | arm | Anthropic | OpenAI | price $/M in/out (A / O) | N | `run_max_usd` | `match_max_usd` |
+|---|---|---|---|---|---|---|---|
+| 1 | smoke (pipeline check) | claude-haiku-5-5 | gpt-6-luna | 0.10/0.50 / 0.10/0.50 | 100 | 3 | 0.15 |
+| 2 | premium | claude-opus-5-5 | gpt-6.1-sol | 4/20 / 2/10 | 20 | 10 | 0.75 |
+| 3 | flagship | claude-fable-5-1 | gpt-6-astra | 10/50 / 10/50 | 10 | 20 | 2.0 |
+
+Total cap $33, under the $40 lifetime ledger (about $37.7 left). The smoke arm goes first because it is
+cheap enough to show that the pipeline works end to end (valid builds, the control, replay, the cost lines)
+before any expensive call.
+
+**The premium arm is not price-matched.** Opus costs twice what gpt-6.1-sol does per token, so its result
+is reported with **$/win** for each vendor (spend divided by matches won) beside the win share, and its
+headline is "per match", never "per dollar". The smoke and flagship arms are price-matched.
+
+**Caps bind before N at typical cost** (cost table below). Premium is about $0.41 per match, so $10 covers
+about 12 of the 20 seeds. Flagship is about $1.38 per match, so $20 covers about 7 of the 10 seeds; its
+`match_max_usd` is 2.0 because 0.75 would cut most flagship matches short. Seeds run in a fixed order
+(`launch-0`, `launch-1`, ...) and only whole seeds count, so a cap ending an arm early reduces N without
+choosing which seeds count. The N reached is reported.
 
 ## Pinned rules (identical for both vendors)
 - `mode = "checked"`, `rounds = 3`, `challenges_per_round = 1`, `max_attempts = 3`, docker sandbox.
@@ -44,13 +59,29 @@ Prices match at every tier, so cost is not a hidden handicap.
    a model result.
 
 ## Primary metrics and analysis (fixed now)
-- Per paired seed (both seat orders): match winner, and the counts of captures and defenses per vendor.
-- Primary: Claude's win share over paired seeds. Two-sided exact sign test, ties dropped, α = 0.05.
-- Secondary: capture rate and defense rate per vendor, each with a Clopper-Pearson 95% CI. Bradley-Terry with a
-  bootstrap CI comes from `duel ratings`.
-- No interim looks at outcomes. Stopping is by budget only, and only whole seeds (both seat orders) are run.
-- Honest power: at N = 30 paired seeds, the sign test detects only a large edge (about 75%+ win share). A null
-  result means "no large edge".
+- Unit: a paired seed (both seat orders). Claude **wins the seed** if it wins both matches, loses it if it
+  loses both. A split is a tie.
+- Primary, per arm: Claude's share of decided seeds. Two-sided exact sign test with ties dropped.
+- **Holm correction across the three arms** (family α = 0.05): sort the three p-values; the smallest must
+  be ≤ 0.0167, the next ≤ 0.025 and the last ≤ 0.05, stopping at the first that fails. The smoke arm is in
+  the family even though it is a pipeline check, so it cannot be dropped after the fact.
+- Secondary: capture and defense rate per vendor with Clopper-Pearson 95% CIs; Bradley-Terry with bootstrap
+  CIs from `duel ratings`; $/capture, $/defense and (premium) $/win per vendor.
+- No interim looks at outcomes. Stopping is by budget only, and only whole seeds count.
+
+### Power (exact sign test, assuming no ties; ties lower it further)
+At the strictest Holm level, α = 0.0167:
+
+| arm | N seeds | win share needed to reject (all of N decided) | power if true share 0.6 / 0.7 / 0.8 / 0.9 | 80% power needs a true share of |
+|---|---|---|---|---|
+| smoke | 100 | ≥ 63/100 | 0.31 / 0.95 / 1.00 / 1.00 | 0.67 |
+| premium | 20 (about 12 within cap) | ≥ 16/20 | 0.05 / 0.24 / 0.63 / 0.96 | 0.85 |
+| flagship | 10 (about 7 within cap) | 10/10 | 0.01 / 0.03 / 0.11 / 0.35 | 0.98 |
+
+At α = 0.05 the 80%-power shares are 0.65, 0.80 and 0.92. What this means: the smoke arm can detect a
+moderate edge. Premium can detect only a large one. Flagship is **descriptive**: only a clean sweep rejects
+the null, so a null flagship result means "no evidence", not "no edge". It is reported with its CI and is
+not used as the headline test.
 
 ## Cost table
 Per match: 3 rounds × 2 agents. **Typical** is 12 calls at 1,500 in / 2,000 out tokens (smoke match
@@ -66,9 +97,8 @@ Per match: 3 rounds × 2 agents. **Typical** is 12 calls at 1,500 in / 2,000 out
 | fable-5-1 vs gpt-6-astra | $1.380 | $15.120 | $13.80 ($151.20) | $41.40 ($453.60) | $138.00 ($1,512.00) |
 
 Budget: the lifetime ledger ceiling is $40 and about $37.7 remains. Worst cases above that are stopped by
-run-specific caps (`run_max_usd`, `match_max_usd`), never by raising defaults. Realistic fits are premium at
-N = 30 (typical $16.56, `run_max_usd = 20`) or flagship at N = 10–20. The tier and N are chosen by the owner
-and written here before the run.
+run-specific caps (`run_max_usd`, `match_max_usd`), never by raising defaults. The owner's arms and caps are under "Arms" above.
+Premium (opus $4/$20 vs gpt-6.1-sol $2/$10, not in the table above) is about $0.41 typical and $4.54 worst per match.
 
 ## Fake dry run (done, $0)
 `duel series --games 5` with the pinned rules on fake agents, docker sandbox: 3 games played (best-of-5

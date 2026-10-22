@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
+from claude_duel.app.budget import DEFAULT_PRICES, PREMIUM, BudgetLimits
 from claude_duel.config import load_settings
 
 ROOT = Path(__file__).parent.parent.parent
@@ -21,3 +23,27 @@ def test_launch_config_matches_prereg() -> None:
     doc = (ROOT / "docs" / "runs" / "launch-prereg.md").read_text(encoding="utf-8")
     assert "`max_output_tokens = 8000`" in doc
     assert '`reasoning_effort = "low"`' in doc
+
+
+def test_launch_arms_match_prereg_and_fit_the_ledger() -> None:
+    arms = tomllib.loads((ROOT / "docs" / "runs" / "launch-arms.toml").read_text(encoding="utf-8"))["arm"]
+    assert [a["name"] for a in arms] == ["smoke", "premium", "flagship"]  # pre-registered execution order
+    assert sum(a["run_max_usd"] for a in arms) == 33.0
+    assert sum(a["run_max_usd"] for a in arms) < BudgetLimits().lifetime_max_usd
+    doc = (ROOT / "docs" / "runs" / "launch-prereg.md").read_text(encoding="utf-8")
+    for order, a in enumerate(arms, 1):
+        assert a["anthropic"] in DEFAULT_PRICES
+        assert a["openai"] in DEFAULT_PRICES
+        assert a["match_max_usd"] <= a["run_max_usd"]
+        row = f"| {order} | {a['name']}"
+        line = next(ln for ln in doc.splitlines() if ln.startswith(row))
+        cells = [c.strip() for c in line.split("|")]
+        assert cells[3:5] == [a["anthropic"], a["openai"]]
+        assert [float(cells[6]), float(cells[7]), float(cells[8])] == [a["n"], a["run_max_usd"], a["match_max_usd"]]
+    for a in arms[1:]:
+        assert {a["anthropic"], a["openai"]} <= PREMIUM  # needs allow_premium, set per run, never by default
+    premium = arms[1]
+    assert DEFAULT_PRICES[premium["anthropic"]] != DEFAULT_PRICES[premium["openai"]]
+    assert "not price-matched" in doc
+    assert "$/win" in doc
+    assert "Holm" in doc

@@ -1,5 +1,5 @@
-# Pinned launch rules (docs/runs/launch-prereg.md). Fake agents as written; for the real run set
-# provider/model per the chosen tier and alternate which vendor is "a" per seed.
+# Pinned launch rules (docs/runs/launch-prereg.md). Fake agents as written; each arm in launch-arms.toml sets
+# provider/model, its own run_max_usd/match_max_usd, and alternates which vendor is "a" per seed.
 sandbox = "docker"
 [[agents]]
 name = "a"
