@@ -50,6 +50,7 @@ _ENV_SCALARS = {
     "DUEL_OPENAI_MODEL": "openai_model",
     "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
+    "DUEL_PROVIDER_MAX_RETRIES": "provider_max_retries",
 }
 _ENV_RULES = {
     "DUEL_ROUNDS": "rounds",
@@ -64,7 +65,11 @@ _ENV_BUDGET = {
     "DUEL_RUN_MAX_USD": "run_max_usd",
     "DUEL_MATCH_MAX_CALLS": "match_max_calls",
     "DUEL_MATCH_MAX_TOKENS": "match_max_tokens",
+    "DUEL_RUN_MAX_CALLS": "run_max_calls",
+    "DUEL_LIFETIME_MAX_USD": "lifetime_max_usd",
 }
+_ENV_SECTIONS = {"rules": _ENV_RULES, "budget": _ENV_BUDGET}
+ENV_VARS = (*_ENV_SCALARS, *_ENV_RULES, *_ENV_BUDGET, "DUEL_DOCKER")  # every DUEL_* knob; README must list all
 
 
 def _overlay(target: dict[str, Any], mapping: dict[str, str], env: dict[str, str]) -> None:
@@ -83,16 +88,20 @@ def _with_preset(rules: dict[str, Any]) -> dict[str, Any]:
     return base.model_dump() | rules
 
 
+def _read_toml(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"cannot read config {path}: {exc}") from exc
+
+
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
-    data: dict[str, Any] = {}
-    if path is not None:
-        try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise ConfigError(f"cannot read config {path}: {exc}") from exc
+    data = _read_toml(path)
     _overlay(data, _ENV_SCALARS, env)
-    for section, mapping in (("rules", _ENV_RULES), ("budget", _ENV_BUDGET)):
+    for section, mapping in _ENV_SECTIONS.items():
         nested = dict(data.get(section, {}))
         _overlay(nested, mapping, env)
         if nested:
