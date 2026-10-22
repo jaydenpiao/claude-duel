@@ -61,7 +61,9 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "The attacker reads your source, so never leave the answer as a plain literal: build it with code "
         "(e.g. chars from a shuffled index list, numbers that must satisfy several constraints like sum, order "
         "and modulo, or input that passes several transforms). Keep each step simple enough that you are sure "
-        "your reference_payload passes.",
+        "your reference_payload passes. The attacker is a model that reads your source: a hash of a plaintext "
+        "that appears in the source protects nothing, and a challenge solved on the first try earns you nothing. "
+        "Defenses score when the attacker fails every try.",
     ]
 
 
