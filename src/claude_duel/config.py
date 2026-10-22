@@ -39,7 +39,7 @@ class Settings(BaseModel):
     anthropic_api_key: SecretStr | None = None
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
-    docker_image: str = "python:3.12-slim"
+    docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
 
