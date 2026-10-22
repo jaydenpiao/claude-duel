@@ -24,7 +24,7 @@ from claude_duel.ports import Metrics
 
 
 def series_id(settings: Settings, tid: str, round_no: int, names: list[str], pair: tuple[str, str]) -> str:
-    """``<tid>-r<n>-p<i>v<j>`` from entrant indexes (arch round 3 #4: names like ``x_y``/``x-y`` or ``a-b``/``b-c``
+    """``<tid>-r<n>-p<i>v<j>`` from entrant indexes (names like ``x_y``/``x-y`` or ``a-b``/``b-c``
     collided). A series already started under the old name-based id keeps that id so it resumes."""
     a, b = pair
     legacy = f"{tid}-r{round_no}-{a}-{b}".replace("_", "-")
@@ -55,7 +55,7 @@ def play_tournament(
     budget = build_budget(settings)
     cap = SpendCap(
         "tournament", f"{tournament_id}-", state.rule.tournament_max_usd
-    )  # R3-4: in-flight games count  # R3-1: run caps span the whole tournament
+    )  # in-flight games count  # run caps span the whole tournament
     specs = {e.name: e for e in state.rule.entrants}
     while (nxt := state.next_pair()) is not None:
         check_caps(settings, (cap,))

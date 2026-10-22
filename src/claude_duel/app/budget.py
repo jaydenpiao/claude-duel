@@ -109,7 +109,7 @@ class CostBudget:
         self.check_lifetime()
 
     def reserve(self, match_id: str, model: str, request: CompletionRequest) -> str:
-        """R3-6: ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
+        """ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
         pin, pout = self._prices[model]
         usd = (len(request.system) + len(request.prompt)) * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
         return self._ledger.reserve(match_id, model, usd)

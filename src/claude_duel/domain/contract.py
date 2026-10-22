@@ -7,7 +7,7 @@ so authors never touch FLAG or stdin. A solver runs after the author's definitio
 
 import ast
 
-# R3-3: the flag goes out through the real ``sys.stdout`` (authors may not name ``sys``), never through ``print``,
+# The flag goes out through the real ``sys.stdout`` (authors may not name ``sys``), never through ``print``,
 # which author code could rebind to transform its own flag.
 WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    sys.stdout.write(FLAG + '\\n')\n"
 _LEGACY_WRAPPERS = ("\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    print(FLAG)\n",)

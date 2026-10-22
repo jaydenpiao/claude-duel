@@ -1,4 +1,4 @@
-"""Release gate H2: a Contributor Covenant 2.1 code of conduct with a contact, linked from CONTRIBUTING."""
+"""Release gate: a Contributor Covenant 2.1 code of conduct with a contact, linked from CONTRIBUTING."""
 
 from __future__ import annotations
 

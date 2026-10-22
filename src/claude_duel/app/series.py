@@ -50,7 +50,7 @@ def play_series(
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
     settings = pinned(settings, state.rules, state.limits, series_id)
-    budget = budget or build_budget(settings)  # R3-1: one run budget across every game of this invocation
+    budget = budget or build_budget(settings)  # one run budget across every game of this invocation
     while not state.done():
         check_caps(settings, (SpendCap("series", f"{series_id}-", state.rule.series_max_usd), *caps))
         n = state.next_game()
@@ -87,7 +87,7 @@ def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None
 
 @dataclass(frozen=True)
 class SpendCap:
-    """R3-4: a spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
+    """a spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
 
     label: str
     prefix: str

@@ -1,4 +1,4 @@
-"""R3-2: a failing solver's output never stores a flag, and each repair try runs under a fresh flag."""
+"""A failing solver's output never stores a flag, and each repair try runs under a fresh flag."""
 
 from __future__ import annotations
 

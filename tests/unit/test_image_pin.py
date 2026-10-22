@@ -1,4 +1,4 @@
-"""R3-7: sandbox and app images are pinned by digest, and health() refuses an unpinned image."""
+"""sandbox and app images are pinned by digest, and health() refuses an unpinned image."""
 
 from __future__ import annotations
 
