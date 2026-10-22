@@ -5,16 +5,14 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
-import re
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from claude_duel.domain.flags import redact
+from claude_duel.domain.flags import scrub
 
 _trace_id: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="-")
-_SECRET_PATTERNS = (re.compile(r"sk-[A-Za-z0-9_\-]{8,}"), re.compile(r"(?i)(api[_-]?key|authorization)[\"':= ]+\S+"))
 
 
 def new_trace_id() -> str:
@@ -32,12 +30,6 @@ def trace(trace_id: str | None = None) -> Iterator[str]:
         yield _trace_id.get()
     finally:
         _trace_id.reset(token)
-
-
-def scrub(text: str) -> str:
-    for pat in _SECRET_PATTERNS:
-        text = pat.sub("<redacted-secret>", text)
-    return redact(text)
 
 
 class JsonFormatter(logging.Formatter):
