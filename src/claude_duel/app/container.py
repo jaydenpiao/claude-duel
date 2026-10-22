@@ -10,7 +10,7 @@ from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
-from claude_duel.adapters.store.event_log import FileEventLog, ObservedEventLog
+from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import CostBudget, check_model_allowed
@@ -84,8 +84,9 @@ def build_engine(
         {a.name: make_provider(a, settings, metrics) for a in agents},
         make_sandbox(settings, agents),
         store,
-        ObservedEventLog(build_event_log(settings), observer) if observer else build_event_log(settings),
+        build_event_log(settings),
         metrics,
         CostBudget(settings.budget, build_ledger(settings), settings.prices),
         {a.name: settings.model_for(a) for a in agents},
+        observer,
     )

@@ -17,7 +17,7 @@ from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
 from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits
 from claude_duel.observability import InMemoryMetrics
-from claude_duel.ports import LLMProvider
+from claude_duel.ports import EventObserver, LLMProvider
 from tests.helpers import any_source
 
 AGENTS = (AgentSpec(name="alice", skill=2), AgentSpec(name="bob", skill=5))
@@ -58,6 +58,7 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
         providers: dict[str, LLMProvider] | None = None,
         metrics: InMemoryMetrics | None = None,
         budget: BudgetLimits | None = None,
+        observer: EventObserver | None = None,
     ) -> MatchEngine:
         providers = providers or {"alice": FakeProvider(skill=2), "bob": FakeProvider(skill=5)}
         return MatchEngine(
@@ -68,6 +69,7 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
             metrics or InMemoryMetrics(),
             CostBudget(budget or BudgetLimits(), FileSpendLedger(store_root / "ledger.jsonl"), DEFAULT_PRICES),
             {"alice": "fake-1", "bob": "fake-1"},
+            observer,
         )
 
     return make

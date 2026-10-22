@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 
-from claude_duel.app.container import build_engine, build_event_log, build_store, pin_agents
+from claude_duel.app.container import build_engine, build_store, pin_agents
 from claude_duel.config import Settings
 from claude_duel.domain.errors import MatchNotFoundError
 from claude_duel.domain.models import MatchState
@@ -18,7 +18,8 @@ _LOG = logging.getLogger(__name__)
 def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObserver | None = None) -> MatchState:
     """Run or resume a match. A resumed match keeps its saved agents, models, rules and limits.
 
-    ``observer`` sees the match's existing events first (on resume), then each new one as it is appended.
+    ``observer`` sees the match's existing events first (on resume), then each new one once it is
+    durable, applied and saved. It is isolated: its failures never affect the match.
     """
     store = build_store(settings)
     with store.lock(match_id):
@@ -35,10 +36,9 @@ def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObs
             store.save(state)
         else:
             _warn_on_drift(settings, state)
-            if observer is not None:
-                for event in build_event_log(settings).read(match_id):
-                    observer(event)
-        return build_engine(settings, metrics, store, state.agents, observer).run(state)
+        engine = build_engine(settings, metrics, store, state.agents, observer)
+        engine.replay_to_observer(state)
+        return engine.run(state)
 
 
 def _warn_on_drift(settings: Settings, state: MatchState) -> None:
