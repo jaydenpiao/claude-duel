@@ -11,7 +11,7 @@ from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import events as ev
-from claude_duel.domain import findings, policy
+from claude_duel.domain import findings, memory, policy
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
@@ -204,7 +204,9 @@ class MatchEngine:
         last: ChallengeSpec | None = None
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
-            prompt = agents.build_prompt(agent, state.round, index, state.rules, error, last)
+            prompt = agents.build_prompt(
+                agent, state.round, index, state.rules, error, last, self._memory(state, agent)
+            )
             completion = self._call(state, agent, self._request(state, prompt, "build"))
             try:
                 last = agents.parse_challenge(completion.text)
@@ -250,6 +252,13 @@ class MatchEngine:
             assert_no_flag(safe.excerpt, flag, "finding excerpt")
             self._metrics.incr("finding", category=safe.category)
             self._checkpoint(state, ev.FINDING_FLAGGED, finding=safe.model_dump(mode="json"))
+
+    def _memory(self, state: MatchState, agent: str) -> str:
+        """Pure summary of the rounds before this one; checked against every flag of the match first."""
+        text = memory.summarize(state, agent, state.round - 1, state.rules.memory)
+        for cid in state.challenges:
+            assert_no_flag(text, derive_flag(state.secret, cid), "memory")
+        return text
 
     def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
         return CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
@@ -326,7 +335,14 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
             pairs = [(a.payload, a.output) for a in history]
             prompt = agents.attack_prompt(
-                attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, pairs
+                attacker,
+                ch.id,
+                spec.title,
+                spec.description,
+                spec.source,
+                len(history) + 1,
+                pairs,
+                self._memory(state, attacker),
             )
             assert_no_flag(prompt, flag, "attack prompt")
             completion = self._call(state, attacker, self._request(state, prompt, "attack"))
