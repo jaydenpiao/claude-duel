@@ -1,4 +1,4 @@
-"""R3-4: series and tournament caps count every game from the ledger, so they stop inside a running series."""
+"""series and tournament caps count every game from the ledger, so they stop inside a running series."""
 
 from __future__ import annotations
 

@@ -136,7 +136,7 @@ class MatchEngine:
         """Apply events a crash left out of the snapshot; create the log only if it is empty.
 
         The log, not ``last_seq``, decides: a crash after ``match_created`` but before the first
-        snapshot leaves ``last_seq == -1`` with a non-empty log (round-2 N2).
+        snapshot leaves ``last_seq == -1`` with a non-empty log.
         """
         events = self._log.read(state.match_id)
         if not events:
@@ -158,7 +158,7 @@ class MatchEngine:
         handler(state)
 
     def _record(self, state: MatchState, kind: str, **data: object) -> Event:
-        """Validate by applying to a copy, then append durably, then apply for real (round-2 N3).
+        """Validate by applying to a copy, then append durably, then apply for real.
 
         An event that can't be applied never reaches the log, so it can't poison resume or replay.
         """
@@ -185,7 +185,7 @@ class MatchEngine:
                 f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
             )
         model = self._models[agent]
-        reservation = self._budget.reserve(state.match_id, model, request)  # R3-6: a crash keeps it counted
+        reservation = self._budget.reserve(state.match_id, model, request)  # a crash keeps it counted
         started = time.monotonic()
         try:
             completion = self._providers[agent].complete(request)
@@ -272,14 +272,7 @@ class MatchEngine:
             completion = self._complete(state, agent, prompt, "build")
             self._note(state, agent, completion.text)
             try:
-                if completion.truncated:
-                    raise MalformedOutputError(TRUNCATED)
-                last = agents.parse_challenge(completion.text)
-                last, problem = self._shape(state, last)
-                if problem is None and state.rules.variety:
-                    problem = variety.repeat_reason(state, agent, last)
-                if problem is None:
-                    last, problem, probed = self._assess(state, cid, agent, last)
+                last, problem, probed = self._judge(state, cid, agent, completion)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -290,6 +283,21 @@ class MatchEngine:
             self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
             errors = state.build_errors[cid]
         return (last, None, False) if last is not None else (None, errors[-1], False)
+
+    def _judge(
+        self, state: MatchState, cid: str, agent: str, completion: Completion
+    ) -> tuple[ChallengeSpec, str | None, bool]:
+        """Parse, shape, variety and assess one build answer (spec, problem, probe_solved);
+        raises ``MalformedOutputError`` if unparseable."""
+        if completion.truncated:
+            raise MalformedOutputError(TRUNCATED)
+        spec, problem = self._shape(state, agents.parse_challenge(completion.text))
+        if problem is None and state.rules.variety:
+            problem = variety.repeat_reason(state, agent, spec)
+        probed = False
+        if problem is None:
+            spec, problem, probed = self._assess(state, cid, agent, spec)
+        return spec, problem, probed
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
@@ -330,7 +338,7 @@ class MatchEngine:
 
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
-        """R3-2 invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
+        """Invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
         if not state.secret:
             return
         body = event.model_dump_json()
@@ -343,7 +351,7 @@ class MatchEngine:
 
     @staticmethod
     def _flag_for(state: MatchState, cid: str) -> str:
-        """The challenge's flag. Before it is built, each repair try gets a fresh one (R3-2), so anything a
+        """The challenge's flag. Before it is built, each repair try gets a fresh one, so anything a
         rejected try leaked names a dead flag; the built challenge keeps the flag of the try that produced it."""
         ch = state.challenges.get(cid)
         return flag_of(state.secret, cid, ch.flag_epoch if ch else len(state.build_errors.get(cid, [])))
@@ -434,7 +442,7 @@ class MatchEngine:
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
             flag = self._flag_for(state, cid)
-            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # R3-2: the solver runs with the real flag
+            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # the solver runs with the real flag
             reason = f"solver failed ({status}); it printed {seen!r}"
             assert_no_flag(reason, flag, "solver failure")
             return spec, reason

@@ -1,4 +1,4 @@
-"""Release gate M3: publishable pyproject metadata and a CHANGELOG entry for the current version."""
+"""Release gate: publishable pyproject metadata and a CHANGELOG entry for the current version."""
 
 from __future__ import annotations
 

@@ -194,7 +194,7 @@ class Challenge(_Frozen):
     author: str
     spec: ChallengeSpec | None
     forfeit_reason: str | None = None
-    flag_epoch: int = 0  # R3-2: the repair try that built it; each try runs under its own flag (0 in older logs)
+    flag_epoch: int = 0  # the repair try that built it; each try runs under its own flag (0 in older logs)
     probe_solved: bool = False  # set only by the arena's difficulty gate in gate_mode "score"; halves the defense award
 
     @model_validator(mode="before")
@@ -290,7 +290,7 @@ class MatchState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     match_id: str
-    secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file (M2)
+    secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file
     framing_text: str = ""  # pinned framing paragraph from match_created ("" = neutral)
     findings: list[Finding] = Field(default_factory=list)
     seed: str = ""  # deterministic tie-break/pairing seed, logged in match_created ("" in pre-0007 logs)

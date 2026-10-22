@@ -11,7 +11,7 @@ from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
-# R3-7: pinned by digest; with --pull never a mutable tag would run whatever image is local under that name.
+# pinned by digest; with --pull never a mutable tag would run whatever image is local under that name.
 DEFAULT_IMAGE = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
 # Host-side deadline on top of the in-container wall limit, to absorb container start-up.
 STARTUP_GRACE_SECONDS = 5.0
@@ -60,7 +60,7 @@ def docker_runtimes(docker: Sequence[str]) -> frozenset[str]:
 
 
 def unpinned(image: str) -> str | None:
-    """R3-7: refuse an image reference that is not pinned by digest (name@sha256:<64 hex>)."""
+    """refuse an image reference that is not pinned by digest (name@sha256:<64 hex>)."""
     _, _, digest = image.partition("@sha256:")
     if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
         return None

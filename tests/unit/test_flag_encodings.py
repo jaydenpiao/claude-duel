@@ -1,4 +1,4 @@
-"""R3-5: encodings the regex enumeration missed are caught by assert_no_flag and redact (property tests)."""
+"""encodings the regex enumeration missed are caught by assert_no_flag and redact (property tests)."""
 
 from __future__ import annotations
 
