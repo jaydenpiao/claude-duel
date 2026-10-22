@@ -10,7 +10,6 @@ from claude_duel.app.container import build_budget, build_event_log, build_serie
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings
-from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
 from claude_duel.domain.errors import BudgetExceededError
 from claude_duel.domain.models import Event, Rules, SandboxLimits, Stage
@@ -39,7 +38,7 @@ def play_series(
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
         }
-        events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
+        events = [Event(v=sr.SERIES_SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
     settings = pinned(settings, state.rules, state.limits, series_id)
@@ -65,7 +64,7 @@ def play_series(
         game = sr.game_of(n, match, decider)
         log.append(
             series_id,
-            Event(v=ev.SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
+            Event(v=sr.SERIES_SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
         )
         state.games.append(game)
     return state
