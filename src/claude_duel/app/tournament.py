@@ -24,7 +24,7 @@ from claude_duel.ports import Metrics
 
 
 def series_id(settings: Settings, tid: str, round_no: int, names: list[str], pair: tuple[str, str]) -> str:
-    """``<tid>-r<n>-p<i>v<j>`` from entrant indexes (arch round 3 #4: names like ``x_y``/``x-y`` or ``a-b``/``b-c``
+    """``<tid>-r<n>-p<i>v<j>`` from entrant indexes (names like ``x_y``/``x-y`` or ``a-b``/``b-c``
     collided). A series already started under the old name-based id keeps that id so it resumes."""
     a, b = pair
     legacy = f"{tid}-r{round_no}-{a}-{b}".replace("_", "-")
