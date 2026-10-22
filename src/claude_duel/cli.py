@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay."""
+"""`duel` command line: run, resume, replay, card, estimate."""
 
 from __future__ import annotations
 
@@ -13,12 +13,15 @@ from pathlib import Path
 
 from rich.console import Console
 
+from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import build_event_log, build_ledger, build_store
+from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings, load_settings
-from claude_duel.domain.errors import DuelError
+from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.models import MatchState
+from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.scoring import match_stats
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
@@ -53,6 +56,9 @@ def _parser() -> argparse.ArgumentParser:
     card = sub.add_parser("card", help="write a shareable SVG summary of a match")
     card.add_argument("match_id")
     card.add_argument("--out", type=Path, help="output path (default: <match-id>-card.svg)")
+    est = sub.add_parser("estimate", help="offline worst-case cost per match for each preset (no API calls)")
+    est.add_argument("--mode", help="one preset (default: all)")
+    est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -123,6 +129,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _run(settings, args.match_id, args)
     if args.cmd == "resume":
         return _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2
+    if args.cmd == "estimate":
+        return _estimate(settings, args.mode, args.model)
     if args.cmd == "card":
         return _card(settings, args.match_id, args.out)
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
@@ -133,6 +141,18 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
+    chosen = model or settings.openai_model
+    check_model_allowed(chosen)
+    try:
+        names = [mode] if mode else sorted(MODES)
+        rows = [estimate(preset(n), chosen, settings.budget) for n in names]
+    except KeyError as exc:
+        raise ConfigError(str(exc.args[0])) from exc
+    print(render(rows))
+    return 0
 
 
 def _card(settings: Settings, match_id: str, out: Path | None) -> int:
