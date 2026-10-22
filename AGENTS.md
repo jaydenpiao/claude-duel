@@ -27,7 +27,7 @@ tests/{unit,integration,e2e}/     see tests/AGENTS.md
 uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
 duel --config configs/dev.toml run [--match-id ID]   # fake provider by default
 duel resume ID ; duel replay ID [--transcript]
-ruff check . && ruff format --check . && mypy src && pytest
+ruff check . && ruff format --check . && mypy src && vulture && pylint src tests && pytest
 ```
 `pytest` excludes `live` tests and fails under 90% coverage (branch). `docker`-marked tests run against a real daemon and skip when none is reachable. CI runs Python 3.11, 3.12, 3.13.
 
@@ -50,6 +50,7 @@ ruff check . && ruff format --check . && mypy src && pytest
 ## Coding standards
 - No duplicated logic; shared helpers live once (e.g. `sandbox/common.py:execute`).
 - `mypy --strict`, ruff rules in `pyproject.toml`, line length 120.
+- CI quality gates: ruff `C90` (complexity <= 10), `ERA` (no commented-out code), `TD` (every TODO links an issue: `# TODO: ... https://github.com/jaydenpiao/claude-duel/issues/N`); `vulture` (dead code; framework names in `[tool.vulture] ignore_names` only); `pylint` duplicate-code (>= 6 similar lines). Fix the code, never raise a threshold or add `noqa` to pass.
 - Dependency injection through constructors; wire only in `app/container.py`. Domain stays pure.
 - Every failure path gets a test that triggers it.
 
