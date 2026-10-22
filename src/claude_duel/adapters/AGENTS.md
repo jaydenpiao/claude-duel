@@ -4,8 +4,8 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 
 ## providers/
 - `fake.py`: deterministic offline opponent; `skill` controls difficulty. Default for tests, CI and staging.
-- `openai.py`: httpx client; `raise_for_status` maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
-- `anthropic.py`: Messages API client on the same port; no temperature or cache_control, cache tokens billed as input; 529 is transient, "credit balance" is quota.
+- `openai.py`: httpx client; gpt-6/gpt-5.6 go through the Responses API (no temperature, strict `json_schema`, `reasoning.effort`), older models through Chat Completions JSON mode; a reply stopped at the cap is `truncated`; `raise_for_status` maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
+- `anthropic.py`: Messages API client on the same port; no temperature or cache_control, cache tokens billed as input; 529 is transient, "credit balance" is quota. Sends the strict `json_schema` and `effort` via `output_config`; `stop_reason == "max_tokens"` is `truncated`; thinking tokens are reported in `reasoning_tokens` (already inside output, billed as output).
 - `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota errors are not retried. It fails fast when a retry-after is above the backoff cap or the next try would pass the per-call deadline (`deadline_s`, `Settings.provider_call_deadline`, 120s; the clock is injectable for tests).
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 

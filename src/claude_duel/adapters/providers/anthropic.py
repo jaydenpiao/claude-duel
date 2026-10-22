@@ -1,7 +1,9 @@
 """Anthropic Messages API adapter (plain HTTP, no SDK), behind the same ``LLMProvider`` port as OpenAI.
 
 Prompt caching stays off: no ``cache_control`` is ever sent, so every input token is billed at the base rate
-and both vendors see the same uncached prompts. Thinking blocks are dropped; only text blocks are the answer.
+and both vendors see the same uncached prompts. A request's ``json_schema`` goes out as structured output
+(``output_config.format``); ``stop_reason == "max_tokens"`` marks the reply truncated.
+Thinking blocks are dropped; only text blocks are the answer.
 Sampling is left at the vendor default (current Claude models reject any temperature other than 1.0).
 """
 
@@ -38,12 +40,19 @@ class AnthropicProvider:
         )
 
     def complete(self, request: CompletionRequest) -> Completion:
-        body = {
+        body: dict[str, object] = {
             "model": self._model,
             "max_tokens": request.max_tokens,
             "system": request.system,
             "messages": [{"role": "user", "content": request.prompt}],
         }
+        config: dict[str, object] = {}
+        if request.json_schema is not None:
+            config["format"] = {"type": "json_schema", "schema": request.json_schema}
+        if request.reasoning_effort is not None:
+            config["effort"] = request.reasoning_effort
+        if config:
+            body["output_config"] = config
         try:
             resp = self._client.post("/messages", json=body)
         except httpx.TimeoutException as exc:
@@ -69,6 +78,8 @@ def _parse(resp: httpx.Response) -> Completion:
             text=text,
             input_tokens=int(usage.get("input_tokens", 0)) + cached,
             output_tokens=int(usage.get("output_tokens", 0)),
+            reasoning_tokens=int((usage.get("output_tokens_details") or {}).get("thinking_tokens", 0)),
+            truncated=data.get("stop_reason") == "max_tokens",
         )
     except (ValueError, KeyError, TypeError) as exc:
         raise TransientProviderError("anthropic returned an unexpected body") from exc
