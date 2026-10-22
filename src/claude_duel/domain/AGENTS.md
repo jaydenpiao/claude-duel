@@ -9,8 +9,7 @@ Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to i
 - `events.py`: event types, one typed payload model per type, `SCHEMA_VERSION`, `payload()` validation, `apply`/`fold` (ADR 0004). `attack_started` (key, try_no) is emitted before each attack call for presentation; its handler changes no state, so logs written before it existed replay identically.
 - `modes.py`: `MODES` presets (plain `Rules`); `config.load_settings` applies `[rules] mode` / `DUEL_MODE` first, then the config's own fields.
 - `findings.py`: tamper detector (`scan_build`, `scan_payload`); logged as `finding_flagged`, never scored (ADR 0008). `policy.reason_code` gives rejection reasons a machine code.
-- `scoring.py`: pure scoring (defense >= capture) and `match_stats` (valid/capture rates for run reports).
-- `scoring.py`: `score_round` builds `RoundFacts` and dispatches to `SCORERS[rules.scoring.kind]` (only `classic` today, ADR 0007); `solve_award`/`defense_award` are the shared base new scorers compose; `add_scores` (deterministic, replay depends on it). Every scorer must pass `TestScorerInvariants`.
+- `scoring.py`: `score_round` builds `RoundFacts` and dispatches to `SCORERS[rules.scoring.kind]` (only `classic` today, ADR 0007); `solve_award`/`defense_award` are the shared base new scorers compose; `add_scores` (deterministic, replay depends on it). Every scorer must pass `TestScorerInvariants`. `match_stats` gives valid/capture rates for run reports.
 - `errors.py`: `DuelError` hierarchy; CLI maps any `DuelError` to exit 2.
 
 Gotchas

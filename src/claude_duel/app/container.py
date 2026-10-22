@@ -13,7 +13,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.app.budget import CostBudget, check_model_allowed
+from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
@@ -31,7 +31,12 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
         if settings.openai_api_key is None:
             raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
         inner = OpenAIProvider(settings.openai_api_key, settings.model_for(agent), timeout=settings.provider_timeout)
-        return RetryingProvider(inner, metrics, max_retries=settings.provider_max_retries)
+        return RetryingProvider(
+            inner,
+            metrics,
+            max_retries=settings.provider_max_retries,
+            deadline_s=settings.provider_call_deadline,
+        )
     raise ConfigError(f"unknown provider {agent.provider!r}")
 
 
@@ -86,12 +91,12 @@ def build_engine(
 ) -> MatchEngine:
     """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps."""
     for agent in agents:
-        check_model_allowed(settings.model_for(agent), settings.prices)
+        check_model_allowed(settings.model_for(agent))
     providers = {a.name: make_provider(a, settings, metrics) for a in agents}
     models = {a.name: settings.model_for(a) for a in agents}
     if settings.rules.difficulty_gate:
         probe = gate_agent(settings, agents)
-        check_model_allowed(settings.model_for(probe), settings.prices)
+        check_model_allowed(settings.model_for(probe))
         providers[GATE], models[GATE] = make_provider(probe, settings, metrics), settings.model_for(probe)
     return MatchEngine(
         providers,
@@ -99,7 +104,7 @@ def build_engine(
         store,
         build_event_log(settings),
         metrics,
-        CostBudget(settings.budget, build_ledger(settings), settings.prices),
+        CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES),
         models,
         observer,
     )
