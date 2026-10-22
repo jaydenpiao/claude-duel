@@ -1,0 +1,63 @@
+# AGENTS.md
+
+Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python challenges that hide a flag, the arena checks each is solvable, then each attacks the other's. CLI only (`duel`), no server.
+
+## Architecture (hexagonal, ADR 0001)
+- `src/claude_duel/domain/`: pure models, state machine, scoring, flag derivation, static policy. No I/O. See [domain/AGENTS.md](src/claude_duel/domain/AGENTS.md).
+- `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `Metrics`.
+- `src/claude_duel/adapters/`: `providers/` (fake, openai, retry), `sandbox/` (subprocess, docker), `store/` (file store, spend ledger). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
+- `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
+- `config.py` (TOML then `DUEL_*` env), `observability.py` (logging, metrics), `cli.py`.
+
+## Match lifecycle (`domain/state_machine.py`)
+`pending -> build -> validate -> attack -> score -> (build | complete)`; any non-terminal stage can go to `failed`. `build` increments `round`. `score` goes to `complete` when `round >= rules.rounds`. `recover()` reopens a failed match at `failed_stage`; stage work is idempotent (skips ids already in `challenges`/`validations`/`attacks`). State is saved after every unit of work.
+
+## Directory map
+```
+configs/{dev,staging,prod}.toml   per-env model + budget
+docs/requirements.md docs/design.md docs/adr/000N-*.md
+src/claude_duel/                  code (see above)
+tests/{unit,integration,e2e}/     see tests/AGENTS.md
+.github/workflows/{ci,staging,release}.yml
+.agents/skills/                   task skills (mirrored at .cursor/skills)
+```
+
+## Setup, run, check
+```bash
+uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
+duel --config configs/dev.toml run [--match-id ID]   # fake provider by default
+duel resume ID ; duel replay ID [--transcript]
+ruff check . && ruff format --check . && mypy src && pytest
+```
+`pytest` excludes `live` tests and fails under 90% coverage (branch). `docker_sandbox.py` is omitted from coverage. CI runs Python 3.11, 3.12, 3.13.
+
+## Environments and release (ADR 0005)
+- dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
+- PR: `ci.yml`. Push to main: `ci.yml` + `staging.yml` (docker build, containerized fake-provider smoke match).
+- Prod: push tag `vX.Y.Z` -> `release.yml` pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
+
+## Cost rules
+- Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
+- Caps: per match (persisted in `state.usage`), per run (in memory), lifetime from `.duel/ledger.jsonl` (`$40`, user's key has a $50 hard limit). Quota errors abort, never retry.
+- `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
+
+## Security invariants
+- Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only as env `FLAG`. Never logged, never in events, never persisted (the match `secret` is, in the 0600 state file).
+- Prompts are checked with `assert_no_flag`; sandbox output shown to attackers is `redact()`ed.
+- Challenge source passes `domain/policy.py` (import allowlist, banned names/attrs, size cap, no flag-shaped literals) before running.
+- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output. Subprocess sandbox is defence in depth only (ADR 0003); Docker sandbox uses no network, read-only, cap-drop ALL, pids 32, nobody user.
+
+## Coding standards
+- No duplicated logic; shared helpers live once (e.g. `sandbox/common.py:execute`).
+- `mypy --strict`, ruff rules in `pyproject.toml`, line length 120.
+- Dependency injection through constructors; wire only in `app/container.py`. Domain stays pure.
+- Every failure path gets a test that triggers it.
+
+## Git style
+- Commits: short lowercase imperative, e.g. `add match state machine`. Branches: kebab-case, e.g. `sandbox-limits`. PR title like a commit; body 2-4 short bullets. No emoji.
+
+## Definition of done
+All checks green locally and in CI, coverage >= 90%, new behaviour and failure cases tested, docs/ADR updated if design changed, no secrets or flags in output. Full list: [review-checklist](.agents/skills/review-checklist/SKILL.md).
+
+## Skills
+[add-provider](.agents/skills/add-provider/SKILL.md) · [add-challenge-type](.agents/skills/add-challenge-type/SKILL.md) · [run-smoke-match](.agents/skills/run-smoke-match/SKILL.md) · [cut-release](.agents/skills/cut-release/SKILL.md) · [debug-failed-match](.agents/skills/debug-failed-match/SKILL.md) · [review-checklist](.agents/skills/review-checklist/SKILL.md)
