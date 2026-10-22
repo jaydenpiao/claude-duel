@@ -294,6 +294,7 @@ class MatchState(BaseModel):
     framing_text: str = ""  # pinned framing paragraph from match_created ("" = neutral)
     findings: list[Finding] = Field(default_factory=list)
     seed: str = ""  # deterministic tie-break/pairing seed, logged in match_created ("" in pre-0007 logs)
+    created_seq: int | None = None  # store-assigned in match_created; orders Elo (#137). None in older logs
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
