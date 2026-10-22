@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
+from claude_duel.adapters.providers.anthropic import AnthropicProvider
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
 from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
@@ -41,17 +42,21 @@ _LOG = logging.getLogger(__name__)
 def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLMProvider:
     if agent.provider == "fake":
         return FakeProvider(skill=agent.skill)
+    model, timeout = settings.model_for(agent), settings.provider_timeout
+    inner: LLMProvider
     if agent.provider == "openai":
         if settings.openai_api_key is None:
             raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
-        inner = OpenAIProvider(settings.openai_api_key, settings.model_for(agent), timeout=settings.provider_timeout)
-        return RetryingProvider(
-            inner,
-            metrics,
-            max_retries=settings.provider_max_retries,
-            deadline_s=settings.provider_call_deadline,
-        )
-    raise ConfigError(f"unknown provider {agent.provider!r}")
+        inner = OpenAIProvider(settings.openai_api_key, model, timeout=timeout)
+    elif agent.provider == "anthropic":
+        if settings.anthropic_api_key is None:
+            raise ConfigError("agent uses anthropic but ANTHROPIC_API_KEY is not set")
+        inner = AnthropicProvider(settings.anthropic_api_key, model, timeout=timeout)
+    else:
+        raise ConfigError(f"unknown provider {agent.provider!r}")
+    return RetryingProvider(
+        inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
+    )
 
 
 def docker_runtime(settings: Settings) -> str | None:
@@ -140,7 +145,7 @@ def build_engine(
     ``budget`` is the invocation's shared ``CostBudget`` (R3-1): a series or tournament passes one so
     ``run_max_*`` spans every game it plays; omitted, the engine gets a fresh one (a single match)."""
     for agent in agents:
-        check_model_allowed(settings.model_for(agent))
+        check_model_allowed(settings.model_for(agent), settings.allow_premium)
     providers = {a.name: make_provider(a, settings, metrics) for a in agents}
     models = {a.name: settings.model_for(a) for a in agents}
     if settings.rules.difficulty_gate:
