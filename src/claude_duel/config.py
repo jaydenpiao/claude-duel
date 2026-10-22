@@ -38,6 +38,8 @@ class Settings(BaseModel):
     database_url: SecretStr | None = None  # DATABASE_URL: a duel_ingest login, for `duel sync` (ADR 0012)
     migrate_database_url: SecretStr | None = None  # MIGRATE_DATABASE_URL: schema owner, for migrate and --rebuild
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
+    results_backend: str = Field(default="postgres", pattern="^(postgres|neon-http)$")  # how sync/migrate reach the DB
+    neon_http_endpoint: str | None = None  # override for neon-http (e.g. a local proxy); default derived from the host
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
@@ -53,6 +55,8 @@ class Settings(BaseModel):
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
     "DUEL_METRICS": "metrics",
+    "DUEL_RESULTS_BACKEND": "results_backend",
+    "DUEL_NEON_HTTP_ENDPOINT": "neon_http_endpoint",
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
