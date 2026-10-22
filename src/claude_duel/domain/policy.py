@@ -225,3 +225,22 @@ _CHECKS: dict[type[ast.AST], Callable[[Any], str | None]] = {
     ast.Attribute: _check_attribute,
     ast.Constant: _check_constant,
 }
+
+
+_REASON_CODES = (
+    ("import not allowed", "import"),
+    ("banned attribute", "attribute"),
+    ("submodule access", "submodule"),
+    ("string with a dunder", "dunder-string"),
+    ("banned name", "banned-name"),
+    ("flag-shaped literal", "flag-literal"),
+    ("FLAG is injected", "flag-assign"),
+    ("the accepting input", "answer-exposed"),
+    ("syntax error", "syntax"),
+)
+
+
+def reason_code(reason: str) -> str:
+    """Machine-readable category of a rejection reason (``solver:`` prefix ignored); "other" if unknown."""
+    text = reason.removeprefix("solver: ")
+    return next((code for prefix, code in _REASON_CODES if text.startswith(prefix)), "other")

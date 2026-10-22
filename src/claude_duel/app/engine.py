@@ -11,7 +11,7 @@ from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import events as ev
-from claude_duel.domain import policy
+from claude_duel.domain import findings, policy
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
@@ -21,6 +21,7 @@ from claude_duel.domain.models import (
     Challenge,
     ChallengeSpec,
     Event,
+    Finding,
     MatchState,
     Stage,
     Validation,
@@ -36,6 +37,7 @@ from claude_duel.ports import (
     LLMProvider,
     MatchStore,
     Metrics,
+    Purpose,
     RunResult,
     Sandbox,
 )
@@ -203,15 +205,10 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(agent, state.round, index, state.rules, error, last)
-            completion = self._call(
-                state,
-                agent,
-                CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build"),
-            )
+            completion = self._call(state, agent, self._request(state, prompt, "build"))
             try:
                 last = agents.parse_challenge(completion.text)
-                last, problem = self._solve_reference(state, cid, last)
-                problem = problem or self._problem(state, cid, state.round, last) or self._gate(state, cid, last)
+                last, problem = self._assess(state, cid, agent, last)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -238,13 +235,32 @@ class MatchEngine:
         problem = self._problem(state, ch.id, ch.round, ch.spec)
         return (False, problem) if problem else (True, "ok")
 
+    def _assess(self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+        """Solver, policy and runs, difficulty gate; then the tamper detector on the answer (logged only)."""
+        spec, problem = self._solve_reference(state, cid, spec)
+        problem = problem or self._problem(state, cid, state.round, spec) or self._gate(state, cid, spec)
+        policy_reason = problem if problem and policy.reason_code(problem) != "other" else None
+        hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
+        self._flag(state, hits, derive_flag(state.secret, cid))
+        return spec, problem
+
+    def _flag(self, state: MatchState, hits: list[Finding], flag: str) -> None:
+        for hit in hits:
+            safe = hit.model_copy(update={"excerpt": redact(hit.excerpt, (flag,))})
+            assert_no_flag(safe.excerpt, flag, "finding excerpt")
+            self._metrics.incr("finding", category=safe.category)
+            self._checkpoint(state, ev.FINDING_FLAGGED, finding=safe.model_dump(mode="json"))
+
+    def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
+        return CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
+
     def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
         """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe; a capture means too easy."""
         if not state.rules.difficulty_gate:
             return None
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
-        completion = self._call(state, GATE, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack"))
-        solved = self._attempt(state, spec, derive_flag(state.secret, cid), completion).captured
+        completion = self._call(state, GATE, self._request(state, prompt, "attack"))
+        solved = self._attempt(state, GATE, spec, derive_flag(state.secret, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         return GATE_REJECTION if solved else None
 
@@ -313,18 +329,19 @@ class MatchEngine:
                 attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, pairs
             )
             assert_no_flag(prompt, flag, "attack prompt")
-            completion = self._call(
-                state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
-            )
-            attempt = self._attempt(state, spec, flag, completion)
+            completion = self._call(state, attacker, self._request(state, prompt, "attack"))
+            attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
 
-    def _attempt(self, state: MatchState, spec: ChallengeSpec, flag: str, completion: Completion) -> AttackAttempt:
+    def _attempt(
+        self, state: MatchState, agent: str, spec: ChallengeSpec, flag: str, completion: Completion
+    ) -> AttackAttempt:
         try:
             payload = agents.parse_attack(completion.text).payload
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens)
+        self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
         run = self._run_challenge(spec.source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens)
