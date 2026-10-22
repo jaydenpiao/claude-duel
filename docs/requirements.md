@@ -24,7 +24,7 @@
 | Provider timeout / 5xx | Retry with exponential backoff + full jitter, bounded attempts |
 | Rate limit (429) | Honour `retry-after`, else backoff |
 | Permanent provider error (4xx) | No retry; unit forfeited, match continues |
-| Malformed model output | Re-prompt with parse error up to `max_format_retries`; then forfeit (build) or wasted attempt (attack) |
+| Malformed or invalid model output | Re-prompt with the parse or validation error up to `max_format_retries` (budgeted); then forfeit/invalid (build) or wasted attempt (attack) |
 | Sandbox escape attempt | AST allowlist; real-model matches require Docker (fail closed); no network, read-only, non-root; rlimits for the fake-only subprocess sandbox |
 | Infinite loop / memory bomb | CPU, address-space, file-size, wall-clock limits; output truncated |
 | Flag leakage | Flags derived via HMAC, never in prompts (guarded), redacted from logs and attack feedback |

@@ -82,6 +82,8 @@ def _check_import_from(node: ast.ImportFrom) -> str | None:
 
 
 def _check_name(node: ast.Name, parent: ast.AST | None) -> str | None:
+    if node.id == "FLAG" and not isinstance(node.ctx, ast.Load):
+        return "FLAG is injected by the arena; never assign or define it"
     if node.id.startswith("_") or node.id in BANNED_NAMES:
         return f"banned name: {node.id}"
     if node.id in RESTRICTED_MODULES and not (isinstance(parent, ast.Attribute) and parent.value is node):

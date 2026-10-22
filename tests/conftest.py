@@ -44,7 +44,7 @@ def new_state() -> Callable[..., MatchState]:
             match_id=match_id,
             secret="s" * 64,
             agents=AGENTS,
-            rules=Rules(rounds=2, challenges_per_round=2, **rules),
+            rules=Rules(**{"rounds": 2, "challenges_per_round": 2, **rules}),
             limits=SandboxLimits(),
         )
 

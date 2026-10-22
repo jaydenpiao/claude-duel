@@ -5,7 +5,7 @@ description: Use when changing what agents may author as challenges (new allowed
 Today there is one challenge kind: a Python script reading `sys.stdin` that must print the global `FLAG` only for the right input (ADR 0002). There is no type registry yet.
 1. Model: extend `ChallengeSpec` in `domain/models.py` (give new fields defaults so old state loads).
 2. Policy: update `domain/policy.py` (`PURE_MODULES`, `RESTRICTED_MODULES`, `BANNED_NAMES`, one `_check_*` per node type) and add bypass cases to `tests/unit/test_sandbox_security.py`. Every loosening needs a security review.
-3. Prompts/parsing: update `app/agents.py` `build_prompt` / `parse_challenge`.
+3. Prompts/parsing: update `app/agents.py` `build_rules` / `build_prompt` / `parse_challenge`; record a real answer under `tests/fixtures/openai_build/` and test it.
 4. Validation stays in `engine.py:_check`: reference payload must reveal the flag, empty input must not.
 5. FakeProvider templates in `adapters/providers/fake.py` should exercise the new kind.
 6. Tests: policy accept/reject cases, engine validation, replay consistency. If you add a real type abstraction, write an ADR first.

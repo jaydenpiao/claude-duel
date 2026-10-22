@@ -1,0 +1,5 @@
+{
+ "model": "gpt-4.1-nano",
+ "note": "shape of a repaired answer after the rejection reason is fed back",
+ "content": "{\"title\": \"Flag Retriever\", \"description\": \"A Python program that reads input from stdin and prints the global FLAG only for the correct input.\", \"source\": \"import json\\nimport sys\\ndata = sys.stdin.read()\\ntry:\\n    payload = json.loads(data)\\nexcept ValueError:\\n    payload = None\\nif isinstance(payload, dict) and payload.get('key') == 'secret_value':\\n    print(FLAG)\\n\", \"reference_payload\": \"{\\\"key\\\": \\\"secret_value\\\"}\", \"difficulty\": 2}"
+}
