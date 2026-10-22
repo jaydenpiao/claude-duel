@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Iterable
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
@@ -57,10 +58,13 @@ def pool_points(rule: DecayRule, solvers: dict[str, list[str]], names: Iterable[
     return points
 
 
+Kind = Literal["round_robin", "swiss"]
+
+
 class TournamentRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     entrants: tuple[AgentSpec, ...] = Field(min_length=3, max_length=32)
-    format: str = Field(default="auto", pattern="^(auto|round_robin|swiss)$")
+    format: Literal["auto", "round_robin", "swiss"] = "auto"
     swiss_rounds: int | None = Field(default=None, ge=1, le=20, description="default ceil(log2(entrants))")
     series: SeriesRule = SeriesRule(games=1)
     tournament_max_usd: float = Field(default=5.0, gt=0)
@@ -77,7 +81,7 @@ class TournamentRule(BaseModel):
             raise ValueError(f"{POOL!r} is reserved")
         return entrants
 
-    def kind(self) -> str:
+    def kind(self) -> Kind:
         if self.format != "auto":
             return self.format
         return "round_robin" if len(self.entrants) <= ROUND_ROBIN_MAX else "swiss"
