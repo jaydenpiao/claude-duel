@@ -247,6 +247,7 @@ def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
             "format": state.rule.kind(),
             "finished": finished,
             "standings": state.table(),
+            "pool_points": state.pool_points,
             "pairings": [p.model_dump() for p in state.pairings],
         }
         print(json.dumps(out))
@@ -255,7 +256,8 @@ def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
             print(f"round {p.round}: {p.a} v {p.b} -> {p.winner or 'draw'}")
         print(f"tournament {tournament_id} ({state.rule.kind()}){'' if finished else ' unfinished'}:")
         for rank, (name, points) in enumerate(state.table(), 1):
-            print(f"{rank:>3}. {name:<24}{points:g}")
+            pool = "" if state.pool_points is None else f"  pool {state.pool_points[name]}"
+            print(f"{rank:>3}. {name:<24}{points:g}{pool}")
     return 0 if finished else 1
 
 
