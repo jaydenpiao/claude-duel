@@ -42,6 +42,8 @@ SAFE_BUILTINS = frozenset(
 )  # fmt: skip
 # CPython introspection attributes without a leading underscore (generator/coroutine/frame/code/traceback).
 _INTROSPECTION_ATTR = re.compile(r"^(gi|cr|ag|f|co|tb)_|^(mro|modules|builtins)$")
+# str.format/format_map/string.Formatter do getattr on fields built at runtime (red-team F1).
+FORMAT_ATTRS = frozenset({"format", "format_map", "vformat", "Formatter"})
 _FORMAT_ATTR = re.compile(r"\{[^{}]*[.\[]")
 MIN_PAYLOAD_CHARS = 4
 _FLAG_HINT = "FLAG is already a global; use it directly"
@@ -196,7 +198,7 @@ def _check_from_name(module: str, name: str) -> str | None:
     allowed = RESTRICTED_MODULES.get(module)
     if name == "*":
         return "star import not allowed"
-    if name.startswith("_") or (allowed is not None and name not in allowed):
+    if name.startswith("_") or name in FORMAT_ATTRS or (allowed is not None and name not in allowed):
         return f"import not allowed: {module}.{name}"
     if allowed is None and _is_submodule(module, name):
         return f"submodule access not allowed: {module}.{name}"
@@ -216,6 +218,8 @@ def _check_name(node: ast.Name, parent: ast.AST | None) -> str | None:
 def _check_attribute(node: ast.Attribute) -> str | None:
     if node.attr.startswith("_") or _INTROSPECTION_ATTR.search(node.attr):
         return f"banned attribute: {node.attr}"
+    if node.attr in FORMAT_ATTRS:
+        return f"banned attribute: {node.attr} (use an f-string or %)"
     module = node.value.id if isinstance(node.value, ast.Name) else None
     if module in RESTRICTED_MODULES and node.attr not in RESTRICTED_MODULES[module]:
         return f"banned attribute: {module}.{node.attr} (only {', '.join(sorted(RESTRICTED_MODULES[module]))})"
@@ -229,7 +233,12 @@ def _is_submodule(module: str, attr: str) -> bool:
     return isinstance(getattr(importlib.import_module(module), attr, None), types.ModuleType)
 
 
+def _check_class(node: ast.ClassDef) -> str | None:
+    return f"class statements not allowed: {node.name} (use functions and dicts)"
+
+
 _CHECKS: dict[type[ast.AST], Callable[[Any], str | None]] = {
+    ast.ClassDef: _check_class,
     ast.Import: _check_import,
     ast.ImportFrom: _check_import_from,
     ast.Attribute: _check_attribute,
@@ -247,6 +256,7 @@ _REASON_CODES = (
     ("FLAG is injected", "flag-assign"),
     ("the accepting input", "answer-exposed"),
     ("syntax error", "syntax"),
+    ("class statements", "class"),
 )
 
 

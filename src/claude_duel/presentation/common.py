@@ -4,24 +4,23 @@ sentences both views print. Pure presentation: nothing here mutates a match the 
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from claude_duel.domain import events as ev
-from claude_duel.domain.flags import redact
+from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Attack, Challenge, Event, MatchState, Validation
 from claude_duel.domain.scoring import defense_award, solve_award
 
 SNIPPET_LINES = 3
 SNIPPET_WIDTH = 72
-_SECRETISH = re.compile(r"\b(sk-[A-Za-z0-9_-]{8,}|[0-9a-f]{32,})\b")
 
 HOOKS = {
     ev.MATCH_CREATED: "_created",
     ev.STAGE_CHANGED: "_stage",
     ev.CHALLENGE_BUILT: "_built",
     ev.CHALLENGE_VALIDATED: "_validated",
+    ev.ATTACK_STARTED: "_started",
     ev.ATTACK_ATTEMPTED: "_attempted",
     ev.CHALLENGE_ATTACKED: "_attacked",
     ev.ROUND_SCORED: "_scored",
@@ -29,11 +28,6 @@ HOOKS = {
     ev.MATCH_RECOVERED: "_recovered",
     ev.FINDING_FLAGGED: "_flagged",
 }
-
-
-def scrub(text: str) -> str:
-    """Redact flags and anything key- or secret-shaped."""
-    return _SECRETISH.sub("<redacted>", redact(text))
 
 
 def snippet(source: str) -> list[str]:
