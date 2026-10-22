@@ -95,11 +95,16 @@ class MatchEngine:
         return state
 
     def _sync(self, state: MatchState) -> None:
-        """Create the log for a new match, or apply events a crash left out of the snapshot."""
-        if state.last_seq < 0:
+        """Apply events a crash left out of the snapshot; create the log only if it is empty.
+
+        The log, not ``last_seq``, decides: a crash after ``match_created`` but before the first
+        snapshot leaves ``last_seq == -1`` with a non-empty log (round-2 N2).
+        """
+        events = self._log.read(state.match_id)
+        if not events:
             self._checkpoint(state, ev.MATCH_CREATED, **ev.created_data(state))
             return
-        for event in self._log.read(state.match_id):
+        for event in events:
             if event.seq > state.last_seq:
                 ev.apply(state, event)
         self._store.save(state)
@@ -115,8 +120,12 @@ class MatchEngine:
         handler(state)
 
     def _record(self, state: MatchState, kind: str, **data: object) -> None:
-        """Append to the durable log first, then apply: the log is the source of truth."""
+        """Validate by applying to a copy, then append durably, then apply for real (round-2 N3).
+
+        An event that can't be applied never reaches the log, so it can't poison resume or replay.
+        """
         event = Event(seq=state.last_seq + 1, type=kind, trace_id=current_trace_id(), data=data)
+        ev.apply(state.model_copy(deep=True), event)
         self._log.append(state.match_id, event)
         ev.apply(state, event)
 
