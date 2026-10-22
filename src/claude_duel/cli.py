@@ -74,7 +74,7 @@ def _parser() -> argparse.ArgumentParser:
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
-    bench = sub.add_parser("bench", help="solve rate on a local stdin-only task manifest (fake agents only)")
+    bench = sub.add_parser("bench", help="solve rate on a local stdin-only task manifest (budget-capped)")
     bench.add_argument("manifest", type=Path, help="JSON-lines tasks (docs/design/benchmark.md)")
     bench.add_argument("--tries", type=int, default=3, help="attempts per task (1-10)")
     bench.add_argument("--format", choices=("text", "json"), default="text")
@@ -172,14 +172,17 @@ def _dispatch(args: argparse.Namespace) -> int:
 def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
     if not 1 <= tries <= 10:
         raise ConfigError("--tries must be 1-10")
-    results = run_bench(settings, manifest, tries)
+    bench_id = f"bench-{uuid.uuid4().hex[:12]}"
+    results, usage = run_bench(settings, manifest, tries, bench_id)
     rates = solve_rate(results)
+    spend = {"bench_id": bench_id, "calls": usage.calls, "tokens": usage.tokens, "est_usd": round(usage.usd, 6)}
     if fmt == "json":
-        print(json.dumps({"solve_rate": rates, "results": [r.model_dump() for r in results]}))
+        print(json.dumps({**spend, "solve_rate": rates, "results": [r.model_dump() for r in results]}))
         return 0
     for r in results:
         print(f"{r.agent:<10} {r.task_id:<24} {'solved' if r.solved else 'failed'} in {r.attempts} ({r.tokens} tok)")
     print("solve rate: " + ", ".join(f"{a} {v:.0%}" for a, v in rates.items()))
+    print(f"{bench_id}: {usage.calls} calls, {usage.tokens} tokens, ${usage.usd:.4f}")
     return 0
 
 
