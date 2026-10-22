@@ -23,8 +23,10 @@ INTRO, BUILD, ATTACK, IMPACT, DEFEND, FIZZLE, ROUND_END, KO = (
     "intro", "build", "attack", "impact", "defend", "fizzle", "round_end", "ko",
 )  # fmt: skip
 STRIKE = 30  # windup 12 + projectile travel 18; the page times its effects inside each beat
+HITSTOP = {IMPACT: 5, DEFEND: 4, KO: 6}  # freeze frames after contact; passed to the page in the payload
 FRAMES = {  # beat length at 30fps (design §4): the one timeline both the page and the renderer use
-    INTRO: 45, BUILD: 30, ATTACK: STRIKE + 12, IMPACT: STRIKE + 1 + 5 + 27, DEFEND: STRIKE + 4 + 20,
+    INTRO: 45, BUILD: 30, ATTACK: STRIKE + 12, IMPACT: STRIKE + 1 + HITSTOP[IMPACT] + 27,
+    DEFEND: STRIKE + HITSTOP[DEFEND] + 20,
     FIZZLE: 20, ROUND_END: 30, KO: 60 + 30,
 }  # fmt: skip
 
@@ -59,6 +61,7 @@ class FightData:
     digest: str
     beats: list[Beat]
     frames: int
+    hitstop: dict[str, int]
 
 
 def _title(ch: Challenge) -> str:
@@ -146,6 +149,7 @@ def fight_data(state: MatchState, events: list[Event], digest: str) -> FightData
         digest=digest,
         beats=beats,
         frames=beats[-1].start + FRAMES[beats[-1].kind] if beats else 1,
+        hitstop=HITSTOP,
     )
 
 

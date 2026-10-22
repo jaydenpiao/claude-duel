@@ -1,6 +1,7 @@
 // Frame dumper for render_fight.sh: drives headless Chrome over the DevTools protocol (no npm deps).
 // usage: node --experimental-websocket render_fight.mjs <fight.html> <outdir> [first] [last]
-// Writes <outdir>/f%05d.png for every frame (or frames first..last) and <outdir>/audio.wav.
+// Writes <outdir>/f%05d.png for every frame (or frames first..last), <outdir>/audio.wav and
+// <outdir>/stats.json ({particles: [count per frame]}).
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,12 +36,14 @@ try {
   await send("Page.navigate", { url: `${pathToFileURL(resolve(html))}#frame=0` });
   while (!(await evaluate("window.__ready === true"))) await new Promise(ok => setTimeout(ok, 50));
   const total = await evaluate("window.__frames");
+  const particles = [];
   const lo = Number(first ?? 0), hi = Math.min(Number(last ?? total - 1), total - 1);
   for (let f = lo; f <= hi; f++) {
-    await evaluate(`window.__draw(${f})`);
+    particles.push(await evaluate(`window.__draw(${f}), window.__particles`));
     const { data } = await send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 } });
     writeFileSync(join(outdir, `f${String(f - lo).padStart(5, "0")}.png`), Buffer.from(data, "base64"));
   }
+  writeFileSync(join(outdir, "stats.json"), JSON.stringify({ particles }));
   writeFileSync(join(outdir, "audio.wav"), Buffer.from(await evaluate("window.__wav()"), "base64"));
 } finally {
   ws.close();

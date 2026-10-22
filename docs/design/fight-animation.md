@@ -2,7 +2,7 @@
 
 Status: implemented (`duel fight`). API spend: **$0**. It only replays existing logs.
 
-TL;DR: build **Direction C**. That's a deterministic Canvas 2D replay plus a vendored WebGL post-processing pass (bloom and chromatic aberration) and seeded jsfxr sound, rendered from the event log to HTML, MP4 and GIF. If headless WebGL fails, fall back to Canvas 2D bloom.
+TL;DR: build **Direction C**. That's a deterministic Canvas 2D replay plus a vendored WebGL post-processing pass (bloom and chromatic aberration) and seeded synth sound, rendered from the event log to HTML, MP4 and GIF. If headless WebGL fails, fall back to Canvas 2D bloom.
 
 ---
 
@@ -29,7 +29,7 @@ Takeaway: the "wow" comes mostly from juice (hitstop, shake, particles, glow, so
 
 - **A. Rich terminal arena.** ASCII fighters and box-drawn HUD, recorded with VHS. Cheap and on-brand for a CLI, but a low ceiling on visuals.
 - **B. Canvas 2D HTML replay.** A single self-contained HTML file with no dependencies, with particles, shake and hitstop. Solid and portable.
-- **C. (Recommended) B + a vendored WebGL post-processing pass + seeded jsfxr sound.** Bloom and chromatic aberration spike on impacts, with audio muxed into the MP4. The most impressive option that's still deterministic. **Fallback:** if headless WebGL fails (no GPU, or SwiftShader output that varies), switch to a Canvas 2D bloom (downsample, blur and `lighter` composite), chosen with `?fx=2d` and auto-detected.
+- **C. (Recommended) B + a vendored WebGL post-processing pass + seeded synth sound.** Bloom and chromatic aberration spike on impacts, with audio muxed into the MP4. The most impressive option that's still deterministic. **Fallback:** if headless WebGL fails (no GPU, or SwiftShader output that varies), switch to a Canvas 2D bloom (downsample, blur and `lighter` composite), chosen with `?fx=2d` and auto-detected.
 
 ## 3. Architecture
 
@@ -37,7 +37,7 @@ Takeaway: the "wow" comes mostly from juice (hitstop, shake, particles, glow, so
 duel fight <ID> --out f.html
   event log → build_beats(events, state) → scrub → JSON embed → template → f.html
 scripts/render_fight.sh f.html out.mp4 [out.gif]
-  headless Chrome: f.html#frame=N → PNG per frame → ffmpeg → MP4 (+ jsfxr WAV)
+  headless Chrome: f.html#frame=N → PNG per frame → ffmpeg → MP4 (+ seeded synth WAV)
   GIF: 640px wide, 15fps (palettegen/paletteuse)
 ```
 
@@ -88,7 +88,7 @@ Impact: 60 sparks with life 18f and speed 6–14px/f. Shards: 40, life 24f. KO: 
 - Chromatic aberration: base offset 0.0008; impact 0.004; KO 0.008, decaying over 15f.
 - Vignette 0.35 throughout.
 
-### Sound (jsfxr presets, seeded with seed+beat for small pitch jitter of ±3%)
+### Sound (seeded synth presets, seeded with seed+beat for small pitch jitter of ±3%)
 | Event | Sound |
 |---|---|
 | Intro / VS | powerUp |
@@ -135,6 +135,7 @@ With `prefers-reduced-motion` or `?motion=reduced`: no shake, no chromatic aberr
 
 ## Implementation notes
 - Built as Direction C in `presentation/fight.py` + `presentation/assets/fight.html`; the CLI is `duel fight`.
-- Sound is a small in-house sfxr-style synth (seeded presets rendered to a WAV in the page), not the vendored jsfxr library.
+- Sound is a seeded synth: sfxr-style presets rendered to a WAV in the page (no vendored library).
 - The Chrome frame-hash determinism test is marked `slow` and deselected by default (`pytest -m slow`).
 - Demo videos: the Duel Demo Videos clips switch to `scripts/render_fight.sh` output; the token overlays previously added in editing are dropped, since the HUD now carries `in X · out Y · $Z` per side.
+- Review tuning: the flash is composited after post-processing and under the HUD (peaks 0.35 VS/impact, 0.45 KO; bloom spike +0.5); HUD text sits on dark plates so it keeps at least 4.5:1 contrast on flash frames (pixel-tested). Particles are capped at `MAX_PARTICLES` = 400 per frame. Hitstop lengths (`HITSTOP` in `fight.py`) are passed to the page in the payload.

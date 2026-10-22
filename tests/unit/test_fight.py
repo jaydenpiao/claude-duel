@@ -23,7 +23,7 @@ from claude_duel.domain.models import Event, MatchState, Rules, Usage
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.card import log_digest
 from claude_duel.presentation.common import usage_text
-from claude_duel.presentation.fight import FRAMES, STRIKE, FightData, fight_beats, fight_data, fight_html
+from claude_duel.presentation.fight import FRAMES, HITSTOP, STRIKE, FightData, fight_beats, fight_data, fight_html
 from tests.helpers import FLAG, forfeit_events
 
 ROOT = Path(__file__).parent.parent.parent
@@ -123,24 +123,76 @@ def test_cli_fight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pyte
 
 
 CHROME = shutil.which(os.environ.get("CHROME", "google-chrome"))
+needs_chrome = pytest.mark.skipif(
+    not (CHROME and shutil.which("node") and shutil.which("ffmpeg")), reason="needs headless Chrome, node and ffmpeg"
+)
+MAX_PARTICLES = 400
+
+
+def test_hitstop_is_passed_in_the_payload(tmp_path: Path) -> None:
+    d = _data(tmp_path)
+    assert json.loads(_payload(fight_html(d)))["hitstop"] == d.hitstop == HITSTOP
+    assert f"MAX_PARTICLES = {MAX_PARTICLES};" in TEMPLATE.read_text(encoding="utf-8")
+
+
+def _render(page: Path, dest: Path, first: int = 0, last: int | None = None) -> Path:
+    span = [str(first), str(last)] if last is not None else []
+    node = ["node", "--experimental-websocket", "--no-warnings", str(ROOT / "scripts" / "render_fight.mjs")]
+    subprocess.run([*node, str(page), str(dest), *span], check=True, timeout=600)
+    return dest
+
+
+@pytest.fixture(scope="module")
+def rendered(tmp_path_factory: pytest.TempPathFactory) -> tuple[FightData, Path]:
+    tmp = tmp_path_factory.mktemp("fight")
+    d = _data(tmp)
+    page = tmp / "f.html"
+    page.write_text(fight_html(d), encoding="utf-8")
+    return d, _render(page, tmp / "all")
+
+
+def _luminance(png: Path, box: tuple[int, int, int, int]) -> list[float]:
+    x, y, w, h = box
+    crop = ["-vf", f"crop={w}:{h}:{x}:{y}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(png), *crop], check=True, capture_output=True).stdout
+
+    def lin(c: int) -> float:
+        v = c / 255
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+    return [0.2126 * lin(raw[i]) + 0.7152 * lin(raw[i + 1]) + 0.0722 * lin(raw[i + 2]) for i in range(0, len(raw), 3)]
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not (CHROME and shutil.which("node")), reason="needs headless Chrome and node")
-def test_frame_pixels_are_stable(tmp_path: Path) -> None:
-    d = _data(tmp_path)
+@needs_chrome
+def test_hud_contrast_on_flash_frames(rendered: tuple[FightData, Path]) -> None:
+    d, out = rendered
+    impact = next(b for b in d.beats if b.kind == "impact")
+    flashes = [30, impact.start + STRIKE, d.beats[-1].start]  # VS, impact, KO peaks
+    for f in flashes:
+        lum = sorted(_luminance(out / f"f{f:05d}.png", (24, 672, 260, 28)))  # left spend HUD
+        text, ground = lum[-1], lum[len(lum) // 2]
+        assert (text + 0.05) / (ground + 0.05) >= 4.5, f
+
+
+@pytest.mark.slow
+@needs_chrome
+def test_particles_stay_under_the_cap(rendered: tuple[FightData, Path]) -> None:
+    d, out = rendered
+    counts = json.loads((out / "stats.json").read_text())["particles"]
+    assert len(counts) == d.frames
+    assert 0 < max(counts) <= MAX_PARTICLES
+
+
+@pytest.mark.slow
+@needs_chrome
+def test_frame_pixels_are_stable(tmp_path: Path, rendered: tuple[FightData, Path]) -> None:
+    d, out = rendered
     page = tmp_path / "f.html"
     page.write_text(fight_html(d), encoding="utf-8")
     impact = next(b for b in d.beats if b.kind in {"impact", "defend"})
-    frames = {"0": 0, "impact": impact.start + STRIKE + 1, "ko": d.beats[-1].start + 20}
-
-    def render(run: str) -> list[str]:
-        out = []
-        for name, f in frames.items():
-            dest = tmp_path / run / name
-            node = ["node", "--experimental-websocket", "--no-warnings", str(ROOT / "scripts" / "render_fight.mjs")]
-            subprocess.run([*node, str(page), str(dest), str(f), str(f)], check=True, timeout=120)
-            out.append(hashlib.sha256((dest / "f00000.png").read_bytes()).hexdigest())
-        return out
-
-    assert render("a") == render("b")
+    for f in (0, impact.start + STRIKE + 1, d.beats[-1].start + 20):
+        again = _render(page, tmp_path / str(f), f, f) / "f00000.png"
+        assert (
+            hashlib.sha256(again.read_bytes()).digest() == hashlib.sha256((out / f"f{f:05d}.png").read_bytes()).digest()
+        )
