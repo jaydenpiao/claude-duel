@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 
 from claude_duel.adapters.sandbox.common import execute
 from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
+from claude_duel.domain.errors import SandboxRefusedError
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
@@ -26,10 +28,17 @@ def rlimits(limits: SandboxLimits) -> dict[str, int]:
 
 
 class SubprocessSandbox:
-    def __init__(self, python: str = sys.executable) -> None:
+    """Not a security boundary. Runs only sources ``source_allowed`` accepts; the composition root passes
+    the fake provider's ``is_template``, so model-written code can never reach it (ADR 0003).
+    """
+
+    def __init__(self, source_allowed: Callable[[str], bool], python: str = sys.executable) -> None:
         self._python = python
+        self._source_allowed = source_allowed
 
     def run(self, source: str, stdin: str, flag: str, limits: SandboxLimits) -> RunResult:
+        if not self._source_allowed(source):
+            raise SandboxRefusedError("subprocess sandbox only runs fake-provider templates; use docker")
         with tempfile.TemporaryDirectory(prefix="duel-") as tmp:
             os.chmod(tmp, 0o500)  # read-only, empty working directory
             return execute(

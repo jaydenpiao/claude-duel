@@ -3,7 +3,10 @@
 The flag and source travel on stdin as a one-line JSON header, so they never
 appear on any argv or in any process environment (``/proc/<pid>/environ``).
 The runner exposes the flag to challenge code as the global ``FLAG`` and hands
-the rest of stdin to the challenge as ``sys.stdin``.
+the rest of stdin to the challenge as ``sys.stdin``. Defence in depth behind the
+AST policy: challenge code gets only ``SAFE_BUILTINS``, an ``__import__`` limited to
+the policy's pure modules, and module stand-ins without submodules or private names, and a ``sys`` stand-in
+exposing only ``stdin``/``stdout``.
 """
 
 from __future__ import annotations
@@ -11,13 +14,25 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
+from claude_duel.domain.policy import PURE_MODULES, SAFE_BUILTINS
+
 RUNNER = (
-    "import io, json, resource, sys\n"
+    "import builtins, io, json, resource, sys, types\n"
     "_h = json.loads(sys.stdin.readline())\n"
     "for _k, _v in _h.pop('rlimits').items():\n"
     "    resource.setrlimit(getattr(resource, _k), (_v, _v))\n"
-    "sys.stdin = io.StringIO(sys.stdin.read())\n"
-    "_g = {'__name__': '__main__', '__builtins__': __builtins__, 'FLAG': _h.pop('flag')}\n"
+    "def _proxy(m):\n"
+    "    return types.SimpleNamespace(**{k: v for k, v in vars(m).items()\n"
+    "                                    if not k.startswith('_') and not isinstance(v, types.ModuleType)})\n"
+    "_mods = {_m: _proxy(__import__(_m)) for _m in _h.pop('imports')}\n"
+    "_mods['sys'] = types.SimpleNamespace(stdin=io.StringIO(sys.stdin.read()), stdout=sys.stdout)\n"
+    "def _imp(name, globals=None, locals=None, fromlist=(), level=0):\n"
+    "    if level or name not in _mods:\n"
+    "        raise ImportError(name)\n"
+    "    return _mods[name]\n"
+    "_b = {_n: getattr(builtins, _n) for _n in _h.pop('builtins')}\n"
+    "_b['__import__'] = _imp\n"
+    "_g = {'__name__': '__main__', '__builtins__': _b, 'FLAG': _h.pop('flag')}\n"
     "_c = compile(_h.pop('source'), '<challenge>', 'exec')\n"
     "del _h\n"
     "exec(_c, _g)\n"
@@ -30,5 +45,11 @@ def frame(source: str, flag: str, stdin: str, rlimits: Mapping[str, int] | None 
 
     ``rlimits`` (e.g. ``{"RLIMIT_NPROC": 1}``) are applied by the runner before the challenge is compiled.
     """
-    header = {"flag": flag, "source": source, "rlimits": dict(rlimits or {})}
+    header = {
+        "flag": flag,
+        "source": source,
+        "rlimits": dict(rlimits or {}),
+        "imports": sorted(PURE_MODULES),
+        "builtins": sorted(SAFE_BUILTINS),
+    }
     return json.dumps(header) + "\n" + stdin

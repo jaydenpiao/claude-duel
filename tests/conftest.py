@@ -18,6 +18,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import LLMProvider
+from tests.helpers import any_source
 
 AGENTS = (AgentSpec(name="alice", skill=2), AgentSpec(name="bob", skill=5))
 
@@ -61,7 +62,7 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
         providers = providers or {"alice": FakeProvider(skill=2), "bob": FakeProvider(skill=5)}
         return MatchEngine(
             providers,
-            SubprocessSandbox(),
+            SubprocessSandbox(any_source),
             store,
             event_log,
             metrics or InMemoryMetrics(),

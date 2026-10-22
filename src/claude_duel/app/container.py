@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
-from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.adapters.providers.fake import FakeProvider, is_template
 from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
@@ -41,7 +41,7 @@ def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
     if settings.sandbox == "subprocess":
         if untrusted:
             raise ConfigError("real-model matches require the docker sandbox; subprocess is for the fake provider")
-        return SubprocessSandbox()
+        return SubprocessSandbox(is_template)
     docker = DockerSandbox(settings.docker_command, settings.docker_image)
     problem = docker.health()
     if problem is None:
@@ -49,7 +49,7 @@ def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
     if settings.sandbox == "docker" or untrusted:
         raise ConfigError(f"docker sandbox required but unavailable: {problem}")
     log(_LOG, logging.WARNING, "docker unavailable; using subprocess sandbox for a fake-only match", reason=problem)
-    return SubprocessSandbox()
+    return SubprocessSandbox(is_template)
 
 
 def build_store(settings: Settings) -> FileMatchStore:

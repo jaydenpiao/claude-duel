@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.app import agents
@@ -14,9 +15,10 @@ from claude_duel.domain.errors import ConfigError, MalformedOutputError, MatchLo
 from claude_duel.domain.flags import derive_flag
 from claude_duel.domain.models import Rules, SandboxLimits
 from claude_duel.observability import JsonFormatter, NullMetrics, log, trace
+from tests.helpers import any_source
 
 LIM = SandboxLimits(wall_seconds=2, cpu_seconds=1, memory_mb=128, max_output_bytes=64)
-SB = SubprocessSandbox()
+SB = SubprocessSandbox(any_source)
 
 
 class TestSandbox:
@@ -128,3 +130,9 @@ class TestLogging:
         assert "boom" in out
         NullMetrics().incr("x")
         NullMetrics().timing("x", 1.0)
+
+
+def test_docker_memory_swap_equals_memory() -> None:  # M5: no swap beyond the memory limit
+    argv = DockerSandbox().argv("duel-x", SandboxLimits(memory_mb=96))
+    assert argv[argv.index("--memory") + 1] == "96m"
+    assert argv[argv.index("--memory-swap") + 1] == "96m"

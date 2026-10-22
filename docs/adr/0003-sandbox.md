@@ -6,3 +6,8 @@ Status: accepted (revised 2026-10-21 after security review round 1).
 - Flag and source travel over stdin to a shared runner (`adapters/sandbox/runner.py`), never argv or env.
 - The subprocess sandbox is defence in depth only (fake provider, tests): rlimits incl. `RLIMIT_NPROC=1` (no forks), empty read-only cwd, clean env, process-group kill after every run.
 - Challenge code must also pass the AST allowlist in `domain/policy.py`.
+
+## Round 2 hardening
+- Policy bans introspection attributes, submodule access and dunder strings (round-2 N1, arch #1).
+- Runner: minimal builtins (`policy.SAFE_BUILTINS`), restricted `__import__` returning module stand-ins without submodules, `sys` stand-in. A policy bypass alone no longer reaches `os`.
+- `SubprocessSandbox` takes a required `source_allowed`; production passes `fake.is_template`, so model-written code can only ever run in Docker.

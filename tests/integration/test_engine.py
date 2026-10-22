@@ -22,6 +22,7 @@ from claude_duel.domain.flags import derive_flag
 from claude_duel.domain.models import Stage
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
+from tests.helpers import any_source
 
 
 class Wrapped:
@@ -132,7 +133,7 @@ def test_lifetime_ledger_refuses_new_matches(tmp_path: Path, new_state) -> None:
 
     engine = MatchEngine(
         {"alice": FakeProvider(), "bob": FakeProvider()},
-        SubprocessSandbox(),
+        SubprocessSandbox(any_source),
         FileMatchStore(tmp_path / "s"),
         FileEventLog(tmp_path / "s"),
         InMemoryMetrics(),
