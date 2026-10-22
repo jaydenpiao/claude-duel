@@ -54,7 +54,7 @@ def test_unrelated_text_passes() -> None:
 
 
 SECRETS = {
-    "openai key": "sk-abcdefgh12345678",
+    "openai key": "sk-abcdefgh12345678",  # gitleaks:allow (fake test value)
     "api_key=": "api_key=hunter2",
     "authorization header": "Authorization: Bearer xyz",
     "long hex": "ab" * 16,
