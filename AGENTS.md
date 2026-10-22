@@ -29,7 +29,7 @@ duel --config configs/dev.toml run [--match-id ID]   # fake provider by default
 duel resume ID ; duel replay ID [--transcript]
 ruff check . && ruff format --check . && mypy src && pytest
 ```
-`pytest` excludes `live` tests and fails under 90% coverage (branch). `docker_sandbox.py` is omitted from coverage. CI runs Python 3.11, 3.12, 3.13.
+`pytest` excludes `live` tests and fails under 90% coverage (branch). `docker`-marked tests run against a real daemon and skip when none is reachable. CI runs Python 3.11, 3.12, 3.13.
 
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
@@ -42,10 +42,10 @@ ruff check . && ruff format --check . && mypy src && pytest
 - `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
 
 ## Security invariants
-- Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only as env `FLAG`. Never logged, never in events, never persisted (the match `secret` is, in the 0600 state file).
+- Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only over stdin (runner header) and exposed to challenge code as the global `FLAG`; never on argv or in env. Never logged, never in events, never persisted (the match `secret` is, in the 0600 state file).
 - Prompts are checked with `assert_no_flag`; sandbox output shown to attackers is `redact()`ed.
-- Challenge source passes `domain/policy.py` (import allowlist, banned names/attrs, size cap, no flag-shaped literals) before running.
-- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output. Subprocess sandbox is defence in depth only (ADR 0003); Docker sandbox uses no network, read-only, cap-drop ALL, pids 32, nobody user.
+- Challenge source passes `domain/policy.py` (AST allowlist: pure modules, `sys.stdin`/`sys.stdout` only, no `_` names, no star/relative imports, banned builtins, size cap, no flag-shaped literals) before running.
+- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output, 32 pids, 0.5 CPUs. Real-model matches run only in Docker and fail closed without it (ADR 0003); the subprocess sandbox is for the fake provider only. Set `DUEL_DOCKER="sudo docker"` if the socket needs sudo.
 
 ## Coding standards
 - No duplicated logic; shared helpers live once (e.g. `sandbox/common.py:execute`).
@@ -57,7 +57,7 @@ ruff check . && ruff format --check . && mypy src && pytest
 - Commits: short lowercase imperative, e.g. `add match state machine`. Branches: kebab-case, e.g. `sandbox-limits`. PR title like a commit; body 2-4 short bullets. No emoji.
 
 ## Definition of done
-All checks green locally and in CI, coverage >= 90%, new behaviour and failure cases tested, docs/ADR updated if design changed, no secrets or flags in output. Full list: [review-checklist](.agents/skills/review-checklist/SKILL.md).
+All checks green locally and in CI, coverage >= 90%, new behaviour and failure cases tested, every AGENTS.md/README/skill/ADR the change affects updated in the same PR, no secrets or flags in output. Full list: [review-checklist](.agents/skills/review-checklist/SKILL.md).
 
 ## Skills
 [add-provider](.agents/skills/add-provider/SKILL.md) · [add-challenge-type](.agents/skills/add-challenge-type/SKILL.md) · [run-smoke-match](.agents/skills/run-smoke-match/SKILL.md) · [cut-release](.agents/skills/cut-release/SKILL.md) · [debug-failed-match](.agents/skills/debug-failed-match/SKILL.md) · [review-checklist](.agents/skills/review-checklist/SKILL.md)
