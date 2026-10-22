@@ -15,10 +15,12 @@ from collections.abc import Iterable
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, Rules, SandboxLimits
 from claude_duel.domain.series import SeriesRule
 
 TOURNAMENT_CREATED, PAIRING_FINISHED, POOL_SCORED = "tournament_created", "pairing_finished", "pool_scored"
+TOURNAMENT_SCHEMA_VERSION = 1  # Event.v of tournament events, versioned apart from match events (#139)
 BYE = "-"
 POOL = "pool"  # the stand-in opponent of a pool match; not a valid entrant name
 ROUND_ROBIN_MAX = 6
@@ -95,6 +97,11 @@ class Pairing(BaseModel):
     winner: str | None
     series_id: str = ""
     usd: float = 0.0
+
+
+class PoolScored(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    points: dict[str, int]
 
 
 class TournamentState(BaseModel):
@@ -211,14 +218,16 @@ def fold(tournament_id: str, events: Iterable[Event]) -> TournamentState:
     first = next(it, None)
     if first is None or first.type != TOURNAMENT_CREATED:
         raise EventLogCorruptError("tournament log does not start with tournament_created")
-    state = TournamentState.model_validate({"tournament_id": tournament_id, **first.data})
+    check_version(first, TOURNAMENT_SCHEMA_VERSION, "tournament event")
+    state = typed(TournamentState, {"tournament_id": tournament_id, **first.data})
     for e in it:
+        check_version(e, TOURNAMENT_SCHEMA_VERSION, "tournament event")
         if e.type == POOL_SCORED and state.next_pair() is None and state.pool_points is None:
-            state.pool_points = {str(k): int(v) for k, v in dict(e.data["points"]).items()}  # type: ignore[call-overload]
+            state.pool_points = typed(PoolScored, e.data).points
             continue
         if e.type != PAIRING_FINISHED:
             raise EventLogCorruptError(f"unknown tournament event {e.type!r}")
-        p = Pairing.model_validate(e.data)
+        p = typed(Pairing, e.data)
         if state.next_pair() != (p.round, (p.a, p.b)):
             raise EventLogCorruptError(f"pairing {p.a} v {p.b} (round {p.round}) recorded out of order")
         state.pairings.append(p)
