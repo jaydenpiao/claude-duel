@@ -68,6 +68,8 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
 
+**Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. It runs fake agents only for now; see [docs/design/benchmark.md](docs/design/benchmark.md).
+
 **Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries and a retry hint, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less); any other `[rules]` field overrides it.
 
 **Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
