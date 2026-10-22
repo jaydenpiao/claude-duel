@@ -1,0 +1,123 @@
+"""Best-of-N series (#38): a pure fold over the series log, layered above matches (no match state changes).
+
+Each game is a normal match. Its seed is ``sha256(series_seed, game_no)`` and sides alternate (the series'
+first agent is ``agents[0]`` in odd games). A game is won on ``final_scores`` (handicap offsets included);
+a tie goes to whoever spent fewer attack tokens, else it is drawn. The series ends once someone has
+``ceil(N/2)`` wins or all N games are played.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Iterable
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.models import AgentSpec, Event, MatchState
+
+SERIES_CREATED, GAME_FINISHED = "series_created", "game_finished"
+
+
+class SeriesRule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    games: int = Field(default=3, ge=1, le=9, description="best of N (odd)")
+    series_max_usd: float = Field(default=2.0, gt=0, description="checked against played games before each game")
+
+    @field_validator("games")
+    @classmethod
+    def _odd(cls, games: int) -> int:
+        if games % 2 == 0:
+            raise ValueError("games must be odd")
+        return games
+
+
+class Game(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    game_no: int
+    match_id: str
+    winner: str | None
+    scores: dict[str, int]
+    usd: float = 0.0
+
+
+class SeriesState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    series_id: str
+    seed: str
+    rule: SeriesRule
+    agents: tuple[AgentSpec, AgentSpec]
+    games: list[Game] = Field(default_factory=list)
+
+    def wins(self) -> dict[str, int]:
+        out = {a.name: 0 for a in self.agents}
+        for g in self.games:
+            if g.winner is not None:
+                out[g.winner] += 1
+        return out
+
+    def done(self) -> bool:
+        need = self.rule.games // 2 + 1
+        return len(self.games) >= self.rule.games or max(self.wins().values()) >= need
+
+    def winner(self) -> str | None:
+        if not self.done():
+            return None
+        (a, wa), (b, wb) = self.wins().items()
+        return a if wa > wb else b if wb > wa else None
+
+    def spent_usd(self) -> float:
+        return sum(g.usd for g in self.games)
+
+    def next_game(self) -> int:
+        return len(self.games) + 1
+
+    def game_id(self, game_no: int) -> str:
+        return f"{self.series_id}-g{game_no}"
+
+
+def game_seed(series_seed: str, game_no: int) -> str:
+    return hashlib.sha256(f"{series_seed}:{game_no}".encode()).hexdigest()[:16]
+
+
+def game_agents(agents: tuple[AgentSpec, AgentSpec], game_no: int) -> tuple[AgentSpec, AgentSpec]:
+    """Sides alternate: the series' first agent leads in odd games."""
+    a, b = agents
+    return (a, b) if game_no % 2 else (b, a)
+
+
+def game_winner(state: MatchState) -> str | None:
+    final = state.final_scores()
+    (a, sa), (b, sb) = sorted(final.items())
+    if sa != sb:
+        return a if sa > sb else b
+    spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
+    if spent[a] != spent[b]:
+        return a if spent[a] < spent[b] else b
+    return None
+
+
+def game_of(game_no: int, state: MatchState) -> Game:
+    return Game(
+        game_no=game_no,
+        match_id=state.match_id,
+        winner=game_winner(state),
+        scores=state.final_scores(),
+        usd=state.usage.usd,
+    )
+
+
+def fold(series_id: str, events: Iterable[Event]) -> SeriesState:
+    it = iter(events)
+    first = next(it, None)
+    if first is None or first.type != SERIES_CREATED:
+        raise EventLogCorruptError("series log does not start with series_created")
+    state = SeriesState.model_validate({"series_id": series_id, **first.data})
+    for e in it:
+        if e.type != GAME_FINISHED:
+            raise EventLogCorruptError(f"unknown series event {e.type!r}")
+        game = Game.model_validate(e.data)
+        if game.game_no != state.next_game():
+            raise EventLogCorruptError(f"game {game.game_no} recorded out of order")
+        state.games.append(game)
+    return state
