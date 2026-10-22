@@ -62,6 +62,36 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 
 **Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`); any other `[rules]` field overrides it.
 
+**Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
+
+| Variable | Setting | Default |
+|---|---|---|
+| `DUEL_SANDBOX` | `sandbox` (`auto`/`docker`/`subprocess`) | `auto` |
+| `DUEL_STORE_DIR` | `store_dir` | `.duel` |
+| `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
+| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-4.1-nano` |
+| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-4.1-nano` |
+| `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
+| `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
+| `DUEL_ROUNDS` | `[rules] rounds` | preset |
+| `DUEL_MAX_ATTEMPTS` | `[rules] max_attempts` | preset |
+| `DUEL_CHALLENGES_PER_ROUND` | `[rules] challenges_per_round` | preset |
+| `DUEL_MODE` | `[rules] mode` (`classic`/`quick`/`gated`) | `classic` |
+| `DUEL_TOKEN_BUDGET` | `[rules] attack_token_budget` | preset |
+| `DUEL_MATCH_MAX_USD` | `[budget] match_max_usd` | 0.25 |
+| `DUEL_RUN_MAX_USD` | `[budget] run_max_usd` | 0.50 |
+| `DUEL_MATCH_MAX_CALLS` | `[budget] match_max_calls` | 80 |
+| `DUEL_MATCH_MAX_TOKENS` | `[budget] match_max_tokens` | 150000 |
+| `DUEL_RUN_MAX_CALLS` | `[budget] run_max_calls` | 200 |
+| `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 40 |
+| `DUEL_DOCKER` | docker command, e.g. `"sudo docker"` | `docker` |
+
+`OPENAI_API_KEY` is read from the environment only.
+
+**Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
+`gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
+`gpt-4.1-mini` (0.40/1.60).
+
 **Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.
 
 ## Development
