@@ -118,6 +118,9 @@ class Rules(_Frozen):
         default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
     )
     retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
+    retry_feedback: bool = Field(
+        default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
+    )
     attack_token_budget: int = Field(default=20_000, ge=1)
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(

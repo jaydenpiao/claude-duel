@@ -11,6 +11,20 @@ WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    prin
 _IO_NAMES = frozenset({"FLAG", "sys"})
 
 
+# Attack-time wrapper (#100): a failed try says whether check() returned False or a non-bool. An exception
+# is already reported by the sandbox runner as type and line. Never a value check() computed, so the answer
+# doesn't leak.
+FEEDBACK_WRAPPER = (
+    "\n\nimport sys\n_ok = check(sys.stdin.read().strip())\n"
+    "print(FLAG if _ok is True else 'check returned False' if _ok is False else 'check returned a non-bool')\n"
+)
+
+
+def with_feedback(source: str) -> str:
+    """The composed challenge with the feedback wrapper; other challenge forms pass through unchanged."""
+    return source[: -len(WRAPPER)] + FEEDBACK_WRAPPER if source.endswith(WRAPPER) else source
+
+
 def definitions(source: str) -> str:
     """The author's part of a composed source (idempotent: a repaired answer may echo the wrapper back)."""
     return source[: -len(WRAPPER)] if source.endswith(WRAPPER) else source
