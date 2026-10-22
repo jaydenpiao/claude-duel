@@ -114,6 +114,10 @@ class Rules(_Frozen):
     rounds: int = Field(default=3, ge=1, le=20)
     challenges_per_round: int = Field(default=2, ge=1, le=10)
     max_attempts: int = Field(default=4, ge=1, le=50)
+    early_bonus_attempts: int = Field(
+        default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
+    )
+    retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
     attack_token_budget: int = Field(default=20_000, ge=1)
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
@@ -282,7 +286,8 @@ class MatchState(BaseModel):
         return next((a.handicap for a in self.agents if a.name == name), Handicap())
 
     def max_attempts(self, name: str) -> int:
-        return max(1, self.rules.max_attempts + self.handicap(name).attempts_delta)
+        bonus = max(0, self.rules.early_bonus_attempts - (max(self.round, 1) - 1))
+        return max(1, self.rules.max_attempts + bonus + self.handicap(name).attempts_delta)
 
     def attack_token_budget(self, name: str) -> int:
         return max(1, int(self.rules.attack_token_budget * self.handicap(name).token_budget_mult))
