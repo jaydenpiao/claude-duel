@@ -6,6 +6,7 @@ import hashlib
 import logging
 import secrets
 
+from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import build_engine, build_store, pin_agents
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
@@ -17,7 +18,13 @@ from claude_duel.ports import EventObserver, Metrics
 _LOG = logging.getLogger(__name__)
 
 
-def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObserver | None = None) -> MatchState:
+def play(
+    settings: Settings,
+    match_id: str,
+    metrics: Metrics,
+    observer: EventObserver | None = None,
+    budget: CostBudget | None = None,
+) -> MatchState:
     """Run or resume a match. A resumed match keeps its saved agents, models, rules and limits.
 
     ``observer`` sees the match's existing events first (on resume), then each new one once it is
@@ -40,7 +47,7 @@ def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObs
             store.save(state)
         else:
             _warn_on_drift(settings, state)
-        engine = build_engine(settings, metrics, store, state.agents, observer)
+        engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)
 

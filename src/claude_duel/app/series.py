@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from claude_duel.app.container import build_event_log, build_series_log, build_store, pin_agents
+from claude_duel.app.budget import CostBudget
+from claude_duel.app.container import build_budget, build_event_log, build_series_log, build_store, pin_agents
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings
@@ -21,6 +22,7 @@ def play_series(
     rule: sr.SeriesRule,
     metrics: Metrics,
     observer: EventObserver | None = None,
+    budget: CostBudget | None = None,
 ) -> sr.SeriesState:
     """Play games until the series is decided. Resuming keeps the saved agents, seed and rule."""
     log = build_series_log(settings)
@@ -34,6 +36,7 @@ def play_series(
         events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
+    budget = budget or build_budget(settings)  # R3-1: one run budget across every game of this invocation
     while not state.done():
         if state.spent_usd() >= state.rule.series_max_usd:
             raise BudgetExceededError(f"series cost ${state.spent_usd():.4f}/${state.rule.series_max_usd}")
@@ -41,10 +44,18 @@ def play_series(
         game_settings = settings.model_copy(
             update={"agents": sr.game_agents(state.agents, n), "seed": sr.game_seed(state.seed, n)}
         )
-        match = play(game_settings, state.game_id(n), metrics, observer)
+        match = play(game_settings, state.game_id(n), metrics, observer, budget)
         if match.stage is not Stage.COMPLETE:
             return state  # failed game: `duel series` again resumes it
-        game = sr.game_of(n, match)
+        decider = None
+        if state.rule.sudden_death and sr.game_winner(match) is None:
+            decider_settings = game_settings.model_copy(
+                update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
+            )
+            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget)
+            if decider.stage is not Stage.COMPLETE:
+                return state
+        game = sr.game_of(n, match, decider)
         log.append(
             series_id,
             Event(v=ev.SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
@@ -68,6 +79,9 @@ def verify_series(settings: Settings, series_id: str) -> SeriesReport:
         match = store.load(g.match_id)
         if not replay(match, events.read(g.match_id)).consistent:
             bad.append(f"game {g.game_no}: replay")
-        if sr.game_of(g.game_no, match) != g:
+        decider = store.load(g.sudden_death) if g.sudden_death else None
+        if decider is not None and not replay(decider, events.read(g.sudden_death)).consistent:
+            bad.append(f"game {g.game_no}: sudden-death replay")
+        if sr.game_of(g.game_no, match, decider) != g:
             bad.append(f"game {g.game_no}: result")
     return SeriesReport(not bad, bad)
