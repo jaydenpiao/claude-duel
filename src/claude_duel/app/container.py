@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
 from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
@@ -77,6 +78,13 @@ def build_event_log(settings: Settings) -> FileEventLog:
 def build_series_log(settings: Settings) -> FileEventLog:
     """Series logs (#38) are ordinary hash-chained event logs named ``<series_id>.series.jsonl``."""
     return FileEventLog(settings.store_dir, suffix=".series.jsonl")
+
+
+def build_metrics(settings: Settings, match_id: str, summary: Metrics) -> Metrics:
+    """The in-memory summary, plus the JSON-lines sink when ``metrics = "jsonl"`` (#11)."""
+    if settings.metrics == "log":
+        return summary
+    return TeeMetrics((summary, JsonlMetrics(settings.store_dir / "metrics.jsonl", match_id)))
 
 
 def build_tournament_log(settings: Settings) -> FileEventLog:

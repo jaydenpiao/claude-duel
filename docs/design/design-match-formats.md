@@ -22,7 +22,7 @@ A **match** stays exactly what it is today: N rounds, one event log, one `MatchS
 - Series: `domain/series.py` + `app/series.py`, `duel series --games N`; logs as `<id>.series.jsonl`. Sudden death: a game tied on score and attack tokens is decided by one extra 1-round match (`<id>-g<n>-sd`); drawn only if that ties too.
 
 ## Built (#39, first PR)
-- Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Tournaments: `domain/tournament.py` + `app/tournament.py`, `duel tournament` (second PR). Not yet: the `decay` scorer; it needs one challenge attacked by several entrants, which no format produces yet (every match has its own challenges).
+- Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Tournaments: `domain/tournament.py` + `app/tournament.py`, `duel tournament` (second PR). Decay (lead decision, 2026-10-22): an opt-in shared challenge pool (`[tournament] pool = true`) where every entrant attacks every other entrant's valid challenges after the pairings; CTFd decay applies only there and breaks ties on series points.
 
 ## Cost
 A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.45; double round robin ~$0.90. A Swiss of 8 entrants x 5 rounds is 20 matches, ~$0.60. Add `series_max_usd` (default $2) checked before each game against the ledger.

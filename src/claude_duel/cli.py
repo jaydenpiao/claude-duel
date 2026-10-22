@@ -16,7 +16,7 @@ from pathlib import Path
 from rich.console import Console
 
 from claude_duel.app.budget import check_model_allowed
-from claude_duel.app.container import build_event_log, build_ledger, build_store
+from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
 from claude_duel.app.series import play_series, verify_series
@@ -112,7 +112,7 @@ def _run(settings: Settings, match_id: str | None, args: argparse.Namespace) -> 
     mid = match_id or uuid.uuid4().hex[:12]
     observer = _observer(settings, mid, args)
     try:
-        state = play(settings, mid, metrics, observer)
+        state = play(settings, mid, build_metrics(settings, mid, metrics), observer)
     finally:
         if isinstance(observer, ArenaView):
             observer.close()
@@ -180,8 +180,7 @@ def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
         rule = SeriesRule(games=games)
     except ValueError as exc:
         raise ConfigError(f"bad series: {exc}") from exc
-    metrics = InMemoryMetrics()
-    state = play_series(settings, series_id, rule, metrics)
+    state = play_series(settings, series_id, rule, build_metrics(settings, series_id, InMemoryMetrics()))
     report = verify_series(settings, series_id)
     winner = state.winner()
     if fmt == "json":
@@ -218,7 +217,9 @@ def _ratings(settings: Settings, boot: int, fmt: str) -> int:
 def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
     if settings.tournament is None:
         raise ConfigError("no [tournament] table in the config (needs at least 3 entrants)")
-    state = play_tournament(settings, tournament_id, settings.tournament, InMemoryMetrics())
+    state = play_tournament(
+        settings, tournament_id, settings.tournament, build_metrics(settings, tournament_id, InMemoryMetrics())
+    )
     finished = state.next_pair() is None
     if fmt == "json":
         out = {
@@ -226,6 +227,7 @@ def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
             "format": state.rule.kind(),
             "finished": finished,
             "standings": state.table(),
+            "pool_points": state.pool_points,
             "pairings": [p.model_dump() for p in state.pairings],
         }
         print(json.dumps(out))
@@ -234,7 +236,8 @@ def _tournament(settings: Settings, tournament_id: str, fmt: str) -> int:
             print(f"round {p.round}: {p.a} v {p.b} -> {p.winner or 'draw'}")
         print(f"tournament {tournament_id} ({state.rule.kind()}){'' if finished else ' unfinished'}:")
         for rank, (name, points) in enumerate(state.table(), 1):
-            print(f"{rank:>3}. {name:<24}{points:g}")
+            pool = "" if state.pool_points is None else f"  pool {state.pool_points[name]}"
+            print(f"{rank:>3}. {name:<24}{points:g}{pool}")
     return 0 if finished else 1
 
 
