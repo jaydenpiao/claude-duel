@@ -105,6 +105,24 @@ class MatchEngine:
             )
         return state
 
+    def attack_pool(self, state: MatchState, pool: list[Challenge]) -> MatchState:
+        """Shared-pool attacks (#39): ``agents[0]`` attacks each imported challenge once. No stages, no scoring;
+        each challenge and its (already passed) validation are recorded first, so resume and replay hold."""
+        self._budget.check_lifetime()
+        attacker = state.agents[0].name
+        with trace():
+            self._sync(state)
+            for ch in pool:
+                if ch.id not in state.challenges:
+                    self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
+                    ok = Validation(challenge_id=ch.id, valid=True, reason="pool import")
+                    self._checkpoint(state, ev.CHALLENGE_VALIDATED, validation=ok.model_dump(mode="json"))
+                key = f"{ch.id}:{attacker}"
+                if key not in state.attacks:
+                    attack = self._solve(state, ch, key, attacker)
+                    self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
+        return state
+
     def replay_to_observer(self, state: MatchState) -> None:
         """Show the observer the history it missed (on resume), through the same isolation."""
         if self._observer is None:

@@ -18,11 +18,41 @@ from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import AgentSpec, Event
 from claude_duel.domain.series import SeriesRule
 
-TOURNAMENT_CREATED, PAIRING_FINISHED = "tournament_created", "pairing_finished"
+TOURNAMENT_CREATED, PAIRING_FINISHED, POOL_SCORED = "tournament_created", "pairing_finished", "pool_scored"
 BYE = "-"
+POOL = "pool"  # the stand-in opponent of a pool match; not a valid entrant name
 ROUND_ROBIN_MAX = 6
 
 Pair = tuple[str, str]
+
+
+class DecayRule(BaseModel):
+    """CTFd-style dynamic value (#39): a pool challenge is worth less the more entrants capture it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    function: str = Field(default="linear", pattern="^(linear|logarithmic)$")
+    initial: int = Field(default=100, ge=1)
+    minimum: int = Field(default=10, ge=0)
+    decay: int = Field(default=20, ge=1, description="linear: points lost per extra solve; log: solves to hit min")
+
+
+def decay_value(rule: DecayRule, solves: int) -> int:
+    """CTFd's formulas: every solver gets the value at the current solve count; the first solve is worth initial."""
+    n = max(solves - 1, 0)
+    if rule.function == "linear":
+        value = rule.initial - rule.decay * n
+    else:
+        value = math.ceil((rule.minimum - rule.initial) / rule.decay**2 * n**2 + rule.initial)
+    return max(value, rule.minimum)
+
+
+def pool_points(rule: DecayRule, solvers: dict[str, list[str]], names: Iterable[str]) -> dict[str, int]:
+    """Points per entrant from ``solvers`` (challenge id -> entrants that captured it)."""
+    points = dict.fromkeys(names, 0)
+    for who in solvers.values():
+        for name in who:
+            points[name] += decay_value(rule, len(who))
+    return points
 
 
 class TournamentRule(BaseModel):
@@ -32,6 +62,8 @@ class TournamentRule(BaseModel):
     swiss_rounds: int | None = Field(default=None, ge=1, le=20, description="default ceil(log2(entrants))")
     series: SeriesRule = SeriesRule(games=1)
     tournament_max_usd: float = Field(default=5.0, gt=0)
+    pool: bool = Field(default=False, description="after the pairings, every entrant attacks every valid challenge")
+    decay: DecayRule = DecayRule()
 
     @field_validator("entrants")
     @classmethod
@@ -39,6 +71,8 @@ class TournamentRule(BaseModel):
         names = [e.name for e in entrants]
         if len(set(names)) != len(names):
             raise ValueError("entrant names must be unique")
+        if POOL in names:
+            raise ValueError(f"{POOL!r} is reserved")
         return entrants
 
     def kind(self) -> str:
@@ -69,6 +103,7 @@ class TournamentState(BaseModel):
     seed: str
     rule: TournamentRule
     pairings: list[Pairing] = Field(default_factory=list)
+    pool_points: dict[str, int] | None = None  # set by pool_scored once the shared pool is attacked
 
     def names(self) -> list[str]:
         return [e.name for e in self.rule.entrants]
@@ -87,7 +122,8 @@ class TournamentState(BaseModel):
 
     def table(self) -> list[tuple[str, float]]:
         pts = self.standings()
-        return sorted(pts.items(), key=lambda kv: (-kv[1], tiebreak(self.seed, kv[0])))
+        pool = self.pool_points or {}
+        return sorted(pts.items(), key=lambda kv: (-kv[1], -pool.get(kv[0], 0), tiebreak(self.seed, kv[0])))
 
     def played(self) -> set[frozenset[str]]:
         return {frozenset((p.a, p.b)) for p in self.pairings}
@@ -165,6 +201,9 @@ def fold(tournament_id: str, events: Iterable[Event]) -> TournamentState:
         raise EventLogCorruptError("tournament log does not start with tournament_created")
     state = TournamentState.model_validate({"tournament_id": tournament_id, **first.data})
     for e in it:
+        if e.type == POOL_SCORED and state.next_pair() is None and state.pool_points is None:
+            state.pool_points = {str(k): int(v) for k, v in dict(e.data["points"]).items()}  # type: ignore[call-overload]
+            continue
         if e.type != PAIRING_FINISHED:
             raise EventLogCorruptError(f"unknown tournament event {e.type!r}")
         p = Pairing.model_validate(e.data)
