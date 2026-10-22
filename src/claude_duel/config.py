@@ -37,6 +37,7 @@ class Settings(BaseModel):
     openai_api_key: SecretStr | None = None
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
+    metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
 
     def model_for(self, agent: AgentSpec) -> str:
@@ -48,6 +49,7 @@ class Settings(BaseModel):
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
+    "DUEL_METRICS": "metrics",
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
