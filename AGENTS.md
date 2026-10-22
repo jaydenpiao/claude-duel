@@ -46,8 +46,8 @@ ruff check . && ruff format --check . && mypy src && vulture && pylint src tests
 ## Security invariants
 - Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only over stdin (runner header) and exposed to challenge code as the global `FLAG`; never on argv or in env. Never logged, never in events, never persisted (the match `secret` is, in the 0600 state file).
 - Prompts are checked with `assert_no_flag`; sandbox output shown to attackers is `redact()`ed.
-- Challenge source passes `domain/policy.py` (AST allowlist: pure modules, `sys.stdin`/`sys.stdout` only, no `_` names, no star/relative imports, banned builtins, size cap, no flag-shaped literals) before running.
-- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output, 32 pids, 0.5 CPUs. Real-model matches run only in Docker and fail closed without it (ADR 0003); the subprocess sandbox is for the fake provider only. Set `DUEL_DOCKER="sudo docker"` if the socket needs sudo.
+- Challenge source passes `domain/policy.py` (AST allowlist: pure modules, `sys.stdin`/`sys.stdout` only, module names only as `mod.attr`, no submodule access (`re.enum`, `json.codecs`), no `_` names, no introspection attributes (`gi_*`, `f_*`, `co_*`, `cr_*`, `tb_*`, `mro`), no strings containing `__`, no star/relative imports, banned builtins, size cap, no flag-shaped literals) before running. At runtime the runner gives challenge code only `policy.SAFE_BUILTINS`, an `__import__` limited to pure-module stand-ins (no submodules) and a `sys` stand-in with only `stdin`/`stdout`.
+- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output, 32 pids, 0.5 CPUs. Real-model matches run only in Docker and fail closed without it (ADR 0003); the subprocess sandbox is for the fake provider only and raises `SandboxRefusedError` for any source its `source_allowed` rejects (the container passes `fake.is_template`; only tests pass `tests/helpers.any_source`). Set `DUEL_DOCKER="sudo docker"` if the socket needs sudo.
 
 ## Coding standards
 - No duplicated logic; shared helpers live once (e.g. `sandbox/common.py:execute`).

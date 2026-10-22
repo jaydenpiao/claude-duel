@@ -1,6 +1,6 @@
 # domain
 
-Pure rules. No I/O, no adapters, no logging. Root context: [AGENTS.md](../../../AGENTS.md).
+Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to inspect them), no adapters, no logging. Root context: [AGENTS.md](../../../AGENTS.md).
 
 - `models.py`: `Stage`, `AgentSpec`, `Rules`, `SandboxLimits`, `ChallengeSpec`, `Challenge`, `Validation`, `Attack`, `Usage`, `Event`, `MatchState` (the only mutable aggregate).
 - `state_machine.py`: `_ALLOWED` transitions, `next_stage`, `transition`, `recover`.

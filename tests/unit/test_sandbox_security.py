@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from claude_duel.adapters.providers.fake import TEMPLATES
+from claude_duel.adapters.providers.fake import TEMPLATES, is_template
 from claude_duel.adapters.sandbox.common import execute
 from claude_duel.adapters.sandbox.runner import frame
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.domain import policy
+from claude_duel.domain.errors import SandboxRefusedError
 from claude_duel.domain.models import ChallengeSpec, SandboxLimits
+from tests.helpers import any_source
 
 FLAG = "DUEL{0123456789abcdef0123456789abcdef}"
 LIM = SandboxLimits(wall_seconds=2, cpu_seconds=1, memory_mb=128, max_output_bytes=256)
@@ -42,6 +45,20 @@ BYPASSES = [
     "import os.path\n",
     "x = ().__class__\n",
     "type(1)\n",
+    # round 2, N1: frame/code introspection without underscores, dunder string keys
+    "def g():\n    yield 1\nx = g()\nos = x.gi_frame.f_builtins['__import__']('os')\n",
+    "def g():\n    yield 1\nprint(g().gi_frame.f_back)\n",
+    "def g():\n    yield 1\nprint(g().gi_code.co_consts)\n",
+    "async def c():\n    pass\nprint(c().cr_frame.f_globals)\n",
+    "try:\n    1 / 0\nexcept ZeroDivisionError as e:\n    print(e.tb_frame)\n",
+    "print(str.mro())\n",
+    "d = {}\nprint(d['__builtins__'])\n",
+    "print(b'__import__')\n",
+    # round 2, arch #1: attribute chains into submodules
+    "import re\nre.enum.sys.modules['os'].system('id')\n",
+    "import json\njson.codecs.open('/etc/passwd')\n",
+    "from json import codecs\n",
+    "import re\nr = re\n",
 ]
 
 
@@ -60,12 +77,57 @@ def test_policy_accepts_sys_stdin_forms() -> None:
 
 
 class TestSubprocess:
-    sb = SubprocessSandbox()
+    sb = SubprocessSandbox(any_source)
 
-    def test_flag_not_in_proc_environ(self) -> None:  # H2
-        r = self.sb.run("import os\nprint(open('/proc/self/environ').read())", "", FLAG, LIM)
-        assert r.exit_code == 0
-        assert FLAG not in r.stdout
+    def test_flag_not_in_proc_environ(self) -> None:  # H2: scan every visible process while a challenge runs
+        seen: list[str] = []
+        done = threading.Event()
+
+        def scan() -> None:
+            while not done.is_set():
+                for env in Path("/proc").glob("[0-9]*/environ"):
+                    try:
+                        seen.append(env.read_bytes().decode(errors="replace"))
+                    except OSError:
+                        continue
+
+        t = threading.Thread(target=scan)
+        t.start()
+        self.sb.run("x = 0\nfor i in range(3000000):\n    x += i\n", "", FLAG, LIM)
+        done.set()
+        t.join()
+        assert seen
+        assert not any(FLAG in env for env in seen)
+
+    def test_refuses_sources_not_allowed(self) -> None:  # round 2: no model code outside docker
+        with pytest.raises(SandboxRefusedError):
+            SubprocessSandbox(is_template).run("print(FLAG)", "", FLAG, LIM)
+        t = TEMPLATES[0]
+        assert FLAG in SubprocessSandbox(is_template).run(t.source, t.payload, FLAG, LIM).stdout
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "print(open)",
+            "import os",
+            "import re\nprint(re.enum)",
+            "import json\nprint(json.codecs)",
+            "import sys\nprint(sys.modules)",
+            "def g():\n    yield 1\ng().gi_frame.f_builtins['__import__']('os')",  # N1 exploit, policy bypassed
+        ],
+    )
+    def test_runtime_refuses_what_policy_bans(self, source: str) -> None:  # N1 defence in depth
+        r = self.sb.run(source + "\n", "", FLAG, LIM)
+        assert r.exit_code != 0
+        assert r.stdout == ""
+
+    def test_runtime_builtins_are_minimal(self) -> None:
+        src = (
+            "def g():\n    yield 1\nb = g().gi_frame.f_builtins\nprint(sorted(set(b) - set("
+            + repr(sorted(policy.SAFE_BUILTINS))
+            + ")))\n"
+        )
+        assert self.sb.run(src, "", FLAG, LIM).stdout.strip() == "['__import__']"
 
     def test_flag_not_on_cmdline(self) -> None:  # H1
         r = self.sb.run("print(open('/proc/self/cmdline').read())", "", FLAG, LIM)

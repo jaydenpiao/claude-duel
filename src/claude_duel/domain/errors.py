@@ -67,3 +67,7 @@ class ConfigError(DuelError):
 
 class EventLogCorruptError(DuelError):
     """The append-only event log was edited, truncated mid-chain or reordered."""
+
+
+class SandboxRefusedError(DuelError):
+    """A sandbox was asked to run code it must never run (e.g. model-written code outside Docker)."""

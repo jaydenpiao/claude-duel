@@ -41,9 +41,12 @@ def docker_probe(docker: Sequence[str]) -> str | None:
 
 
 class DockerSandbox:
-    def __init__(self, docker: Sequence[str] = ("docker",), image: str = DEFAULT_IMAGE) -> None:
+    def __init__(
+        self, docker: Sequence[str] = ("docker",), image: str = DEFAULT_IMAGE, name_prefix: str = "duel-"
+    ) -> None:
         self._docker = tuple(docker)
         self._image = image
+        self._prefix = name_prefix  # containers are named <prefix><random>; tests use a per-run prefix
 
     def health(self) -> str | None:
         """Why this sandbox can't run challenges, or None. Probes the daemon, then runs a real self-test container."""
@@ -79,7 +82,7 @@ class DockerSandbox:
         ]  # fmt: skip
 
     def run(self, source: str, stdin: str, flag: str, limits: SandboxLimits) -> RunResult:
-        name = f"duel-{uuid.uuid4().hex[:16]}"
+        name = f"{self._prefix}{uuid.uuid4().hex[:16]}"
         result = execute(
             self.argv(name, limits),
             frame(source, flag, stdin),

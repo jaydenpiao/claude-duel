@@ -55,6 +55,13 @@ TEMPLATES: tuple[Template, ...] = (
         2,
     ),
 )
+_TEMPLATE_SOURCES = frozenset(t.source for t in TEMPLATES)
+
+
+def is_template(source: str) -> bool:
+    """True only for this provider's own fixed challenge sources."""
+    return source in _TEMPLATE_SOURCES
+
 
 _AGENT = re.compile(r"^AGENT: (\S+)$", re.M)
 _ROUND = re.compile(r"^ROUND: (\d+)$", re.M)
