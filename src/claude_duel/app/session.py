@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import secrets
 
@@ -29,6 +30,7 @@ def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObs
             state = MatchState(
                 match_id=match_id,
                 secret=secrets.token_hex(32),
+                seed=settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16],
                 agents=pin_agents(settings),
                 rules=settings.rules,
                 limits=settings.limits,

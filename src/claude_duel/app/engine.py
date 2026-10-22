@@ -157,10 +157,19 @@ class MatchEngine:
         self._budget.check(state)
         started = time.monotonic()
         completion = self._providers[agent].complete(request)
-        self._metrics.timing("provider.seconds", time.monotonic() - started, agent=agent, purpose=request.purpose)
+        elapsed = time.monotonic() - started
+        self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
         model = self._models[agent]
         usd = self._budget.charge(state.match_id, model, completion)
-        self._checkpoint(state, ev.CALL_CHARGED, agent=agent, model=model, tokens=completion.total_tokens, usd=usd)
+        self._checkpoint(
+            state,
+            ev.CALL_CHARGED,
+            agent=agent,
+            model=model,
+            tokens=completion.total_tokens,
+            usd=usd,
+            elapsed_ms=round(elapsed * 1000),
+        )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 

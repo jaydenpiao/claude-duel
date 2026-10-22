@@ -50,7 +50,12 @@ class ScoringRule(_Frozen):
 _LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
 
 
+RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
+
+
 class Rules(_Frozen):
+    mode: str = Field(default="classic", description="preset name (domain/modes.py) this match started from")
+    rules_version: int = RULES_VERSION
     rounds: int = Field(default=3, ge=1, le=20)
     challenges_per_round: int = Field(default=2, ge=1, le=10)
     max_attempts: int = Field(default=4, ge=1, le=50)
@@ -72,7 +77,7 @@ class Rules(_Frozen):
         moved = {k: data.pop(k) for k in _LEGACY_SCORING if k in data}
         scoring = data.get("scoring")
         base = scoring.model_dump() if isinstance(scoring, ScoringRule) else dict(scoring or {})
-        data["scoring"] = moved | base
+        data["scoring"] = base | moved  # an explicit legacy override wins (e.g. over a preset's scoring)
         return data
 
     def max_source_bytes(self, round_no: int) -> int:
@@ -167,6 +172,7 @@ class MatchState(BaseModel):
 
     match_id: str
     secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file (M2)
+    seed: str = ""  # deterministic tie-break/pairing seed, logged in match_created ("" in pre-0007 logs)
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits

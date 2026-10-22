@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from claude_duel.adapters.providers.fake import TEMPLATES
+from claude_duel.config import load_settings
 from claude_duel.domain import policy
-from claude_duel.domain.errors import FlagLeakError, InvalidTransitionError
+from claude_duel.domain.errors import ConfigError, FlagLeakError, InvalidTransitionError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
     AgentSpec,
@@ -22,6 +24,7 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
+from claude_duel.domain.modes import MODES
 from claude_duel.domain.scoring import (
     SCORERS,
     RoundFacts,
@@ -250,3 +253,21 @@ def test_legacy_top_level_scoring_fields_move_under_scoring() -> None:
     assert Rules.model_validate({"solve_points": 3, "scoring": {"defense_points": 4}}).scoring == ScoringRule(
         solve_points=3, defense_points=4
     )
+
+
+class TestModes:
+    def test_preset_then_overrides(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "c.toml"
+        cfg.write_text('[rules]\nmode = "quick"\nmax_attempts = 2\nsolve_points = 3\n')
+        rules = load_settings(cfg, env={}).rules
+        assert (rules.mode, rules.rounds, rules.max_attempts, rules.scoring.solve_points) == ("quick", 1, 2, 3)
+
+    def test_env_mode(self) -> None:
+        assert load_settings(None, env={"DUEL_MODE": "gated"}).rules.difficulty_gate
+
+    def test_unknown_mode_lists_known(self) -> None:
+        with pytest.raises(ConfigError, match="known: classic, gated, quick"):
+            load_settings(None, env={"DUEL_MODE": "nope"})
+
+    def test_presets_are_valid_rules_named_after_themselves(self) -> None:
+        assert all(r.mode == name for name, r in MODES.items())
