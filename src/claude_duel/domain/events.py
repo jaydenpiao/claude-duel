@@ -54,6 +54,7 @@ class _Payload(BaseModel):
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
     framing_text: str = ""  # absent before framings
+    created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
@@ -262,7 +263,13 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         raise EventLogCorruptError("event log does not start with match_created")
     p = cast(MatchCreated, payload(created))
     return MatchState(
-        match_id=match_id, seed=p.seed, framing_text=p.framing_text, agents=p.agents, rules=p.rules, limits=p.limits
+        match_id=match_id,
+        seed=p.seed,
+        framing_text=p.framing_text,
+        created_seq=p.created_seq,
+        agents=p.agents,
+        rules=p.rules,
+        limits=p.limits,
     )
 
 
