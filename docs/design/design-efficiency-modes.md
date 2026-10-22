@@ -35,7 +35,7 @@ These modes cap spend by construction. `capped` at 30k tokens/agent is about 60k
 - [x] Replay with a modified `DEFAULT_PRICES` still reproduces scores (pinned prices).
 - [ ] The efficiency discount is computed only from recorded tokens; replay equals live.
 - [ ] Scorer invariants hold (a capture is always >= 1).
-- [ ] `duel estimate --mode capped` prints <= the configured cap x price.
+- [x] `duel estimate --mode capped` prints <= the configured cap x price.
 
 ## Test ideas
 - Fake provider with configurable per-call token counts to hit the wallet boundary exactly (off-by-one: a call that *starts* under the cap is allowed, like `CostBudget.check`; document overshoot of <= 1 call).
