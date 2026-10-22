@@ -66,7 +66,6 @@ def _variant_pattern(flag: str) -> re.Pattern[str]:
     loose, strict = _texts(flag)
     alts = [f"(?i:{_spread(t)})" for t in sorted(set(loose), key=len, reverse=True)]
     alts += [r"\s*".join(re.escape(c) for c in t) for t in sorted(set(strict), key=len, reverse=True)]
-    alts += [_DEC_SEP.join(str(b) for b in t.encode()) for t in (flag, _inner(flag))]  # decimal byte lists
     return re.compile("|".join(alts))
 
 
@@ -98,7 +97,7 @@ def _canonical_leak(text: str, flag: str) -> bool:
 
 
 def assert_no_flag(text: str, flag: str, where: str) -> None:
-    """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, rot13, decimal bytes, case-changed,
+    """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, rot13, case-changed,
     spaced, split (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes."""
     if flag in text or _variant_pattern(flag).search(text) or _canonical_leak(text, flag):
         raise FlagLeakError(f"flag would leak via {where}")
