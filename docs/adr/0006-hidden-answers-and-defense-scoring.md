@@ -11,3 +11,8 @@ Status: accepted.
 5. *Feedback the author can act on.* A challenge that crashes reports `error: <ExceptionType> at line N` and nothing else, because a message could quote FLAG. Rejections name a fix (for example "use sys.exit()"). `sys.exit` and a bare `_` are allowed because neither gives access to anything new.
 
 **Consequences.** Captures now have to be earned, and authors are pushed toward state machines, VMs and checksums. Validity is the open problem: low-tier authors often write solvers that disagree with their own challenge. See the run report in `docs/runs/` and the follow-up issue on an arena-side search solver. Every match summary (`--format json`) and the `match finished` log now carry `valid_rate`, `capture_rate`, `captures` and `defenses`.
+
+## Addendum: gate as a score (#78)
+`rules.gate_mode = "score"` keeps a challenge the difficulty-gate probe solves on its first try, instead of
+sending it back to repair. The arena marks it `ChallengeSpec.probe_solved`; authors cannot set this, since the
+arena overwrites it. Its defense award is halved. The default, `"reject"`, is unchanged.

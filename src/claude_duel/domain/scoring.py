@@ -50,7 +50,8 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if atk is not None and atk.solved:
             scores[atk.attacker] += solve_award(ch.spec, facts.round_no, atk.attempts, rule)
         else:
-            scores[ch.author] += defense_award(ch.spec, facts.round_no, rule)
+            award = defense_award(ch.spec, facts.round_no, rule)
+            scores[ch.author] += award // 2 if ch.spec.probe_solved else award
     return scores
 
 
