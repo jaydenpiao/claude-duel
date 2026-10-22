@@ -23,6 +23,7 @@ class SeriesRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     games: int = Field(default=3, ge=1, le=9, description="best of N (odd)")
     series_max_usd: float = Field(default=2.0, gt=0, description="checked against played games before each game")
+    sudden_death: bool = Field(default=True, description="a tied game is decided by one extra 1-round match")
 
     @field_validator("games")
     @classmethod
@@ -39,6 +40,7 @@ class Game(BaseModel):
     winner: str | None
     scores: dict[str, int]
     usd: float = 0.0
+    sudden_death: str = ""  # match id of the 1-round decider played after a tie ("" when none)
 
 
 class SeriesState(BaseModel):
@@ -97,13 +99,18 @@ def game_winner(state: MatchState) -> str | None:
     return None
 
 
-def game_of(game_no: int, state: MatchState) -> Game:
+def game_of(game_no: int, state: MatchState, decider: MatchState | None = None) -> Game:
+    """The game's record; a tie is settled by ``decider`` (the sudden-death match) when one was played."""
+    winner = game_winner(state)
+    if winner is None and decider is not None:
+        winner = game_winner(decider)
     return Game(
         game_no=game_no,
         match_id=state.match_id,
-        winner=game_winner(state),
+        winner=winner,
         scores=state.final_scores(),
-        usd=state.usage.usd,
+        usd=state.usage.usd + (decider.usage.usd if decider is not None else 0.0),
+        sudden_death=decider.match_id if decider is not None else "",
     )
 
 
