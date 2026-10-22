@@ -40,12 +40,32 @@ def docker_probe(docker: Sequence[str]) -> str | None:
     return None
 
 
+def docker_runtimes(docker: Sequence[str]) -> frozenset[str]:
+    """Runtime names the daemon has registered (e.g. runc, runsc); empty when it can't be asked."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed arena argv
+            [*docker, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return frozenset()
+    return frozenset(proc.stdout.split()) if proc.returncode == 0 else frozenset()
+
+
 class DockerSandbox:
     def __init__(
-        self, docker: Sequence[str] = ("docker",), image: str = DEFAULT_IMAGE, name_prefix: str = "duel-"
+        self,
+        docker: Sequence[str] = ("docker",),
+        image: str = DEFAULT_IMAGE,
+        name_prefix: str = "duel-",
+        runtime: str | None = None,
     ) -> None:
         self._docker = tuple(docker)
         self._image = image
+        self._runtime = runtime  # e.g. "runsc" for gVisor (ADR 0011); None = the daemon default
         self._prefix = name_prefix  # containers are named <prefix><random>; tests use a per-run prefix
 
     def health(self) -> str | None:
@@ -61,8 +81,9 @@ class DockerSandbox:
     def argv(self, name: str, limits: SandboxLimits) -> list[str]:
         """Container argv. Carries neither the flag nor the source: both go over stdin."""
         mem = f"{limits.memory_mb}m"
+        runtime = ["--runtime", self._runtime] if self._runtime else []
         return [
-            *self._docker, "run", "--rm", "-i", "--pull", "never", "--name", name,
+            *self._docker, "run", "--rm", "-i", "--pull", "never", "--name", name, *runtime,
             "--network", "none",
             "--read-only",
             "--tmpfs", "/tmp:size=1m,noexec,nosuid,nodev",  # noqa: S108 - container-private tmpfs

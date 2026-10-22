@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 from claude_duel.adapters.sandbox.common import execute
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
+from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.runner import frame
 from claude_duel.app.container import make_sandbox
 from claude_duel.config import Settings
@@ -138,3 +138,17 @@ def test_cpu_seconds_limit(sb: DockerSandbox) -> None:
     r = sb.run("while True:\n    pass\n", "", FLAG, LIM.model_copy(update={"cpu_seconds": 1, "wall_seconds": 10}))
     assert not r.timed_out
     assert r.killed_reason == "signal"
+
+
+def test_runsc_runtime_runs_hardened(docker_cmd: tuple[str, ...]) -> None:
+    if "runsc" not in docker_runtimes(docker_cmd):
+        pytest.skip("gVisor runsc runtime not registered")
+    gv = DockerSandbox(docker_cmd, name_prefix=PREFIX, runtime="runsc")
+    lim = LIM.model_copy(update={"pids_limit": 32})  # the host pids cgroup also counts gVisor's own threads
+    assert gv.health() is None
+    r = gv.run("import sys\nif sys.stdin.read() == 'go':\n    print(FLAG)", "go", FLAG, lim)
+    assert r.stdout.strip() == FLAG
+    assert gv.run("while True: pass", "", FLAG, lim).killed_reason is not None
+    bomb = "import os\nwhile True:\n    os.fork()"
+    assert FLAG not in gv.run(bomb, "", FLAG, lim).stdout
+    assert _leftover(docker_cmd) == ""

@@ -12,7 +12,7 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - `common.py:execute`: the single process runner (own process group, wall timeout, streamed output cap, group kill + `cleanup` after every run). Reuse it; don't fork it.
 - `runner.py`: in-sandbox loader; flag, source and rlimits go over stdin (`frame`), never argv/env.
 - `subprocess_sandbox.py`: rlimits (CPU, AS, FSIZE=0, NOFILE=16, NPROC=1), `python -I -S`, read-only temp dir, minimal env. Fake provider only; not a hard boundary.
-- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it; real-model matches fail closed without it. Tests: `tests/integration/test_docker_sandbox.py`.
+- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it; real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. Tests: `tests/integration/test_docker_sandbox.py`.
 - Never pass the host env through; the child env is only a minimal PATH.
 
 ## store/
