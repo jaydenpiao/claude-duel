@@ -178,7 +178,8 @@ class MatchEngine:
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: wallet, then budget caps (strictest wins), call, charge, checkpoint."""
-        allowance.check(state, agent)
+        if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (arch r3 #8)
+            allowance.check(state, agent)
         self._budget.check(state)
         if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
             raise DeadlineExceededError(

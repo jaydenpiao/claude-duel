@@ -13,7 +13,7 @@ from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
-from claude_duel.adapters.store.file_store import FileMatchStore
+from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
@@ -78,6 +78,12 @@ def build_store(settings: Settings) -> FileMatchStore:
 
 def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
+
+
+def build_driver_lock(settings: Settings, log_id: str, kind: str) -> FileLock:
+    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (arch r3 #6)."""
+    settings.store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return FileLock(settings.store_dir / f"{log_id}.{kind}.lock")
 
 
 def build_series_log(settings: Settings) -> FileEventLog:
