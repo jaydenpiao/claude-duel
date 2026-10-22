@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from claude_duel.app.container import build_tournament_log
+from claude_duel.app.container import build_budget, build_tournament_log
 from claude_duel.app.series import play_series
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
@@ -27,6 +27,7 @@ def play_tournament(
         events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=tr.TOURNAMENT_CREATED, trace_id=tournament_id, data=data)]
         log.append(tournament_id, events[0])
     state = tr.fold(tournament_id, events)
+    budget = build_budget(settings)  # R3-1: run caps span the whole tournament
     specs = {e.name: e for e in state.rule.entrants}
     while (nxt := state.next_pair()) is not None:
         if state.spent_usd() >= state.rule.tournament_max_usd:
@@ -39,7 +40,7 @@ def play_tournament(
             pair_settings = settings.model_copy(
                 update={"agents": (specs[a], specs[b]), "seed": game_seed(state.seed, len(state.pairings) + 1)}
             )
-            series = play_series(pair_settings, sid, state.rule.series, metrics)
+            series = play_series(pair_settings, sid, state.rule.series, metrics, budget=budget)
             if not series.done():
                 return state  # a failed game: rerun to resume
             pairing = tr.Pairing(
