@@ -20,7 +20,7 @@ Depends on: design-rules-abstraction.md (`Rules.token_cap`, scorer `efficiency`)
 
 ## Built (#35, first PR)
 - `capped` (token or $ wallets, strictest wins, `app/allowance.py`) and `efficiency` scored on recorded tokens (`scoring.efficiency`).
-- Not yet: the `usd` unit with prices pinned in `match_created`, and `CompletionRequest.max_output_tokens`.
+- Second PR: `ScoringRule.unit = "usd"` scores recorded `usd_micros` (on each `AttackAttempt`/`Attack`; the price is pinned by recording the charge rather than in `match_created`, so replay never re-prices), and `WalletRule.max_output_tokens` caps `CompletionRequest.max_tokens` (the existing field) per call. Default unit stays `tokens` so existing matches keep their meaning; no warning yet when wallets sum above `match_max_usd`.
 
 ## Fit
 - Agent wallets live in the existing `Usage` model, per agent (`MatchState.usage_by_agent`, folded from `call_charged.agent`, which is already in the event).
@@ -32,7 +32,7 @@ These modes cap spend by construction. `capped` at 30k tokens/agent is about 60k
 ## Acceptance criteria
 - [ ] An agent with an empty wallet makes no further calls (assert the fake provider call count).
 - [ ] Strictest-wins: with wallet > match cap, the match cap stops the agent; with wallet < match cap, the wallet does, and the error names the limit hit.
-- [ ] Replay with a modified `DEFAULT_PRICES` still reproduces scores (pinned prices).
+- [x] Replay with a modified `DEFAULT_PRICES` still reproduces scores (pinned prices).
 - [ ] The efficiency discount is computed only from recorded tokens; replay equals live.
 - [ ] Scorer invariants hold (a capture is always >= 1).
 - [x] `duel estimate --mode capped` prints <= the configured cap x price.

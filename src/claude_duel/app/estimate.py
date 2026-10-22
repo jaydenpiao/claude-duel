@@ -23,8 +23,9 @@ class Estimate:
 def estimate(rules: Rules, model: str, limits: BudgetLimits) -> Estimate:
     """Worst-case calls and tokens for one match, priced at ``DEFAULT_PRICES[model]``; no API calls."""
     pin, pout = DEFAULT_PRICES[model]
-    per_call_usd = (IN_TOKENS * pin + OUT_TOKENS * pout) / 1_000_000
-    per_call_tokens = IN_TOKENS + OUT_TOKENS
+    out = min(OUT_TOKENS, rules.wallet.max_output_tokens or OUT_TOKENS)
+    per_call_usd = (IN_TOKENS * pin + out * pout) / 1_000_000
+    per_call_tokens = IN_TOKENS + out
     builds = 1 + rules.max_format_retries + (1 if rules.difficulty_gate else 0)
     calls = min(rules.rounds * 2 * rules.challenges_per_round * (builds + rules.max_attempts), limits.match_max_calls)
     bounds = [(calls * per_call_tokens, "rules"), (limits.match_max_tokens, "match cap")]

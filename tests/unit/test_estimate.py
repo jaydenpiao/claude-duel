@@ -42,6 +42,8 @@ def test_usd_wallet_and_small_rules_bind() -> None:
     quick = estimate(preset("quick"), MODEL, BudgetLimits())
     assert quick.bound == "rules"
     assert estimate(preset("quick"), "fake-1", BudgetLimits()).usd == 0
+    short = estimate(Rules(mode="quick", rounds=1, wallet=WalletRule(max_output_tokens=100)), MODEL, BudgetLimits())
+    assert short.usd < estimate(Rules(mode="quick", rounds=1), MODEL, BudgetLimits()).usd
 
 
 def test_cli_prints_a_row_per_mode(capsys: pytest.CaptureFixture[str]) -> None:
