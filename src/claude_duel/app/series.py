@@ -78,6 +78,14 @@ def play_series(
     return state
 
 
+def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None, log_id: str) -> Settings:
+    """Settings with the rules and limits pinned when the series/tournament was created; warns on config drift."""
+    rules, limits = rules or settings.rules, limits or settings.limits
+    if (rules, limits) != (settings.rules, settings.limits):
+        log(_LOG, logging.WARNING, "config differs from the saved series; resuming with the saved rules", id=log_id)
+    return settings.model_copy(update={"rules": rules, "limits": limits})
+
+
 @dataclass(frozen=True)
 class SpendCap:
     """R3-4: a spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""

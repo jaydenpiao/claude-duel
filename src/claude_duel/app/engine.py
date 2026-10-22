@@ -13,7 +13,7 @@ from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, memory, policy, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
+from claude_duel.domain.flags import assert_no_flag, flag_of, redact
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -162,6 +162,7 @@ class MatchEngine:
         An event that can't be applied never reaches the log, so it can't poison resume or replay.
         """
         event = Event(v=ev.SCHEMA_VERSION, seq=state.last_seq + 1, type=kind, trace_id=current_trace_id(), data=data)
+        self._no_flags(state, event)
         ev.apply(state.model_copy(deep=True), event)
         self._log.append(state.match_id, event)
         ev.apply(state, event)
@@ -223,7 +224,10 @@ class MatchEngine:
                     spec, reason = self._author(state, cid, agent.name, index)
                 except WalletEmptyError as exc:
                     spec, reason = None, str(exc)
-                ch = Challenge(id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason)
+                epoch = len(state.build_errors.get(cid, []))
+                ch = Challenge(
+                    id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason, flag_epoch=epoch
+                )
                 self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
     def _author(self, state: MatchState, cid: str, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
@@ -298,8 +302,28 @@ class MatchEngine:
             spec, problem = self._gate(state, cid, spec)
         policy_reason = problem if problem and policy.reason_code(problem) != "other" else None
         hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
-        self._flag(state, hits, derive_flag(state.secret, cid))
+        self._flag(state, hits, self._flag_for(state, cid))
         return spec, problem
+
+    @staticmethod
+    def _no_flags(state: MatchState, event: Event) -> None:
+        """R3-2 invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
+        if not state.secret:
+            return
+        body = event.model_dump_json()
+        cids = set(state.challenges) | set(state.build_errors)
+        if isinstance(cid := event.data.get("challenge_id"), str):
+            cids.add(cid)
+        for cid in sorted(cids):
+            for epoch in range(len(state.build_errors.get(cid, [])) + 1):
+                assert_no_flag(body, flag_of(state.secret, cid, epoch), f"event {event.type}")
+
+    @staticmethod
+    def _flag_for(state: MatchState, cid: str) -> str:
+        """The challenge's flag. Before it is built, each repair try gets a fresh one (R3-2), so anything a
+        rejected try leaked names a dead flag; the built challenge keeps the flag of the try that produced it."""
+        ch = state.challenges.get(cid)
+        return flag_of(state.secret, cid, ch.flag_epoch if ch else len(state.build_errors.get(cid, [])))
 
     def _flag(self, state: MatchState, hits: list[Finding], flag: str) -> None:
         for hit in hits:
@@ -312,7 +336,7 @@ class MatchEngine:
         """Pure summary of the rounds before this one; checked against every flag of the match first."""
         text = memory.summarize(state, agent, state.round - 1, state.rules.memory)
         for cid in state.challenges:
-            assert_no_flag(text, derive_flag(state.secret, cid), "memory")
+            assert_no_flag(text, self._flag_for(state, cid), "memory")
         return text
 
     @staticmethod
@@ -324,7 +348,7 @@ class MatchEngine:
         note = agents.parse_notes(text) if self._scratch(state) else ""
         if not note:
             return
-        flags = tuple(derive_flag(state.secret, cid) for cid in state.challenges)
+        flags = tuple(self._flag_for(state, cid) for cid in state.challenges)
         note = redact(note, flags)
         for f in flags:
             assert_no_flag(note, f, "note")
@@ -343,7 +367,7 @@ class MatchEngine:
             return spec, None
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
         completion = self._call(state, GATE, self._request(state, prompt, "attack"))
-        solved = self._attempt(state, GATE, spec, derive_flag(state.secret, cid), completion).captured
+        solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
             return spec.model_copy(update={"probe_solved": True}), None
@@ -366,11 +390,15 @@ class MatchEngine:
                 "cpu_seconds": lim.cpu_seconds * SOLVER_TIME_FACTOR,
             }
         )
-        out = self._run_challenge(program, "", derive_flag(state.secret, cid), state, "solve_reference", slow)
+        out = self._run_challenge(program, "", self._flag_for(state, cid), state, "solve_reference", slow)
         payload = out.stdout.strip()
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
-            return spec, f"solver failed ({status}); it printed {payload[:REF_OUTPUT_CHARS]!r}"
+            flag = self._flag_for(state, cid)
+            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # R3-2: the solver runs with the real flag
+            reason = f"solver failed ({status}); it printed {seen!r}"
+            assert_no_flag(reason, flag, "solver failure")
+            return spec, reason
         return spec.model_copy(update={"reference_payload": payload}), None
 
     def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
@@ -380,7 +408,7 @@ class MatchEngine:
         rejected = policy.check(spec, state.rules.max_source_bytes(round_no))
         if rejected:
             return rejected
-        flag = derive_flag(state.secret, cid)
+        flag = self._flag_for(state, cid)
         ref = self._run_challenge(spec.source, spec.reference_payload, flag, state, "validate")
         if flag not in ref.stdout:
             seen = redact(ref.stdout, (flag,)).strip()[:REF_OUTPUT_CHARS]
@@ -411,7 +439,7 @@ class MatchEngine:
         """Attempts are checkpointed one by one; a resumed attack replays history instead of re-paying."""
         spec = ch.spec
         assert spec is not None, "only valid challenges are attacked"
-        flag = derive_flag(state.secret, ch.id)
+        flag = self._flag_for(state, ch.id)
         while True:
             history = state.attempts.get(key, [])
             tokens = sum(a.tokens for a in history)

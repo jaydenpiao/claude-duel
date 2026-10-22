@@ -25,6 +25,11 @@ def derive_flag(secret: str, challenge_id: str) -> str:
     return f"DUEL{{{digest[:32]}}}"
 
 
+def flag_of(secret: str, cid: str, epoch: int = 0) -> str:
+    """Flag of challenge ``cid`` built on repair try ``epoch`` (R3-2); epoch 0 is the original derivation."""
+    return derive_flag(secret, cid if epoch == 0 else f"{cid}~{epoch}")
+
+
 def _inner(flag: str) -> str:
     m = re.fullmatch(r"DUEL\{(.+)\}", flag)
     return m.group(1) if m else flag
