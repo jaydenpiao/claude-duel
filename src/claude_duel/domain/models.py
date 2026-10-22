@@ -101,8 +101,21 @@ class MemoryRule(_Frozen):
     """Between-round memory (#19): what each agent is shown about earlier rounds (domain/memory.py)."""
 
     kind: Literal["none", "summary", "summary+scratchpad"] = "none"
-    max_chars: int = Field(default=3000, ge=200, le=20_000)  # about 750 tokens
-    source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
+    max_tokens: int = Field(default=1200, ge=100, le=8000)  # whole block, by memory.est_tokens
+    source_tokens: int = Field(default=800, ge=0, le=5000)  # shared by all revealed opponent sources
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_chars(cls, data: Any) -> Any:
+        """Logs and configs before the token budget had ``max_chars``/``source_chars``; 4 bytes is one token."""
+        if not isinstance(data, dict) or not {"max_chars", "source_chars"} & data.keys():
+            return data
+        data = dict(data)
+        if "max_chars" in data:
+            data.setdefault("max_tokens", max(100, min(8000, data.pop("max_chars") // 4)))
+        if "source_chars" in data:
+            data.setdefault("source_tokens", min(5000, data.pop("source_chars") // 4))
+        return data
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match

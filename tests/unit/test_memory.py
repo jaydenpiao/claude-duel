@@ -67,12 +67,13 @@ def test_summary_replays_identically(make_engine, new_state, event_log) -> None:
 
 
 @settings(max_examples=25, deadline=None)
-@given(st.integers(200, 4000), st.integers(0, 800))
-def _cap_property(max_chars: int, source_chars: int) -> None:
+@given(st.integers(100, 1500), st.integers(0, 900))
+def _cap_property(max_tokens: int, source_tokens: int) -> None:
     state = _CACHE["state"]
-    rule = MemoryRule(kind="summary", max_chars=max_chars, source_chars=source_chars)
+    assert isinstance(state, MatchState)
+    rule = MemoryRule(kind="summary", max_tokens=max_tokens, source_tokens=source_tokens)
     text = memory.summarize(state, "alice", 3, rule)
-    assert 0 < len(text) <= max_chars
+    assert 0 < memory.est_tokens(text) <= max_tokens
     if memory.OMITTED in text:
         assert text.index(memory.OMITTED) == 0  # oldest rounds go first
 
