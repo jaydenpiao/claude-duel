@@ -14,6 +14,7 @@ from claude_duel.domain import policy
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import (
+    CAPTURED,
     Attack,
     AttackAttempt,
     Challenge,
@@ -38,7 +39,6 @@ from claude_duel.ports import (
 )
 
 _LOG = logging.getLogger(__name__)
-CAPTURED = "<flag captured>"
 MALFORMED = "<malformed>"
 
 
@@ -219,7 +219,7 @@ class MatchEngine:
         while True:
             history = state.attempts.get(key, [])
             tokens = sum(a.tokens for a in history)
-            if history and history[-1].output == CAPTURED:
+            if history and history[-1].captured:
                 return Attack.of(ch.id, attacker, history, solved=True, reason="flag captured")
             if len(history) >= state.rules.max_attempts:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")

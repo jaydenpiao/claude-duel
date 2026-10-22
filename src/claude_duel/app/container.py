@@ -10,7 +10,7 @@ from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
-from claude_duel.adapters.store.event_log import FileEventLog
+from claude_duel.adapters.store.event_log import FileEventLog, ObservedEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import CostBudget, check_model_allowed
@@ -19,7 +19,7 @@ from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
 from claude_duel.observability import log
-from claude_duel.ports import LLMProvider, Metrics, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, Sandbox
 
 _LOG = logging.getLogger(__name__)
 
@@ -60,6 +60,10 @@ def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
 
 
+def build_ledger(settings: Settings) -> FileSpendLedger:
+    return FileSpendLedger(settings.store_dir / "ledger.jsonl")
+
+
 def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
     """Agents with their effective model written in, so a saved match never depends on later config."""
     a, b = (agent.model_copy(update={"model": settings.model_for(agent)}) for agent in settings.agents)
@@ -67,7 +71,11 @@ def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
 
 
 def build_engine(
-    settings: Settings, metrics: Metrics, store: FileMatchStore, agents: tuple[AgentSpec, AgentSpec]
+    settings: Settings,
+    metrics: Metrics,
+    store: FileMatchStore,
+    agents: tuple[AgentSpec, AgentSpec],
+    observer: EventObserver | None = None,
 ) -> MatchEngine:
     """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps."""
     for agent in agents:
@@ -76,8 +84,8 @@ def build_engine(
         {a.name: make_provider(a, settings, metrics) for a in agents},
         make_sandbox(settings, agents),
         store,
-        build_event_log(settings),
+        ObservedEventLog(build_event_log(settings), observer) if observer else build_event_log(settings),
         metrics,
-        CostBudget(settings.budget, FileSpendLedger(settings.store_dir / "ledger.jsonl"), settings.prices),
+        CostBudget(settings.budget, build_ledger(settings), settings.prices),
         {a.name: settings.model_for(a) for a in agents},
     )

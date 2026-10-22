@@ -30,8 +30,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "--match-id", "e2e"]) == 0
-    assert "match e2e: complete after round 2" in capsys.readouterr().out
-    assert main(["resume", "e2e"]) == 0  # resuming a complete match is a no-op
+    out = capsys.readouterr().out
+    assert "alice (fake-1) vs bob (fake-1)" in out
+    assert "winner: " in out
+    assert out.rstrip().endswith("replay verified ✓")
+    assert main(["resume", "e2e", "--format", "json"]) == 0  # resuming a complete match is a no-op
+    summary = json.loads(capsys.readouterr().out)
+    assert (summary["match_id"], summary["stage"], summary["round"]) == ("e2e", "complete", 2)
+    assert summary["est_usd"] == 0
     assert main(["replay", "e2e", "--transcript"]) == 0
     out = capsys.readouterr().out
     assert "replay consistent=True" in out
@@ -128,4 +134,5 @@ def test_live_openai_tiny_match(
     out = capsys.readouterr().out
     print(out)
     assert code == 0
-    assert "complete" in out
+    assert "replay verified ✓" in out
+    assert "of $50 burned" in out
