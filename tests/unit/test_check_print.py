@@ -43,3 +43,11 @@ def test_wrapper_never_calls_print_and_still_composes() -> None:
 def test_plain_helpers_still_pass() -> None:
     source = "def helper(x):\n    return x * 2\n\ndef check(s):\n    v = helper(len(s))\n    return v == 10\n"
     assert contract.compose(source)[1] is None
+
+
+def test_feedback_wrapper_never_calls_print() -> None:
+    assert "print" not in contract.FEEDBACK_WRAPPER
+    composed, problem = contract.compose(CHECK)
+    assert problem is None
+    fed = contract.with_feedback(composed)
+    assert fed.endswith(contract.FEEDBACK_WRAPPER)

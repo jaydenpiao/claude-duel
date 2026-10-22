@@ -22,6 +22,7 @@ from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.presentation.common import (
     MatchFold,
+    agent_cost,
     attempt_view,
     board,
     defense,
@@ -76,6 +77,7 @@ class Player:
     model: str
     score: int = 0
     rounds: list[int] = field(default_factory=list)
+    cost: str = ""  # live tokens in/out and $ (common.agent_cost)
 
 
 @dataclass
@@ -133,6 +135,11 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         now = Table.grid()
         now.add_row(spinner, Text(f" {m.now}", no_wrap=True, overflow="ellipsis"))
     parts: list[RenderableType] = [header, sub, Text(""), _player_rows(m, bar), _tug_line(m, width), Text("")]
+    parts.extend(
+        Text(f"{p.name}: {p.cost}", style=f"dim {COLORS[i % len(COLORS)]}", no_wrap=True, overflow="ellipsis")
+        for i, p in enumerate(m.players)
+        if p.cost
+    )
     parts.append(now)
     if m.flash:
         parts.append(Text(m.flash, style="bold", no_wrap=True, overflow="ellipsis"))
@@ -191,6 +198,7 @@ class ArenaView(MatchFold):
         m.round, m.rounds = s.round, s.rules.rounds
         for p in m.players:
             p.score = s.scores.get(p.name, 0)
+            p.cost = agent_cost(s, p.name)
         m.spend = spend(s, self._lifetime(), self._key_limit)
 
     def _created(self, s: MatchState, e: Event) -> None:

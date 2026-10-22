@@ -118,7 +118,16 @@ class Rules(_Frozen):
         default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
     )
     retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
+    retry_feedback: bool = Field(
+        default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
+    )
     attack_token_budget: int = Field(default=20_000, ge=1)
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
+    )
+    max_output_tokens: int = Field(
+        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; same for every agent"
+    )
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
@@ -231,6 +240,9 @@ class Usage(BaseModel):
     calls: int = 0
     tokens: int = 0
     usd: float = 0.0
+    input_tokens: int = 0  # split of ``tokens`` (0 for logs before the split was recorded)
+    output_tokens: int = 0
+    reasoning_tokens: int = 0  # part of output_tokens: thinking/reasoning, billed as output
     clock_tokens: int = 0  # token-clock charge (#36): output + input // clock.input_divisor, per agent
     elapsed_ms: int = 0  # recorded provider time; the match deadline is measured on it, so resume keeps it
 

@@ -13,6 +13,7 @@ MODES: dict[str, Rules] = {
         variety=True,
         early_bonus_attempts=2,
         retry_hint=True,
+        retry_feedback=True,
     ),
     # Scored modes (#67) run on a token clock, so provider latency never decides a result; the wall-clock
     # match_deadline_s stays only as a safety backstop that fails (never scores) a match.
