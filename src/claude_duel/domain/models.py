@@ -243,6 +243,9 @@ class Usage(BaseModel):
     calls: int = 0
     tokens: int = 0
     usd: float = 0.0
+    input_tokens: int = 0  # split of ``tokens`` (0 for logs before the split was recorded)
+    output_tokens: int = 0
+    reasoning_tokens: int = 0  # part of output_tokens: thinking/reasoning, billed as output
     clock_tokens: int = 0  # token-clock charge (#36): output + input // clock.input_divisor, per agent
     elapsed_ms: int = 0  # recorded provider time; the match deadline is measured on it, so resume keeps it
 
