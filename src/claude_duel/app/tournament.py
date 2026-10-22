@@ -23,6 +23,16 @@ from claude_duel.domain.series import game_seed
 from claude_duel.ports import Metrics
 
 
+def series_id(settings: Settings, tid: str, round_no: int, names: list[str], pair: tuple[str, str]) -> str:
+    """``<tid>-r<n>-p<i>v<j>`` from entrant indexes (arch round 3 #4: names like ``x_y``/``x-y`` or ``a-b``/``b-c``
+    collided). A series already started under the old name-based id keeps that id so it resumes."""
+    a, b = pair
+    legacy = f"{tid}-r{round_no}-{a}-{b}".replace("_", "-")
+    if build_series_log(settings).read(legacy):
+        return legacy
+    return f"{tid}-r{round_no}-p{names.index(a)}v{names.index(b)}"
+
+
 def play_tournament(
     settings: Settings, tournament_id: str, rule: tr.TournamentRule, metrics: Metrics
 ) -> tr.TournamentState:
@@ -53,7 +63,7 @@ def play_tournament(
         if b == tr.BYE:
             pairing = tr.Pairing(round=round_no, a=a, b=b, winner=a)
         else:
-            sid = f"{tournament_id}-r{round_no}-{a}-{b}".replace("_", "-")
+            sid = series_id(settings, tournament_id, round_no, state.names(), (a, b))
             pair_settings = settings.model_copy(
                 update={"agents": (specs[a], specs[b]), "seed": game_seed(state.seed, len(state.pairings) + 1)}
             )
