@@ -21,7 +21,7 @@ from claude_duel.domain.models import (
 from claude_duel.domain.scoring import add_scores, score_round
 from claude_duel.domain.state_machine import next_stage, transition
 
-SRC = 'import os\nimport sys\nif sys.stdin.read() == "x":\n    print(os.environ["FLAG"])\n'
+SRC = 'import sys\nif sys.stdin.read() == "x":\n    print(FLAG)\n'
 
 
 def spec(source: str = SRC, difficulty: int = 1) -> ChallengeSpec:
@@ -93,7 +93,7 @@ class TestPolicy:
             ("import socket\n", "import not allowed"),
             ("from subprocess import run\n", "import not allowed"),
             ("eval('1')\n", "banned name"),
-            ("import os\nos.system('id')\n", "banned attribute"),
+            ("import os\nos.system('id')\n", "import not allowed"),
             ("x = ().__class__\n", "banned attribute"),
             ("def (:\n", "syntax error"),
             ("x = 'DUEL{" + "a" * 32 + "}'\n", "flag-shaped"),

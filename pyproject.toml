@@ -40,8 +40,10 @@ mypy_path = "src"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m \"not live\" --cov=claude_duel --cov-report=term-missing --cov-fail-under=90"
-markers = ["live: hits a real provider (skipped without API key)"]
+markers = [
+  "live: hits a real provider (skipped without API key)",
+  "docker: needs a reachable Docker daemon (skipped otherwise)",
+]
 
 [tool.coverage.run]
 branch = true
-omit = ["*/docker_sandbox.py"]

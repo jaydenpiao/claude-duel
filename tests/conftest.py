@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.adapters.sandbox.docker_sandbox import docker_probe
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
@@ -60,3 +63,14 @@ def make_engine(store: FileMatchStore, store_root: Path) -> Callable[..., MatchE
         )
 
     return make
+
+
+@pytest.fixture(scope="session")
+def docker_cmd() -> tuple[str, ...]:
+    """A working docker CLI (DUEL_DOCKER, plain docker, or passwordless sudo); skips the test otherwise."""
+    candidates = [tuple(shlex.split(os.environ["DUEL_DOCKER"]))] if os.environ.get("DUEL_DOCKER") else []
+    candidates += [("docker",), ("sudo", "-n", "docker")]
+    for cmd in candidates:
+        if docker_probe(cmd) is None:
+            return cmd
+    pytest.skip("docker daemon not reachable")
