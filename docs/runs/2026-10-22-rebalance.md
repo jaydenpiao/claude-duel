@@ -2,7 +2,7 @@
 
 Checked mode with variety, `gate_mode = "score"`, and the #98 rebalance
 (2 extra attack tries early on, retry hint). 3 rounds, cap $0.25, spend $0.2092.
-rm = gpt-4.1-mini vs mini, rk = nano vs mini.
+rm = mini vs mini, rk = nano vs mini.
 
 | Match | Valid | Captures a/b | Defenses a/b | Both |
 |---|---|---|---|---|
