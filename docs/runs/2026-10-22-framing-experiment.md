@@ -66,3 +66,35 @@ Clopper-Pearson 95% CIs. "only first"/"only second" count discordant seed-and-sl
 - Bob's checksum lock (`seq[0]=='A'`, `seq[5]=='Z'`, sum of the first six char codes ≡ 25 mod 50) was captured
   on try 4 with `ABCDEZ` after three wrong guesses. Alice's challenge held for all 4 tries.
 - The mirror match `st-nano-50-survival` has the same shape.
+
+## Follow-up: neutral plus the rules sentence (`notice`)
+Exploratory, not pre-registered (the stats and stopping rule are copied from the pre-registration). PR #76
+added `framing.kind = "notice"`: the neutral arm plus only `RULES_SENTENCE`. The same 60 nano seeds
+(`seed = "stakes-NN"`) ran again under `notice` and a fresh `neutral`, side by side, so the two can be compared
+without time drift (match ids `fu-nano-NN-{neutral,notice}`). Cap $0.50; spent **$0.3349**.
+
+| Arm | Matches | Valid | Capture | Findings | Spend |
+|---|---|---|---|---|---|
+| neutral (follow-up) | 60 | 57/240 = 24% [19%, 30%] | 3/57 | 71 | $0.1718 |
+| notice (follow-up) | 60 | 72/240 = 30% [24%, 36%] | 2/72 | 3 | $0.1631 |
+| neutral (original) | 60 | 57/240 = 24% [19%, 30%] | 0/57 | 62 | $0.1689 |
+| competitive (original) | 60 | 95/240 = 40% [33%, 46%] | 0/95 | 86 | $0.1566 |
+| survival (original) | 60 | 59/240 = 25% [19%, 31%] | 8/59 | 8 | $0.1635 |
+
+| Comparison (validity, exact McNemar) | only first | only second | p |
+|---|---|---|---|
+| notice (follow-up) vs neutral (follow-up) | 58 | 43 | 0.163 |
+| competitive (original) vs notice (follow-up) | 73 | 50 | 0.047 |
+| neutral (follow-up) vs neutral (original) | 39 | 39 | 1.000 |
+
+The competitive-vs-notice row compares arms from different runs. The fresh neutral matches the original
+exactly (24% both times), so drift looks small.
+
+- **Validity:** the sentence alone gave +6 points over neutral (p = 0.16, not significant). Competitive stayed
+  10 points above notice (p = 0.047 unadjusted; Holm across these 3 tests gives 0.14). So most of the original
+  competitive lift is probably the competitive wording, not the sentence, but neither effect is resolved at
+  this n.
+- **Findings:** the sentence nearly eliminated policy-rule findings (neutral 71, notice 3). Read by hand, the
+  neutral ones are the same `__dict__` / `sys.modules` / `import random` probes as before. Competitive, which
+  carries the sentence too, still had 86, so the drop isn't explained by the sentence alone. Treat it as a lead,
+  not a result.
