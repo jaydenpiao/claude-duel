@@ -1,8 +1,9 @@
 """Ratings (#39): Elo for display and Bradley-Terry with bootstrap CIs as the reported number. Pure, offline.
 
 An entrant is ``provider:model`` (fake agents also carry their skill, since they share one model name).
-Each completed match is one result, decided like a series game (``series.game_winner``). Elo folds results
-in ``match_id`` order (documented; Elo is order-dependent). Bradley-Terry is fitted on the multiset of results,
+Each completed match is one result, decided on raw scores (``raw_winner``: handicap score offsets never
+count); a handicapped agent is rated as a separate entrant (``entrant`` appends the handicap). Elo folds
+results in ``match_id`` order (documented; Elo is order-dependent). Bradley-Terry is fitted on the multiset of results,
 so it does not depend on file or log order; its bootstrap resamples with a fixed seed.
 """
 
@@ -14,7 +15,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from claude_duel.domain.models import AgentSpec, MatchState, Stage
-from claude_duel.domain.series import game_winner
 
 ELO_START, ELO_K = 1500.0, 32.0
 
@@ -38,9 +38,27 @@ class Rating:
 
 
 def entrant(agent: AgentSpec) -> str:
-    if agent.provider == "fake":
-        return f"fake:{agent.model or 'fake'}@skill{agent.skill}"
-    return f"{agent.provider}:{agent.model or 'default'}"
+    """Rating identity. A handicapped agent is a separate entrant (arch round 3), never pooled with the plain one."""
+    base = (
+        f"fake:{agent.model or 'fake'}@skill{agent.skill}"
+        if agent.provider == "fake"
+        else f"{agent.provider}:{agent.model or 'default'}"
+    )
+    h = agent.handicap
+    if not h.is_set():
+        return base
+    return f"{base}+hc({h.attempts_delta:+d},x{h.token_budget_mult:g},x{h.bank_mult:g})"
+
+
+def raw_winner(state: MatchState) -> str | None:
+    """Winner on raw ``scores`` (no ``score_offset``), then fewer attack tokens; None on a full tie."""
+    (a, sa), (b, sb) = sorted((x.name, state.scores.get(x.name, 0)) for x in state.agents)
+    if sa != sb:
+        return a if sa > sb else b
+    spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
+    if spent[a] != spent[b]:
+        return a if spent[a] < spent[b] else b
+    return None
 
 
 def results(states: Iterable[MatchState]) -> list[Result]:
@@ -53,7 +71,7 @@ def results(states: Iterable[MatchState]) -> list[Result]:
         a, b = entrant(x), entrant(y)
         if a == b:
             continue
-        win = game_winner(s)
+        win = raw_winner(s)
         out.append(Result(s.match_id, a, b, 0.5 if win is None else 1.0 if win == x.name else 0.0))
     return sorted(out)
 
