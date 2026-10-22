@@ -18,6 +18,6 @@ Use cases and wiring. Root: [AGENTS.md](../../../AGENTS.md).
 Gotchas
 - R3-2: every flag comes from `MatchEngine._flag_for` (a fresh flag per repair try until the challenge is built), the solver-failure reason is redacted, and `_record` refuses any event whose JSON carries a flag variant of the match (`_no_flags`).
 - Every prompt must pass `assert_no_flag`; attacker-visible output must go through `redact`.
-- `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.openai_model`.
+- `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.default_model(provider)`; vendors are declared once in `adapters/providers/registry.py`.
 
 - `framings.py`: versioned framing paragraphs; `framing_text(rule)` is pinned into `match_created`, and `agents.system_prompt(text)` is the only place it enters a request (ADR 0008). The engine runs the findings detector on every build answer and payload.
