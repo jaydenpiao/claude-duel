@@ -58,6 +58,7 @@ class OpenAIProvider:
         body = {
             "model": self._model,
             "max_completion_tokens": request.max_tokens,
+            "temperature": request.temperature,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": request.system},

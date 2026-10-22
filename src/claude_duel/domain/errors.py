@@ -45,9 +45,6 @@ class BudgetExceededError(DuelError):
     """Arena cost circuit breaker tripped."""
 
 
-ABORTING_ERRORS: tuple[type[Exception], ...] = (QuotaExceededError, BudgetExceededError)
-
-
 class MalformedOutputError(DuelError):
     """Model output could not be parsed."""
 

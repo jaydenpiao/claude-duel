@@ -90,7 +90,8 @@ class TestOpenAI:
     def test_success_and_auth_header(self) -> None:
         def h(req: httpx.Request) -> httpx.Response:
             assert req.headers["authorization"] == "Bearer sk-test-0000000000"
-            assert json.loads(req.content)["model"] == "m"
+            body = json.loads(req.content)
+            assert (body["model"], body["temperature"]) == ("m", 0.0)
             return httpx.Response(
                 200,
                 json={
