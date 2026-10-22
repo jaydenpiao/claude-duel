@@ -103,3 +103,36 @@ def test_replay_ignores_events_past_snapshot(make_engine, new_state, event_log) 
     state = _played(make_engine, new_state)
     events = [*event_log.read("m1"), _event(state.last_seq + 1, to="build")]
     assert replay(state, events).consistent
+
+
+def test_new_events_carry_schema_version(
+    make_engine: Callable[..., MatchEngine], new_state: Callable[..., MatchState], event_log: FileEventLog
+) -> None:
+    state = _played(make_engine, new_state)
+    assert {e.v for e in event_log.read(state.match_id)} == {ev.SCHEMA_VERSION}
+
+
+def test_pre_versioning_log_still_verifies(event_log: FileEventLog, store_root: Path) -> None:
+    event_log.append("old", _event(0, ev.MATCH_CREATED))  # v=0: written without the field, as before N5
+    line = json.loads((store_root / "old.events.jsonl").read_text())
+    assert "v" not in line["event"]
+    assert event_log.read("old")[0].v == 0
+
+
+def test_newer_schema_is_rejected() -> None:
+    with pytest.raises(EventLogCorruptError, match="schema v9"):
+        ev.payload(Event(v=9, seq=1, type=ev.STAGE_CHANGED, trace_id="t", data={"to": "build"}))
+
+
+@pytest.mark.parametrize(
+    ("type_", "data"),
+    [
+        (ev.STAGE_CHANGED, {"to": "nowhere"}),
+        (ev.CALL_CHARGED, {"agent": "a", "model": "m", "tokens": "many", "usd": 0.1}),
+        (ev.ROUND_SCORED, {"round": 1, "delta": {"a": 1}, "extra": True}),
+        (ev.BUILD_REJECTED, {"challenge_id": "c"}),
+    ],
+)
+def test_bad_payload_is_corruption(type_: str, data: dict[str, object]) -> None:
+    with pytest.raises(EventLogCorruptError, match="bad payload"):
+        ev.payload(_event(1, type_, **data))

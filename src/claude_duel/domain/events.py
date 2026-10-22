@@ -6,10 +6,10 @@ The engine records an event and applies it; replay folds the same events from sc
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import cast
+from collections.abc import Callable, Iterable
+from typing import Any, cast
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
@@ -39,81 +39,144 @@ ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
 
-_SCORES = TypeAdapter(dict[str, int])
-Data = Mapping[str, object]
+SCHEMA_VERSION = 1  # Event.v of new events; 0 = written before versioning (same payload shapes)
 
 
-def _str(data: Data, key: str) -> str:
-    return str(data[key])
+class _Payload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-def _int(data: Data, key: str) -> int:
-    return int(cast(int, data[key]))
+class MatchCreated(_Payload):
+    agents: tuple[AgentSpec, AgentSpec]
+    rules: Rules
+    limits: SandboxLimits
 
 
-def _created(state: MatchState, data: Data) -> None:
+class StageChanged(_Payload):
+    to: Stage
+
+
+class MatchFailed(_Payload):
+    reason: str
+
+
+class MatchRecovered(_Payload):
+    pass
+
+
+class CallCharged(_Payload):
+    agent: str
+    model: str
+    tokens: int
+    usd: float
+
+
+class BuildRejected(_Payload):
+    challenge_id: str
+    error: str
+
+
+class ChallengeBuilt(_Payload):
+    challenge: Challenge
+
+
+class ChallengeValidated(_Payload):
+    validation: Validation
+
+
+class AttackAttempted(_Payload):
+    key: str
+    attempt: AttackAttempt
+
+
+class ChallengeAttacked(_Payload):
+    key: str
+    attack: Attack
+
+
+class RoundScored(_Payload):
+    round: int
+    delta: dict[str, int]
+
+
+def _created(state: MatchState, p: MatchCreated) -> None:
     return None  # fields are set by ``initial_state``
 
 
-def _stage(state: MatchState, data: Data) -> None:
-    transition(state, Stage(_str(data, "to")))
+def _stage(state: MatchState, p: StageChanged) -> None:
+    transition(state, p.to)
 
 
-def _failed(state: MatchState, data: Data) -> None:
+def _failed(state: MatchState, p: MatchFailed) -> None:
     transition(state, Stage.FAILED)
-    state.failure = _str(data, "reason")
+    state.failure = p.reason
 
 
-def _recovered(state: MatchState, data: Data) -> None:
+def _recovered(state: MatchState, p: MatchRecovered) -> None:
     recover(state)
 
 
-def _charged(state: MatchState, data: Data) -> None:
+def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.calls += 1
-    state.usage.tokens += _int(data, "tokens")
-    state.usage.usd += float(cast(float, data["usd"]))
+    state.usage.tokens += p.tokens
+    state.usage.usd += p.usd
 
 
-def _rejected(state: MatchState, data: Data) -> None:
-    state.build_errors.setdefault(_str(data, "challenge_id"), []).append(_str(data, "error"))
+def _rejected(state: MatchState, p: BuildRejected) -> None:
+    state.build_errors.setdefault(p.challenge_id, []).append(p.error)
 
 
-def _built(state: MatchState, data: Data) -> None:
-    ch = Challenge.model_validate(data["challenge"])
-    state.challenges[ch.id] = ch
+def _built(state: MatchState, p: ChallengeBuilt) -> None:
+    state.challenges[p.challenge.id] = p.challenge
 
 
-def _validated(state: MatchState, data: Data) -> None:
-    v = Validation.model_validate(data["validation"])
-    state.validations[v.challenge_id] = v
+def _validated(state: MatchState, p: ChallengeValidated) -> None:
+    state.validations[p.validation.challenge_id] = p.validation
 
 
-def _attempted(state: MatchState, data: Data) -> None:
-    state.attempts.setdefault(_str(data, "key"), []).append(AttackAttempt.model_validate(data["attempt"]))
+def _attempted(state: MatchState, p: AttackAttempted) -> None:
+    state.attempts.setdefault(p.key, []).append(p.attempt)
 
 
-def _attacked(state: MatchState, data: Data) -> None:
-    state.attacks[_str(data, "key")] = Attack.model_validate(data["attack"])
+def _attacked(state: MatchState, p: ChallengeAttacked) -> None:
+    state.attacks[p.key] = p.attack
 
 
-def _scored(state: MatchState, data: Data) -> None:
-    state.scores = add_scores(state.scores, _SCORES.validate_python(data["delta"]))
-    state.scored_rounds.append(_int(data, "round"))
+def _scored(state: MatchState, p: RoundScored) -> None:
+    state.scores = add_scores(state.scores, p.delta)
+    state.scored_rounds.append(p.round)
 
 
-_HANDLERS: dict[str, Callable[[MatchState, Data], None]] = {
-    MATCH_CREATED: _created,
-    STAGE_CHANGED: _stage,
-    MATCH_FAILED: _failed,
-    MATCH_RECOVERED: _recovered,
-    CALL_CHARGED: _charged,
-    BUILD_REJECTED: _rejected,
-    CHALLENGE_BUILT: _built,
-    CHALLENGE_VALIDATED: _validated,
-    ATTACK_ATTEMPTED: _attempted,
-    CHALLENGE_ATTACKED: _attacked,
-    ROUND_SCORED: _scored,
+_HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] = {
+    MATCH_CREATED: (MatchCreated, _created),
+    STAGE_CHANGED: (StageChanged, _stage),
+    MATCH_FAILED: (MatchFailed, _failed),
+    MATCH_RECOVERED: (MatchRecovered, _recovered),
+    CALL_CHARGED: (CallCharged, _charged),
+    BUILD_REJECTED: (BuildRejected, _rejected),
+    CHALLENGE_BUILT: (ChallengeBuilt, _built),
+    CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
+    ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
+    CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
+    ROUND_SCORED: (RoundScored, _scored),
 }
+
+
+def payload(event: Event) -> _Payload:
+    """The event's typed payload; a wrong shape, unknown type or newer schema means the log is corrupt."""
+    if event.v > SCHEMA_VERSION:
+        raise EventLogCorruptError(
+            f"event {event.seq} uses schema v{event.v}; this build reads up to v{SCHEMA_VERSION}"
+        )
+    entry = _HANDLERS.get(event.type)
+    if entry is None:
+        raise EventLogCorruptError(f"unknown event type {event.type!r}")
+    try:
+        return entry[0].model_validate(event.data)
+    except ValidationError as exc:
+        raise EventLogCorruptError(
+            f"event {event.seq} ({event.type}) has a bad payload: {exc.errors()[0]['msg']}"
+        ) from exc
 
 
 def created_data(state: MatchState) -> dict[str, object]:
@@ -128,10 +191,8 @@ def created_data(state: MatchState) -> dict[str, object]:
 def apply(state: MatchState, event: Event) -> None:
     if event.seq != state.last_seq + 1:
         raise EventLogCorruptError(f"event {event.seq} applied after {state.last_seq}")
-    handler = _HANDLERS.get(event.type)
-    if handler is None:
-        raise EventLogCorruptError(f"unknown event type {event.type!r}")
-    handler(state, event.data)
+    data = payload(event)
+    _HANDLERS[event.type][1](state, data)
     state.last_seq = event.seq
 
 
@@ -139,14 +200,8 @@ def initial_state(match_id: str, created: Event) -> MatchState:
     """State described by a ``match_created`` event, before it is applied. The secret is not in the log."""
     if created.type != MATCH_CREATED:
         raise EventLogCorruptError("event log does not start with match_created")
-    a, b = (AgentSpec.model_validate(x) for x in cast(list[object], created.data["agents"]))
-    return MatchState(
-        match_id=match_id,
-        secret="",
-        agents=(a, b),
-        rules=Rules.model_validate(created.data["rules"]),
-        limits=SandboxLimits.model_validate(created.data["limits"]),
-    )
+    p = cast(MatchCreated, payload(created))
+    return MatchState(match_id=match_id, secret="", agents=p.agents, rules=p.rules, limits=p.limits)
 
 
 def fold(match_id: str, events: Iterable[Event]) -> MatchState:
