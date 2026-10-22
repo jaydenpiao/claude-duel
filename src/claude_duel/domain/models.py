@@ -142,7 +142,7 @@ class MatchState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     match_id: str
-    secret: str
+    secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file (M2)
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
