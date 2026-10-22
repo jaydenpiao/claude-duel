@@ -27,6 +27,9 @@ Depends on: design-rules-abstraction.md (`Rules.clock`, scorer `timed`).
 - `rules.clock` (`ClockRule`) folded in `app/allowance.py` alongside wallets; `call_charged` now records `input_tokens`/`output_tokens`; `timed` scorer uses the attack's recorded `tokens_used` as its clock tokens.
 - Not yet: Bronstein delay, `bank_mult` handicaps (see #38), alternating call order.
 
+## Built (#67)
+- Scored presets run on token clocks: `blitz` (40k + 500) and `efficiency` (60k + 500). `capped` is bounded by its token wallet. A test runs each scored preset with and without injected provider latency and requires identical outcomes and clock usage. The 900 s wall deadline only fails a match.
+
 ## Fit
 - `app/engine.py::_call` already times calls (`time.monotonic`) for metrics. Pass that value into the `call_charged` event (additive field, default 0 for old logs).
 - New `app/clock.py::MatchClock` (pure fold + check), wired in `container.py`.
