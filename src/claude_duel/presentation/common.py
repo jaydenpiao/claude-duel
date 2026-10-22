@@ -130,6 +130,13 @@ def _per(usd: float, n: int) -> str:
     return f"${usd / n:.4f}" if n else "—"
 
 
+def usage_text(u: Usage, *, think: bool = False) -> str:
+    """Tokens in/out and dollars, e.g. ``in 1,234 · out 567 · $0.0123``: the one spend formatter the arena,
+    card, commentary and fight replay share. ``think`` adds the reasoning share after the output count."""
+    reasoning = f" (think {u.reasoning_tokens:,})" if think else ""
+    return f"in {u.input_tokens:,} · out {u.output_tokens:,}{reasoning} · ${u.usd:.4f}"
+
+
 def agent_cost(s: MatchState, name: str) -> str:
     """One agent's tokens in/out (thinking share), dollars, and dollars per capture and per defense.
 
@@ -141,8 +148,8 @@ def agent_cost(s: MatchState, name: str) -> str:
     captures = sum(a.solved for a in mine)
     defenses = sum(not a.solved and s.challenges[a.challenge_id].author == name for a in s.attacks.values())
     return (
-        f"in {u.input_tokens:,} · out {u.output_tokens:,} (think {u.reasoning_tokens:,}) · ${u.usd:.4f} · "
-        f"{_per(attack_usd, captures)}/capture · {_per(max(u.usd - attack_usd, 0.0), defenses)}/defense"
+        f"{usage_text(u, think=True)} · {_per(attack_usd, captures)}/capture · "
+        f"{_per(max(u.usd - attack_usd, 0.0), defenses)}/defense"
     )
 
 

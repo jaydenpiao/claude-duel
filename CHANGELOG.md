@@ -5,6 +5,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `duel fight` HTML fight replay of a match log (hitstop, shake, slow-mo KO, seeded synth sound, per-side token/$ HUD)
+  and `scripts/render_fight.sh` for MP4/GIF. Shared `usage_text` formatter for HUD and cost lines.
+
 ## [0.1.0]
 First public release.
 

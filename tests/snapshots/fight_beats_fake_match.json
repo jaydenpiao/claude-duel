@@ -1,0 +1,1001 @@
+[
+ {
+  "actor": "",
+  "kind": "intro",
+  "outcome": "alice vs bob",
+  "points": 0,
+  "round": 0,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 0 · out 0 · $0.0000",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 0 · out 0 · $0.0000",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "usd": 0.0
+   }
+  },
+  "start": 0,
+  "target": ""
+ },
+ {
+  "actor": "alice",
+  "kind": "build",
+  "outcome": "alice forges 'Mirror'",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 791 · out 98 · $0.0000",
+    "tokens_in": 791,
+    "tokens_out": 98,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 0 · out 0 · $0.0000",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "usd": 0.0
+   }
+  },
+  "start": 45,
+  "target": ""
+ },
+ {
+  "actor": "alice",
+  "kind": "build",
+  "outcome": "alice forges 'Knock'",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 0 · out 0 · $0.0000",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "usd": 0.0
+   }
+  },
+  "start": 75,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "build",
+  "outcome": "bob forges 'Arithmetic gate'",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 791 · out 97 · $0.0000",
+    "tokens_in": 791,
+    "tokens_out": 97,
+    "usd": 0.0
+   }
+  },
+  "start": 105,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "build",
+  "outcome": "bob forges 'Maze'",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 1,582 · out 223 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 223,
+    "usd": 0.0
+   }
+  },
+  "start": 135,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Mirror' (try 1)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 1,760 · out 230 · $0.0000",
+    "tokens_in": 1760,
+    "tokens_out": 230,
+    "usd": 0.0
+   }
+  },
+  "start": 165,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "impact",
+  "outcome": "bob cracks 'Mirror' +9",
+  "points": 9,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 1,952 · out 238 · $0.0000",
+    "tokens_in": 1952,
+    "tokens_out": 238,
+    "usd": 0.0
+   }
+  },
+  "start": 207,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 1)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,144 · out 245 · $0.0000",
+    "tokens_in": 2144,
+    "tokens_out": 245,
+    "usd": 0.0
+   }
+  },
+  "start": 270,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 2)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,351 · out 253 · $0.0000",
+    "tokens_in": 2351,
+    "tokens_out": 253,
+    "usd": 0.0
+   }
+  },
+  "start": 312,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 3)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,573 · out 260 · $0.0000",
+    "tokens_in": 2573,
+    "tokens_out": 260,
+    "usd": 0.0
+   }
+  },
+  "start": 354,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 4)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 396,
+  "target": "alice"
+ },
+ {
+  "actor": "alice",
+  "kind": "defend",
+  "outcome": "'Knock' holds +20",
+  "points": 20,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,582 · out 216 · $0.0000",
+    "tokens_in": 1582,
+    "tokens_out": 216,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 438,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "impact",
+  "outcome": "alice cracks 'Arithmetic gate' +20",
+  "points": 20,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,759 · out 224 · $0.0000",
+    "tokens_in": 1759,
+    "tokens_out": 224,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 492,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 1)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 1,960 · out 232 · $0.0000",
+    "tokens_in": 1960,
+    "tokens_out": 232,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 555,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 2)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 2,177 · out 239 · $0.0000",
+    "tokens_in": 2177,
+    "tokens_out": 239,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 597,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 3)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 2,409 · out 247 · $0.0000",
+    "tokens_in": 2409,
+    "tokens_out": 247,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 639,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 4)",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 2,656 · out 255 · $0.0000",
+    "tokens_in": 2656,
+    "tokens_out": 255,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 681,
+  "target": "bob"
+ },
+ {
+  "actor": "bob",
+  "kind": "defend",
+  "outcome": "'Maze' holds +10",
+  "points": 10,
+  "round": 1,
+  "score": {
+   "alice": 0,
+   "bob": 0
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 2,656 · out 255 · $0.0000",
+    "tokens_in": 2656,
+    "tokens_out": 255,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 723,
+  "target": "alice"
+ },
+ {
+  "actor": "",
+  "kind": "round_end",
+  "outcome": "round 1 scored",
+  "points": 0,
+  "round": 1,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 2,656 · out 255 · $0.0000",
+    "tokens_in": 2656,
+    "tokens_out": 255,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 777,
+  "target": ""
+ },
+ {
+  "actor": "alice",
+  "kind": "build",
+  "outcome": "alice forges 'Mirror'",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 3,447 · out 353 · $0.0000",
+    "tokens_in": 3447,
+    "tokens_out": 353,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 807,
+  "target": ""
+ },
+ {
+  "actor": "alice",
+  "kind": "build",
+  "outcome": "alice forges 'Knock'",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 2,810 · out 268 · $0.0000",
+    "tokens_in": 2810,
+    "tokens_out": 268,
+    "usd": 0.0
+   }
+  },
+  "start": 837,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "build",
+  "outcome": "bob forges 'Arithmetic gate'",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 3,601 · out 365 · $0.0000",
+    "tokens_in": 3601,
+    "tokens_out": 365,
+    "usd": 0.0
+   }
+  },
+  "start": 867,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "build",
+  "outcome": "bob forges 'Maze'",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 4,392 · out 491 · $0.0000",
+    "tokens_in": 4392,
+    "tokens_out": 491,
+    "usd": 0.0
+   }
+  },
+  "start": 897,
+  "target": ""
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Mirror' (try 1)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 4,570 · out 498 · $0.0000",
+    "tokens_in": 4570,
+    "tokens_out": 498,
+    "usd": 0.0
+   }
+  },
+  "start": 927,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "impact",
+  "outcome": "bob cracks 'Mirror' +19",
+  "points": 19,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 4,762 · out 506 · $0.0000",
+    "tokens_in": 4762,
+    "tokens_out": 506,
+    "usd": 0.0
+   }
+  },
+  "start": 969,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 1)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 4,954 · out 513 · $0.0000",
+    "tokens_in": 4954,
+    "tokens_out": 513,
+    "usd": 0.0
+   }
+  },
+  "start": 1032,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 2)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,161 · out 521 · $0.0000",
+    "tokens_in": 5161,
+    "tokens_out": 521,
+    "usd": 0.0
+   }
+  },
+  "start": 1074,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 3)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,383 · out 528 · $0.0000",
+    "tokens_in": 5383,
+    "tokens_out": 528,
+    "usd": 0.0
+   }
+  },
+  "start": 1116,
+  "target": "alice"
+ },
+ {
+  "actor": "bob",
+  "kind": "attack",
+  "outcome": "bob misses 'Knock' (try 4)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1158,
+  "target": "alice"
+ },
+ {
+  "actor": "alice",
+  "kind": "defend",
+  "outcome": "'Knock' holds +40",
+  "points": 40,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,238 · out 471 · $0.0000",
+    "tokens_in": 4238,
+    "tokens_out": 471,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1200,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "impact",
+  "outcome": "alice cracks 'Arithmetic gate' +40",
+  "points": 40,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,415 · out 479 · $0.0000",
+    "tokens_in": 4415,
+    "tokens_out": 479,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1254,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 1)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,616 · out 487 · $0.0000",
+    "tokens_in": 4616,
+    "tokens_out": 487,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1317,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 2)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 4,833 · out 494 · $0.0000",
+    "tokens_in": 4833,
+    "tokens_out": 494,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1359,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 3)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 5,065 · out 502 · $0.0000",
+    "tokens_in": 5065,
+    "tokens_out": 502,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1401,
+  "target": "bob"
+ },
+ {
+  "actor": "alice",
+  "kind": "attack",
+  "outcome": "alice misses 'Maze' (try 4)",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 5,312 · out 510 · $0.0000",
+    "tokens_in": 5312,
+    "tokens_out": 510,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1443,
+  "target": "bob"
+ },
+ {
+  "actor": "bob",
+  "kind": "defend",
+  "outcome": "'Maze' holds +20",
+  "points": 20,
+  "round": 2,
+  "score": {
+   "alice": 40,
+   "bob": 19
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 5,312 · out 510 · $0.0000",
+    "tokens_in": 5312,
+    "tokens_out": 510,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1485,
+  "target": "alice"
+ },
+ {
+  "actor": "",
+  "kind": "ko",
+  "outcome": "winner: alice · alice 120  bob 58",
+  "points": 0,
+  "round": 2,
+  "score": {
+   "alice": 120,
+   "bob": 58
+  },
+  "sides": {
+   "alice": {
+    "hud": "in 5,312 · out 510 · $0.0000",
+    "tokens_in": 5312,
+    "tokens_out": 510,
+    "usd": 0.0
+   },
+   "bob": {
+    "hud": "in 5,620 · out 536 · $0.0000",
+    "tokens_in": 5620,
+    "tokens_out": 536,
+    "usd": 0.0
+   }
+  },
+  "start": 1539,
+  "target": ""
+ }
+]

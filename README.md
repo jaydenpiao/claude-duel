@@ -19,6 +19,7 @@ duel run --match-id demo            # fake provider, no network, free; live aren
 duel run --view arena --pace 0.15   # animated scoreboard, slowed down to watch (or --view commentary)
 duel run --format json              # one JSON summary instead (scripts, CI)
 duel card demo [--out card.svg]     # shareable SVG card: models, score, rounds, spend, replay-verified log hash
+duel fight demo [--out f.html]      # animated fight replay (HTML); scripts/render_fight.sh f.html out.mp4 [out.gif]
 duel replay demo --transcript       # refold the event log and verify scores
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
 duel tournament                     # round robin (<= 6) or Swiss over the config's [[tournament.entrants]];

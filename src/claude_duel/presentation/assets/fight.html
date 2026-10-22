@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Duels · fight replay</title>
+<style>
+  html, body { margin: 0; background: #0B0F1A; }
+  #out { display: block; width: 1280px; height: 720px; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="out" width="1280" height="720" title="click for sound"></canvas>
+<script type="application/json" id="beats">__BEATS__</script>
+<script>
+"use strict";
+// LLM Duels fight replay (docs/design/fight-animation.md). draw(frame) is a pure function of
+// (beats, seed, frame): no clocks, no unseeded randomness, no network. #frame=N renders one frame.
+const D = JSON.parse(document.getElementById("beats").textContent);
+const W = 1280, H = 720, FPS = 30, RATE = 44100;
+const params = new URLSearchParams(location.search);
+const REDUCED = params.get("motion") === "reduced" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const C = {
+  side: ["#22D3EE", "#F472B6"], glow: ["#67E8F9", "#F9A8D4"], bg: "#0B0F1A", grid: "#1E293B",
+  flash: "#FFFFFF", tint: "#FDE68A", hud: "#E2E8F0", dim: "#94A3B8",
+  capture: "#FACC15", ko: "#F87171", block: "#A3E635", fizzle: "#64748B",
+};
+
+// ---- ease.js: every easing, pure ----
+const ease = {
+  outBack: t => { const c = 1.70158; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; },
+  inQuad: t => t * t,
+  inOutCubic: t => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2),
+  outExpo: t => (t >= 1 ? 1 : 1 - 2 ** (-10 * t)),
+  outCubic: t => 1 - (1 - t) ** 3,
+  inOutQuart: t => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2),
+};
+const clamp01 = t => Math.max(0, Math.min(1, t));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// mulberry32, re-seeded per beat with seed ^ beatIndex so effects never drift.
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- timeline (frames at 30fps) ----
+// Beat starts and lengths come from fight.py (FRAMES); these are the sub-timings inside a beat.
+const WIND = 12, TRAVEL = 18, STRIKE = WIND + TRAVEL, TOTAL = D.frames;
+const names = D.players.map(p => p[0]);
+const side = name => names.indexOf(name);
+const loser = b => {
+  const [a, c] = names.map(n => b.score[n] || 0);
+  return a === c ? -1 : (a < c ? 0 : 1);
+};
+
+function beatAt(f) {
+  let i = 0;
+  while (i + 1 < D.beats.length && D.beats[i + 1].start <= f) i++;
+  return { i, t: f - D.beats[i].start, b: D.beats[i] };
+}
+
+// ---- scene (Canvas 2D) ----
+const scene = document.createElement("canvas"); scene.width = W; scene.height = H;
+const sx = scene.getContext("2d");
+const HOME = [[320, 430], [960, 430]];
+
+function fx(f) {  // per-frame effect state: shake, flash, camera, bloom/CA spikes, fighter offsets
+  const { i, t, b } = beatAt(f);
+  const r = rng(D.seed ^ i);
+  const e = { i, t, b, r, shake: [0, 0, 0], flash: 0, flashColor: C.flash, zoom: 1, focus: [W / 2, H / 2],
+              bloom: 0.6, ca: 0.0008, off: [[0, 0], [0, 0]], scale: [1, 1], time: t };
+  const hit = b.kind === "impact" ? STRIKE : b.kind === "defend" ? STRIKE : -1;
+  if (b.kind === "intro") {
+    const k = ease.outBack(clamp01(t / 30));
+    e.off = [[lerp(-520, 0, k), 0], [lerp(520, 0, k), 0]];
+    if (t >= 30 && t < 33) e.flash = 0.8;
+  }
+  if (hit >= 0 || b.kind === "attack") {
+    const a = side(b.kind === "defend" ? b.target : b.actor);
+    if (a >= 0 && t < WIND) e.scale[a] = 1 + 0.08 * ease.inQuad(t / WIND);
+  }
+  if (b.kind === "impact" && t >= STRIKE) {
+    const stop = 5, after = t - STRIKE - 1 - stop, dIdx = side(b.target);
+    e.time = t >= STRIKE + 1 && after < 0 ? STRIKE + 1 : t - (t > STRIKE + stop ? stop : 0);  // hitstop freezes effects
+    e.flash = 0.6 * Math.max(0, 1 - (t - STRIKE) / 4);
+    e.bloom = 0.6 + 1.0 * Math.max(0, 1 - (t - STRIKE) / 10);
+    e.ca = 0.0008 + 0.0032 * Math.max(0, 1 - (t - STRIKE) / 15);
+    if (after >= 0 && after < 10) {
+      const amp = 14 * 0.8 ** after, ang = r() * Math.PI * 2 + after * 2.4;
+      e.shake = [Math.cos(ang) * amp, Math.sin(ang) * amp, (r() - 0.5) * 1.2 * 0.8 ** after];
+    }
+    if (dIdx >= 0 && after >= 0) {
+      const dir = dIdx === 0 ? -1 : 1;
+      const push = after < 12 ? ease.outExpo(after / 12) : 1 - ease.outCubic(clamp01((after - 12) / 15));
+      e.off[dIdx] = [dir * 60 * push, 0];
+    }
+  }
+  if (b.kind === "defend" && t >= STRIKE) {
+    e.time = t < STRIKE + 4 ? STRIKE : t - 4;
+    e.bloom = 0.6 + 0.6 * Math.max(0, 1 - (t - STRIKE) / 10);
+  }
+  if (b.kind === "ko") {
+    const l = loser(b), stop = 6, slow = 40;
+    const local = REDUCED ? t : (t < slow ? t * 0.25 : slow * 0.25 + (t - slow));
+    e.time = Math.max(0, local - (local > 2 ? Math.min(stop * 0.25, local - 2) : 0));
+    e.zoom = REDUCED ? 1 : 1 + 0.35 * ease.outCubic(clamp01(t / slow));
+    e.focus = l >= 0 ? HOME[l] : [W / 2, H / 2];
+    e.flash = 0.8 * Math.max(0, 1 - t / 6);
+    e.flashColor = C.tint;
+    e.bloom = 0.6 + 1.0 * Math.max(0, 1 - t / 10);
+    e.ca = 0.008 * Math.max(0.15, 1 - t / 15);
+  }
+  if (REDUCED) { e.shake = [0, 0, 0]; e.ca = 0; e.flash = Math.min(e.flash, 0.2); }
+  return e;
+}
+
+function grid(f) {
+  sx.fillStyle = C.bg; sx.fillRect(-200, -200, W + 400, H + 400);
+  sx.globalAlpha = 0.4; sx.strokeStyle = C.grid; sx.lineWidth = 1;
+  const drift = (f * 0.5) % 40;
+  for (let x = -40; x <= W + 40; x += 40) { sx.beginPath(); sx.moveTo(x, 0); sx.lineTo(x, H); sx.stroke(); }
+  for (let y = 520 + drift; y <= H + 40; y += 40) { sx.beginPath(); sx.moveTo(0, y); sx.lineTo(W, y); sx.stroke(); }
+  sx.globalAlpha = 1;
+  sx.strokeStyle = C.grid; sx.lineWidth = 2; sx.beginPath(); sx.moveTo(0, 520); sx.lineTo(W, 520); sx.stroke();
+}
+
+function embers(f) {  // 20 ambient embers, life 90f, pure in f
+  sx.globalCompositeOperation = "lighter";
+  for (let k = 0; k < 20; k++) {
+    const r = rng(D.seed ^ (0x9E37 + k)), phase = Math.floor(r() * 90), age = (f + phase) % 90;
+    const cyc = Math.floor((f + phase) / 90), q = rng(D.seed ^ (k * 977 + cyc));
+    const x = q() * W, y = 560 - age * (1 + q() * 2);
+    sx.globalAlpha = 0.5 * Math.sin(Math.PI * age / 90);
+    sx.fillStyle = k % 2 ? C.glow[1] : C.glow[0];
+    sx.fillRect(x, y, 2, 2);
+  }
+  sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over";
+}
+
+function fighter(n, e, f, hurt) {
+  const [hx, hy] = HOME[n], [ox, oy] = e.off[n], s = e.scale[n];
+  const x = hx + ox, y = hy + oy + Math.sin(f * 0.12 + n * 2) * 4, dir = n === 0 ? 1 : -1;
+  sx.save(); sx.translate(x, y); sx.scale(s * dir, s);
+  sx.shadowColor = C.glow[n]; sx.shadowBlur = 30;
+  sx.fillStyle = hurt ? C.flash : C.side[n];
+  sx.beginPath();  // crystalline body
+  sx.moveTo(0, -120); sx.lineTo(46, -40); sx.lineTo(30, 60); sx.lineTo(-30, 60); sx.lineTo(-46, -40); sx.closePath();
+  sx.fill();
+  sx.fillStyle = C.bg; sx.shadowBlur = 0;
+  sx.fillRect(4, -70, 24, 8);  // visor
+  sx.fillStyle = C.glow[n]; sx.shadowBlur = 20;
+  sx.beginPath(); sx.arc(70, -10, 12, 0, Math.PI * 2); sx.fill();  // casting hand
+  sx.restore();
+  sx.globalAlpha = 0.35; sx.fillStyle = C.side[n];
+  sx.beginPath(); sx.ellipse(hx + ox, 520, 70, 10, 0, 0, Math.PI * 2); sx.fill(); sx.globalAlpha = 1;
+}
+const hand = (n, e) => [HOME[n][0] + e.off[n][0] + (n === 0 ? 70 : -70), HOME[n][1] - 10];
+
+function burst(r, n, origin, age, life, speed, colors, gravity) {
+  sx.globalCompositeOperation = "lighter";
+  for (let k = 0; k < n; k++) {
+    const ang = r() * Math.PI * 2, v = speed[0] + r() * (speed[1] - speed[0]), c = colors[k % colors.length];
+    if (age < 0 || age >= life) continue;
+    const x = origin[0] + Math.cos(ang) * v * age, y = origin[1] + Math.sin(ang) * v * age + 0.5 * gravity * age * age;
+    sx.globalAlpha = 1 - age / life; sx.fillStyle = c;
+    sx.fillRect(x - 2, y - 2, 4, 4);
+  }
+  sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over";
+}
+
+function projectile(n, from, to, t, color) {
+  for (let g = 11; g >= 0; g--) {  // 12 ghosts, 0.6 alpha decaying x0.8
+    const k = ease.inOutCubic(clamp01((t - WIND - g) / TRAVEL));
+    if (t - g < WIND) continue;
+    sx.globalAlpha = 0.6 * 0.8 ** g; sx.fillStyle = g ? C.glow[n] : color;
+    sx.shadowColor = C.glow[n]; sx.shadowBlur = 24;
+    sx.beginPath(); sx.arc(lerp(from[0], to[0], k), lerp(from[1], to[1], k) - Math.sin(Math.PI * k) * 60, 14 - g * 0.6, 0, Math.PI * 2);
+    sx.fill();
+  }
+  sx.globalAlpha = 1; sx.shadowBlur = 0;
+}
+
+function charge(r, n, at, t) {  // windup particles pulled inward
+  sx.globalCompositeOperation = "lighter"; sx.fillStyle = C.glow[n];
+  for (let k = 0; k < 16; k++) {
+    const ang = r() * Math.PI * 2, d = 90 * (1 - ease.inQuad(clamp01(t / WIND)));
+    sx.globalAlpha = clamp01(t / WIND); sx.fillRect(at[0] + Math.cos(ang) * d, at[1] + Math.sin(ang) * d, 3, 3);
+  }
+  sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over";
+}
+
+function shield(n, t) {  // hex shield that cracks after the hit
+  const [x, y] = [HOME[n][0] + (n === 0 ? 90 : -90), HOME[n][1] - 30];
+  sx.save(); sx.strokeStyle = C.block; sx.lineWidth = 4; sx.shadowColor = C.block; sx.shadowBlur = 20;
+  sx.globalAlpha = t < STRIKE + 4 ? clamp01((t - WIND) / 10) : 0;
+  sx.beginPath();
+  for (let k = 0; k < 6; k++) { const a = Math.PI / 3 * k; sx.lineTo(x + Math.cos(a) * 70, y + Math.sin(a) * 90); }
+  sx.closePath(); sx.stroke(); sx.restore();
+  return [x, y];
+}
+
+function drawScene(f, e) {
+  const { i, b, t } = e, r = rng(D.seed ^ i);
+  sx.save();
+  sx.translate(e.focus[0], e.focus[1]); sx.scale(e.zoom, e.zoom); sx.translate(-e.focus[0], -e.focus[1]);
+  sx.translate(W / 2 + e.shake[0], H / 2 + e.shake[1]); sx.rotate(e.shake[2] * Math.PI / 180); sx.translate(-W / 2, -H / 2);
+  grid(f); embers(f);
+  const a = side(b.actor), tg = side(b.target);
+  const hurt = [false, false];
+  if (b.kind === "impact" && tg >= 0 && t >= STRIKE && t < STRIKE + 6) hurt[tg] = true;
+  for (let n = 0; n < names.length && n < 2; n++) fighter(n, e, f, hurt[n]);
+  if (b.kind === "build" && a >= 0) {  // glyph rain converging on the hand
+    const at = hand(a, e);
+    sx.font = "16px monospace"; sx.fillStyle = C.glow[a];
+    for (let k = 0; k < 40; k++) {
+      const x0 = r() * W, y0 = r() * 200, k2 = ease.inOutCubic(clamp01((t - k * 0.4) / 24));
+      sx.globalAlpha = 1 - k2 * 0.7;
+      sx.fillText(String.fromCharCode(0x30A0 + Math.floor(r() * 96)), lerp(x0, at[0], k2), lerp(y0, at[1], k2));
+    }
+    sx.globalAlpha = 1;
+  }
+  if (b.kind === "impact" || b.kind === "defend" || b.kind === "attack") {
+    const atk = b.kind === "defend" ? tg : a, def = b.kind === "defend" ? a : tg;
+    if (atk >= 0 && def >= 0) {
+      const from = hand(atk, e), to = b.kind === "attack" ? [HOME[def][0], 200] : [HOME[def][0], HOME[def][1] - 30];
+      if (t < WIND) charge(r, atk, from, t);
+      if (t < STRIKE + 1) projectile(atk, from, to, Math.min(t, STRIKE), C.flash);
+      const age = e.time - STRIKE - 1;
+      if (b.kind === "impact") burst(rng(D.seed ^ i ^ 0xA1), 60, to, age, 18, [6, 14], [C.capture, C.flash, C.glow[atk]], 0);
+      if (b.kind === "defend") {
+        const at = shield(def, t);
+        burst(rng(D.seed ^ i ^ 0xB2), 40, at, t - STRIKE - 4, 24, [3, 9], [C.block, C.glow[def]], 0.4);
+      }
+      if (b.kind === "attack") burst(rng(D.seed ^ i ^ 0xC3), 8, to, t - STRIKE, 12, [1, 3], [C.fizzle], 0);
+    }
+  }
+  if (b.kind === "fizzle" && a >= 0) burst(rng(D.seed ^ i ^ 0xD4), 8, hand(a, e), t, 20, [1, 2.5], [C.fizzle], -0.05);
+  if (b.kind === "ko") {
+    const l = loser(b), at = l >= 0 ? [HOME[l][0], HOME[l][1] - 30] : [W / 2, 360];
+    burst(rng(D.seed ^ i ^ 0xE5), 120, at, e.time, 36, [2, 10], [C.ko, C.tint, C.flash], 0.15);
+  }
+  sx.restore();
+  if (e.flash > 0) { sx.globalAlpha = e.flash; sx.fillStyle = e.flashColor; sx.fillRect(0, 0, W, H); sx.globalAlpha = 1; }
+  if (b.kind === "round_end") {  // wipe + slam
+    const k = ease.inOutQuart(clamp01(t / 20));
+    sx.fillStyle = C.grid; sx.fillRect(0, 0, 1280 * k, H);
+  }
+}
+
+// ---- post-processing: vendored single-pass WebGL bloom + chromatic aberration + vignette ----
+const glc = document.createElement("canvas"); glc.width = W; glc.height = H;
+const gl = params.get("fx") === "2d" ? null : glc.getContext("webgl", { preserveDrawingBuffer: true, antialias: false });
+let post = null;
+if (gl) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec2 p;varying vec2 uv;void main(){uv=p*.5+.5;uv.y=1.-uv.y;gl_Position=vec4(p,0,1);}"));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `precision mediump float;varying vec2 uv;uniform sampler2D s;
+uniform float bloom,ca,vig;
+vec3 bright(vec2 q){vec3 c=texture2D(s,q).rgb;return max(c-.7,0.)/.3;}
+void main(){vec2 d=uv-.5;
+vec3 c=vec3(texture2D(s,uv+d*ca*4.).r,texture2D(s,uv).g,texture2D(s,uv-d*ca*4.).b);
+vec3 b=vec3(0);for(int i=0;i<16;i++){float a=float(i)*.3927;float r=(mod(float(i),4.)+1.)*.004;
+b+=bright(uv+vec2(cos(a),sin(a)*1.78)*r);}c+=b/16.*bloom;
+c*=1.-vig*smoothstep(.3,.75,length(d));gl_FragColor=vec4(c,1);}`));
+  gl.linkProgram(prog);
+  if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, "p");
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+                          [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    const u = n => gl.getUniformLocation(prog, n);
+    post = { bloom: u("bloom"), ca: u("ca"), vig: u("vig") };
+  }
+}
+const small = document.createElement("canvas"); small.width = W / 8; small.height = H / 8;
+const smx = small.getContext("2d");
+
+function postprocess(ox, e) {
+  if (post) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+    gl.uniform1f(post.bloom, e.bloom); gl.uniform1f(post.ca, e.ca); gl.uniform1f(post.vig, 0.35);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    ox.drawImage(glc, 0, 0);
+    return;
+  }
+  ox.drawImage(scene, 0, 0);  // Canvas 2D fallback: downsample, blur, additive composite
+  smx.filter = "brightness(0.8) blur(2px)"; smx.clearRect(0, 0, W / 8, H / 8); smx.drawImage(scene, 0, 0, W / 8, H / 8);
+  ox.globalCompositeOperation = "lighter"; ox.globalAlpha = Math.min(1, e.bloom * 0.5);
+  ox.drawImage(small, 0, 0, W, H); ox.globalAlpha = 1; ox.globalCompositeOperation = "source-over";
+  const g = ox.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H * 0.95);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.35)");
+  ox.fillStyle = g; ox.fillRect(0, 0, W, H);
+}
+
+// ---- HUD: drawn after post so bloom never blurs text; values change only at beat boundaries ----
+function text(ox, s, x, y, size, color, align = "left", weight = "") {
+  ox.font = `${weight} ${size}px ui-monospace, Menlo, Consolas, monospace`;
+  ox.textAlign = align; ox.fillStyle = color; ox.fillText(s, x, y);
+}
+function slam(ox, s, t, color, size) {
+  const k = ease.outBack(clamp01(t / 10)), sc = lerp(2, 1, k);
+  ox.save(); ox.translate(W / 2, 330); ox.scale(sc, sc); ox.globalAlpha = clamp01(t / 4);
+  ox.shadowColor = color; ox.shadowBlur = 30; text(ox, s, 0, 0, size, color, "center", "bold");
+  ox.restore();
+}
+function hud(ox, e) {
+  const { b, t } = e;
+  const [a, c] = names;
+  const sc = n => b.score[n] || 0;
+  text(ox, `ROUND ${Math.max(1, b.round)}/${D.rounds} · ${a} ${sc(a)} – ${sc(c)} ${c} · log ${D.digest.slice(0, 8)}`,
+       W / 2, 40, 22, C.hud, "center", "bold");
+  D.players.slice(0, 2).forEach(([n, model], k) => {
+    const x = k === 0 ? 32 : W - 32, al = k === 0 ? "left" : "right";
+    text(ox, n, x, 88, 26, C.side[k], al, "bold");
+    text(ox, model, x, 114, 16, C.dim, al);
+    text(ox, b.sides[n].hud, x, H - 28, 18, C.hud, al);
+  });
+  const typed = b.kind === "build" ? b.outcome.slice(0, t + 1) : b.outcome;
+  text(ox, typed, W / 2, 600, 22, C.hud, "center");
+  const d = b.points;
+  if (b.kind === "intro" && t >= 28) slam(ox, "VS", t - 28, C.flash, 96);
+  if (b.kind === "impact" && t > STRIKE) text(ox, `+${d}`, HOME[side(b.target)][0], 230 - Math.min(40, (t - STRIKE) * 3), 48, C.capture, "center", "bold");
+  if (b.kind === "defend" && t > STRIKE) slam(ox, `BLOCK +${d}`, t - STRIKE, C.block, 72);
+  if (b.kind === "attack" && t > STRIKE) slam(ox, "MISS", t - STRIKE, C.dim, 64);
+  if (b.kind === "fizzle") slam(ox, "FIZZLE", t, C.fizzle, 72);
+  if (b.kind === "round_end" && t >= 10) slam(ox, `ROUND ${b.round + 1}`, t - 10, C.hud, 96);
+  if (b.kind === "ko") {
+    if (t < 60) slam(ox, "K.O.", t, C.ko, 140);
+    else {  // results card
+      ox.fillStyle = "rgba(11,15,26,0.85)"; ox.fillRect(290, 220, 700, 260);
+      ox.strokeStyle = C.grid; ox.lineWidth = 2; ox.strokeRect(290, 220, 700, 260);
+      text(ox, b.outcome, W / 2, 290, 26, C.capture, "center", "bold");
+      names.slice(0, 2).forEach((n, k) => {
+        text(ox, `${n}  ${sc(n)}`, W / 2, 340 + k * 56, 22, C.side[k], "center", "bold");
+        text(ox, b.sides[n].hud, W / 2, 362 + k * 56, 16, C.dim, "center");
+      });
+      text(ox, `replay log ${D.digest}`, W / 2, 460, 14, C.dim, "center");
+    }
+  }
+}
+
+const out = document.getElementById("out").getContext("2d");
+function draw(f) {
+  const e = fx(Math.max(0, Math.min(TOTAL - 1, f)));
+  drawScene(f, e);
+  postprocess(out, e);
+  hud(out, e);
+}
+
+// ---- sound: seeded sfxr-style presets, rendered offline into one PCM track ----
+const PRESETS = {  // [wave, startHz, endHz, seconds, noiseMix]
+  intro: ["square", 220, 880, 0.5, 0], build: ["square", 1200, 1200, 0.05, 0], attack: ["saw", 300, 1400, 0.35, 0],
+  impact: ["noise", 120, 40, 0.45, 1], defend: ["square", 900, 300, 0.3, 0.5], fizzle: ["square", 600, 150, 0.3, 0],
+  round_end: ["square", 988, 1319, 0.25, 0], ko: ["noise", 90, 30, 1.6, 0.8],
+};
+function track() {
+  const pcm = new Float32Array(Math.ceil(TOTAL / FPS * RATE));
+  D.beats.forEach((b, i) => {
+    const [wave, f0, f1, dur, noise] = PRESETS[b.kind], r = rng(D.seed ^ i), jit = 1 + (r() - 0.5) * 0.06;
+    const at = Math.floor((b.start + (b.kind === "impact" ? STRIKE : 0)) / FPS * RATE), n = Math.floor(dur * RATE);
+    let ph = 0, nz = rng(D.seed ^ i ^ 0x5F);
+    for (let k = 0; k < n && at + k < pcm.length; k++) {
+      const p = k / n, hz = lerp(f0, f1, p) * jit;
+      ph += hz / RATE;
+      const tone = wave === "saw" ? 2 * (ph % 1) - 1 : (ph % 1 < 0.5 ? 1 : -1);
+      const sub = b.kind === "ko" ? Math.sin(2 * Math.PI * lerp(80, 30, p) * k / RATE) : 0;
+      const v = (tone * (1 - noise) + (nz() * 2 - 1) * noise + sub) * (1 - p) ** 2 * 0.25;
+      pcm[at + k] += v;
+    }
+  });
+  return pcm;
+}
+function wav() {  // base64 16-bit mono WAV of the whole replay, for render_fight.sh
+  const pcm = track(), buf = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const str = (o, s) => [...s].forEach((ch, k) => buf.setUint8(o + k, ch.charCodeAt(0)));
+  str(0, "RIFF"); buf.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVEfmt ");
+  buf.setUint32(16, 16, true); buf.setUint16(20, 1, true); buf.setUint16(22, 1, true);
+  buf.setUint32(24, RATE, true); buf.setUint32(28, RATE * 2, true); buf.setUint16(32, 2, true); buf.setUint16(34, 16, true);
+  str(36, "data"); buf.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((v, k) => buf.setInt16(44 + k * 2, Math.max(-1, Math.min(1, v)) * 32767, true));
+  let s = ""; const bytes = new Uint8Array(buf.buffer);
+  for (let k = 0; k < bytes.length; k += 0x8000) s += String.fromCharCode(...bytes.subarray(k, k + 0x8000));
+  return btoa(s);
+}
+
+// ---- entry points ----
+window.__frames = TOTAL;
+window.__fps = FPS;
+window.__draw = draw;
+window.__wav = wav;
+const pinned = /#frame=(\d+)/.exec(location.hash);
+if (pinned) {
+  draw(Number(pinned[1]));
+  window.__ready = true;
+} else {  // live preview: requestAnimationFrame only advances a frame counter (two ticks per frame)
+  let tick = 0, audio = null;
+  document.getElementById("out").addEventListener("click", () => {
+    if (audio) return;
+    audio = new AudioContext({ sampleRate: RATE });
+    const pcm = track(), b = audio.createBuffer(1, pcm.length, RATE);
+    b.copyToChannel(pcm, 0);
+    const src = audio.createBufferSource(); src.buffer = b; src.connect(audio.destination);
+    src.start(0, (Math.floor(tick / 2) % TOTAL) / FPS);
+  });
+  const loop = () => { draw(Math.floor(tick / 2) % TOTAL); tick++; requestAnimationFrame(loop); };
+  window.__ready = true;
+  loop();
+}
+</script>
+</body>
+</html>

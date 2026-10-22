@@ -77,6 +77,7 @@ addopts = "-m \"not live\" --cov=claude_duel --cov-report=term-missing --cov-fai
 markers = [
   "live: hits a real provider (skipped without API key)",
   "docker: needs a reachable Docker daemon (skipped otherwise)",
+  "slow: renders frames in headless Chrome (skipped without Chrome and node)",
 ]
 
 [tool.coverage.run]

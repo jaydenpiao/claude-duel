@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament, bench."""
+"""`duel` command line: run, resume, replay, card, fight, estimate, series, ratings, tournament, bench."""
 
 from __future__ import annotations
 
@@ -33,8 +33,9 @@ from claude_duel.domain.scoring import match_stats
 from claude_duel.domain.series import SeriesRule, SeriesState
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
-from claude_duel.presentation.card import card_data, card_svg
+from claude_duel.presentation.card import card_data, card_svg, log_digest
 from claude_duel.presentation.commentary import Commentary
+from claude_duel.presentation.fight import fight_data, fight_html
 
 _LOG = logging.getLogger(__name__)
 
@@ -64,6 +65,9 @@ def _parser() -> argparse.ArgumentParser:
     card = sub.add_parser("card", help="write a shareable SVG summary of a match")
     card.add_argument("match_id")
     card.add_argument("--out", type=Path, help="output path (default: <match-id>-card.svg)")
+    fight = sub.add_parser("fight", help="write a self-contained HTML fight replay of a match (no API calls)")
+    fight.add_argument("match_id")
+    fight.add_argument("--out", type=Path, help="output path (default: <match-id>-fight.html)")
     est = sub.add_parser("estimate", help="offline worst-case cost per match for each preset (no API calls)")
     est.add_argument("--mode", help="one preset (default: all)")
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
@@ -155,6 +159,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
+        "fight": lambda: _fight(settings, args.match_id, args.out),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
     }
     if args.cmd in handlers:
@@ -286,6 +291,15 @@ def _card(settings: Settings, match_id: str, out: Path | None) -> int:
     path = out or Path(f"{match_id}-card.svg")
     path.write_text(card_svg(card_data(state, report, events)), encoding="utf-8")
     print(f"card written: {path}")
+    return 0 if report.consistent else 1
+
+
+def _fight(settings: Settings, match_id: str, out: Path | None) -> int:
+    state, events = build_store(settings).load(match_id), build_event_log(settings).read(match_id)
+    report = replay(state, events)
+    path = out or Path(f"{match_id}-fight.html")
+    path.write_text(fight_html(fight_data(state, events, log_digest(events))), encoding="utf-8")
+    print(f"fight written: {path}")
     return 0 if report.consistent else 1
 
 
