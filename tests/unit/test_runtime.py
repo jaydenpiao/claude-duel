@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
+from claude_duel.adapters.sandbox.docker_sandbox import DEFAULT_IMAGE, DockerSandbox, docker_runtimes
 from claude_duel.app.container import docker_runtime
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError
@@ -25,7 +25,7 @@ def test_argv_adds_runtime_only_when_set() -> None:
     assert "--runtime" not in DockerSandbox().argv("n", SandboxLimits())
     argv = DockerSandbox(runtime="runsc").argv("n", SandboxLimits())
     assert argv[argv.index("--runtime") + 1] == "runsc"
-    assert argv.index("--runtime") < argv.index("python:3.12-slim")
+    assert argv.index("--runtime") < argv.index(DEFAULT_IMAGE)
 
 
 def test_docker_runtimes_parses_and_fails_empty(tmp_path: Path) -> None:
