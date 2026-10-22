@@ -1,7 +1,7 @@
 # Runs as a non-root user; code is root-owned and read-only to it. Run with a read-only rootfs:
 #   docker run --read-only --cap-drop ALL --security-opt no-new-privileges \
 #     --tmpfs /tmp --tmpfs /app/.duel:uid=10001,gid=10001,mode=0700 claude-duel ...
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2
 RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 duel
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./

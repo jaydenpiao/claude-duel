@@ -254,7 +254,8 @@ def repair_hint(error: str) -> str:
 
 RETRY_HINT = (
     "Your earlier tries failed. Before guessing again, trace check() on your last payload line by line, name the "
-    "first condition that returns False, and change only what fixes it."
+    "first condition that returns False, and change only what fixes it. If stdout says why check() said no "
+    "(it returned False, or raised an error), use that."
 )
 
 

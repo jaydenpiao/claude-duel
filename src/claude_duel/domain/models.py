@@ -47,7 +47,7 @@ class SandboxLimits(_Frozen):
     cpu_seconds: int = Field(default=1, gt=0)
     memory_mb: int = Field(default=128, gt=0)
     max_output_bytes: int = Field(default=4096, gt=0)
-    pids_limit: int = Field(default=32, gt=0)
+    pids_limit: int = Field(default=64, gt=0)  # >= 64 so gVisor (runsc) can start
     cpus: float = Field(default=0.5, gt=0)
 
 
@@ -118,6 +118,9 @@ class Rules(_Frozen):
         default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
     )
     retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
+    retry_feedback: bool = Field(
+        default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
+    )
     attack_token_budget: int = Field(default=20_000, ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
@@ -181,7 +184,14 @@ class ChallengeSpec(_Frozen):
         description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
     )
     difficulty: int = Field(ge=1, le=3)
-    probe_solved: bool = False  # set by the arena's difficulty gate in gate_mode "score"; halves the defense award
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_arena_fields(cls, data: Any) -> Any:
+        """#142: ``probe_solved`` is the arena's verdict (now on ``Challenge``); a reply that sends it is ignored."""
+        if isinstance(data, dict) and "probe_solved" in data:
+            data = {k: v for k, v in data.items() if k != "probe_solved"}
+        return data
 
 
 class Challenge(_Frozen):
@@ -190,7 +200,18 @@ class Challenge(_Frozen):
     author: str
     spec: ChallengeSpec | None
     forfeit_reason: str | None = None
-    flag_epoch: int = 0  # R3-2: the repair try that built it; each try runs under its own flag (0 in older logs)
+    flag_epoch: int = 0  # the repair try that built it; each try runs under its own flag (0 in older logs)
+    probe_solved: bool = False  # set only by the arena's difficulty gate in gate_mode "score"; halves the defense award
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_probe_solved(cls, data: Any) -> Any:
+        """Older logs kept ``probe_solved`` inside ``spec``; lift it onto the challenge (#142)."""
+        if isinstance(data, dict) and isinstance(spec := data.get("spec"), dict) and "probe_solved" in spec:
+            data = dict(data)
+            data["spec"] = {k: v for k, v in spec.items() if k != "probe_solved"}
+            data.setdefault("probe_solved", spec["probe_solved"])
+        return data
 
 
 class Validation(_Frozen):
@@ -275,10 +296,11 @@ class MatchState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     match_id: str
-    secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file (M2)
+    secret: str = Field(default="", repr=False, exclude=True)  # never serialized; stores keep it in its own file
     framing_text: str = ""  # pinned framing paragraph from match_created ("" = neutral)
     findings: list[Finding] = Field(default_factory=list)
     seed: str = ""  # deterministic tie-break/pairing seed, logged in match_created ("" in pre-0007 logs)
+    created_seq: int | None = None  # store-assigned in match_created; orders Elo (#137). None in older logs
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits

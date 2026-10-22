@@ -19,7 +19,7 @@ from claude_duel.ports import RunResult
 pytestmark = pytest.mark.docker
 
 FLAG = "DUEL{0123456789abcdef0123456789abcdef}"
-LIM = SandboxLimits(wall_seconds=2, cpu_seconds=2, memory_mb=64, max_output_bytes=256, pids_limit=8)
+LIM = SandboxLimits(wall_seconds=2, cpu_seconds=2, memory_mb=64, max_output_bytes=256, pids_limit=64)
 
 
 # Per-run prefix: leftover checks only see this run's containers, never a concurrent run's (round 2 N2).
@@ -120,11 +120,16 @@ def test_read_only_non_root_no_host_files(sb: DockerSandbox, docker_cmd: tuple[s
 
 
 def test_pids_and_memory_limits(sb: DockerSandbox, docker_cmd: tuple[str, ...]) -> None:
-    fork_bomb = (
-        "import os, time\ntry:\n    while True:\n        if os.fork() == 0:\n            time.sleep(10)\n"
-        "except OSError:\n    print('capped')"
+    # runc fails fork() with EAGAIN at the cap; gVisor (forced on box CI) kills the sandbox. Either way the
+    # bomb never gets past 64 live pids, while a modest 16-child fan-out still works.
+    bomb = (
+        "import os, time\ntry:\n    for _ in range(10000):\n        if os.fork() == 0:\n            time.sleep(10)\n"
+        "            os._exit(0)\n    print('escaped')\nexcept OSError:\n    print('capped')"
     )
-    assert "capped" in _raw(sb, docker_cmd, fork_bomb, lim=LIM.model_copy(update={"wall_seconds": 5})).stdout
+    lim5 = LIM.model_copy(update={"wall_seconds": 5})
+    assert "escaped" not in _raw(sb, docker_cmd, bomb, lim=lim5).stdout
+    fan = "import os\nfor _ in range(16):\n    if os.fork() == 0:\n        os._exit(0)\n    os.wait()\nprint('ok')"
+    assert _raw(sb, docker_cmd, fan, lim=lim5).stdout.strip() == "ok"
     r = sb.run("x = bytearray(512 * 1024 * 1024)\nprint('alive')", "", FLAG, LIM)
     assert "alive" not in r.stdout
 
@@ -144,7 +149,7 @@ def test_runsc_runtime_runs_hardened(docker_cmd: tuple[str, ...]) -> None:
     if "runsc" not in docker_runtimes(docker_cmd):
         pytest.skip("gVisor runsc runtime not registered")
     gv = DockerSandbox(docker_cmd, name_prefix=PREFIX, runtime="runsc")
-    lim = LIM.model_copy(update={"pids_limit": 32})  # the host pids cgroup also counts gVisor's own threads
+    lim = LIM
     assert gv.health() is None
     r = gv.run("import sys\nif sys.stdin.read() == 'go':\n    print(FLAG)", "go", FLAG, lim)
     assert r.stdout.strip() == FLAG
