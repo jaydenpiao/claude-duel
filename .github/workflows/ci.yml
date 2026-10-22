@@ -17,6 +17,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - name: runtime install smoke (no dev extras)
+        run: uv venv --python ${{ matrix.python }} /tmp/runtime && uv pip install --python /tmp/runtime/bin/python . && /tmp/runtime/bin/duel --help
       - run: uv venv --python ${{ matrix.python }} && uv pip install -e '.[dev]'
       - run: .venv/bin/ruff check . && .venv/bin/ruff format --check .
       - run: .venv/bin/mypy src
