@@ -15,8 +15,8 @@ and replay-verified:
 | order | arm | Anthropic | OpenAI | price $/M in/out (A / O) | N | `run_max_usd` | `match_max_usd` |
 |---|---|---|---|---|---|---|---|
 | 1 | smoke (pipeline check) | claude-haiku-5-5 | gpt-6-luna | 0.10/0.50 / 0.10/0.50 | 100 | 3 | 0.15 |
-| 2 | premium | claude-opus-5-5 | gpt-6.1-sol | 4/20 / 2/10 | 20 | 10 | 0.75 |
-| 3 | flagship | claude-fable-5-1 | gpt-6-astra | 10/50 / 10/50 | 10 | 20 | 2.0 |
+| 2 | premium | claude-opus-5-5 | gpt-6.1-sol | 4/20 / 2/10 | 10 | 10 | 0.85 |
+| 3 | flagship | claude-fable-5-1 | gpt-6-astra | 10/50 / 10/50 | 6 | 20 | 2.75 |
 
 Total cap $33, under the $40 lifetime ledger (about $37.7 left). The smoke arm goes first because it is
 cheap enough to show that the pipeline works end to end (valid builds, the control, replay, the cost lines)
@@ -26,11 +26,37 @@ before any expensive call.
 is reported with **$/win** for each vendor (spend divided by matches won) beside the win share, and its
 headline is "per match", never "per dollar". The smoke and flagship arms are price-matched.
 
-**Caps bind before N at typical cost** (cost table below). Premium is about $0.41 per match, so $10 covers
-about 12 of the 20 seeds. Flagship is about $1.38 per match, so $20 covers about 7 of the 10 seeds; its
-`match_max_usd` is 2.0 because 0.75 would cut most flagship matches short. Seeds run in a fixed order
-(`launch-0`, `launch-1`, ...) and only whole seeds count, so a cap ending an arm early reduces N without
-choosing which seeds count. The N reached is reported.
+**N fits the cap at typical cost** (owner's choice: keep the $33 total, lower N). Typical cost per seed is
+two matches (cost table below): smoke $0.028, premium $0.828, flagship $2.76. Each N is the largest whole
+number of seeds whose typical cost leaves at least 15% of the cap as headroom:
+
+| arm | N seeds | typical $ | cap | headroom |
+|---|---|---|---|---|
+| smoke | 100 | 2.76 | 3 | 8% (N=100 kept by the owner) |
+| premium | 10 | 8.28 | 10 | 17% (N=11 would leave 9%) |
+| flagship | 6 | 16.56 | 20 | 17% (N=7 would leave 3%) |
+
+**Per-match caps** (`match_max_usd`) are a safety stop, not a game rule. Each is about 2× the arm's
+typical match: smoke 0.15 (its worst case), premium 0.85 (2 × $0.414), flagship 2.75 (2 × $1.38). An arm's
+headroom over typical cost (smoke $0.24, premium $1.72, flagship $3.44) therefore absorbs at least one capped
+match without ending the arm early. Before the premium arm, the smoke arm's observed p95 match cost is
+scaled by the price ratio and recorded here. If that figure exceeds the premium or flagship cap, the cap is
+raised before any premium spend, and never after any of that arm's seeds have been seen.
+
+Seeds run in a fixed order (`launch-0`, `launch-1`, ...) and only whole seeds count. If a worse-than-typical
+run hits `run_max_usd` early, N shrinks without anyone choosing which seeds count. The N reached is reported.
+
+### Void seeds (match cap hits, ADR "match caps")
+A match that crosses `match_max_usd` ends in the terminal stage `CAPPED`. It records the breaching agent, is
+never resumed, and counts as void (no winner, excluded from ratings). A seed with any `CAPPED` match is a
+**void seed**:
+- Void seeds are never re-run or replaced by a new seed. Re-rolling would let the cap choose which outcomes count.
+- Void seeds are excluded from the sign test, counted, and reported per arm, broken down by the vendor of the
+  breaching agent. In the premium arm, Opus costs 2× per token, so it is more likely to be the breacher.
+- If **more than 20%** of an arm's seeds are void, that arm is reported as **cap-limited**: a statement about
+  the caps, not a model result (same shape as control 6).
+- `max_output_tokens = 8000` is equal in tokens, but tokenizers differ, so the same text can cost one vendor
+  more tokens. Control 6 (the per-vendor truncation audit) catches this effect.
 
 ## Pinned rules (identical for both vendors)
 - `mode = "checked"`, `rounds = 3`, `challenges_per_round = 1`, `max_attempts = 3`, docker sandbox.
@@ -75,13 +101,15 @@ At the strictest Holm level, α = 0.0167:
 | arm | N seeds | win share needed to reject (all of N decided) | power if true share 0.6 / 0.7 / 0.8 / 0.9 | 80% power needs a true share of |
 |---|---|---|---|---|
 | smoke | 100 | ≥ 63/100 | 0.31 / 0.95 / 1.00 / 1.00 | 0.67 |
-| premium | 20 (about 12 within cap) | ≥ 16/20 | 0.05 / 0.24 / 0.63 / 0.96 | 0.85 |
-| flagship | 10 (about 7 within cap) | 10/10 | 0.01 / 0.03 / 0.11 / 0.35 | 0.98 |
+| premium | 10 | 10/10 | 0.01 / 0.03 / 0.11 / 0.35 | 0.98 |
+| flagship | 6 | cannot reject (smallest two-sided p = 2/64 = 0.031) | 0 / 0 / 0 / 0 | — |
 
-At α = 0.05 the 80%-power shares are 0.65, 0.80 and 0.92. What this means: the smoke arm can detect a
-moderate edge. Premium can detect only a large one. Flagship is **descriptive**: only a clean sweep rejects
-the null, so a null flagship result means "no evidence", not "no edge". It is reported with its CI and is
-not used as the headline test.
+At α = 0.05 the 80%-power shares are 0.65 (smoke), 0.92 (premium, needs ≥ 9/10) and 0.96 (flagship, needs
+6/6). What this means: only the smoke arm is a real test, and it can detect a moderate edge. **Premium and
+flagship are descriptive.** Premium rejects only on a clean sweep. Flagship cannot reject at the first Holm
+level at all; it could reject only on a 6/6 sweep, and only if the other arms are tested first and rejected.
+Both are reported with win share, exact 95% CI and $/win, never as a headline significance test. A null
+result there means "no evidence", not "no edge".
 
 ## Cost table
 Per match: 3 rounds × 2 agents. **Typical** is 12 calls at 1,500 in / 2,000 out tokens (smoke match

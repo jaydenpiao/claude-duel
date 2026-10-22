@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from claude_duel.app.budget import DEFAULT_PRICES, PREMIUM, BudgetLimits
 from claude_duel.config import load_settings
@@ -25,6 +26,14 @@ def test_launch_config_matches_prereg() -> None:
     assert '`reasoning_effort = "low"`' in doc
 
 
+def _typical_seed_usd(arm: dict[str, Any]) -> float:
+    """Typical cost of one seed (2 matches), per the prereg cost table: 6 calls per agent, 1,500 in / 2,000 out."""
+    per_match = sum(
+        6 * (1500 * DEFAULT_PRICES[m][0] + 2000 * DEFAULT_PRICES[m][1]) / 1e6 for m in (arm["anthropic"], arm["openai"])
+    )
+    return 2 * per_match
+
+
 def test_launch_arms_match_prereg_and_fit_the_ledger() -> None:
     arms = tomllib.loads((ROOT / "docs" / "runs" / "launch-arms.toml").read_text(encoding="utf-8"))["arm"]
     assert [a["name"] for a in arms] == ["smoke", "premium", "flagship"]  # pre-registered execution order
@@ -42,8 +51,17 @@ def test_launch_arms_match_prereg_and_fit_the_ledger() -> None:
         assert [float(cells[6]), float(cells[7]), float(cells[8])] == [a["n"], a["run_max_usd"], a["match_max_usd"]]
     for a in arms[1:]:
         assert {a["anthropic"], a["openai"]} <= PREMIUM  # needs allow_premium, set per run, never by default
+        assert a["n"] * _typical_seed_usd(a) <= a["run_max_usd"]  # a typical arm finishes all N within its cap
+    for a in arms[1:]:
+        assert a["n"] * _typical_seed_usd(a) <= a["run_max_usd"] / 1.15  # owner's 15% headroom
+        assert (a["n"] + 1) * _typical_seed_usd(a) > a["run_max_usd"] / 1.15  # and N is the largest that fits
     premium = arms[1]
     assert DEFAULT_PRICES[premium["anthropic"]] != DEFAULT_PRICES[premium["openai"]]
     assert "not price-matched" in doc
     assert "$/win" in doc
     assert "Holm" in doc
+    assert "**void seed**" in doc
+    assert "never re-run" in doc
+    assert "**more than 20%**" in doc
+    assert "**cap-limited**" in doc
+    assert "breaching agent" in doc

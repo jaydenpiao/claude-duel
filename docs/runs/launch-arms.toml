@@ -1,5 +1,6 @@
 # Launch arms chosen by the owner (docs/runs/launch-prereg.md, "Arms"). Each arm runs launch.toml's rules
 # with these models; n = paired seeds (each played twice, seats swapped), so 2n matches. Run in this order.
+# n is sized so 2n matches at typical cost fit the cap with >= 15% headroom (smoke: owner kept N=100, ~8%).
 [[arm]]
 name = "smoke"
 anthropic = "claude-haiku-5-5"
@@ -12,14 +13,14 @@ match_max_usd = 0.15
 name = "premium"
 anthropic = "claude-opus-5-5"
 openai = "gpt-6.1-sol"
-n = 20
+n = 10
 run_max_usd = 10.0
-match_max_usd = 0.75
+match_max_usd = 0.85
 
 [[arm]]
 name = "flagship"
 anthropic = "claude-fable-5-1"
 openai = "gpt-6-astra"
-n = 10
+n = 6
 run_max_usd = 20.0
-match_max_usd = 2.0
+match_max_usd = 2.75
