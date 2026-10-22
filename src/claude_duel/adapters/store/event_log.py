@@ -40,7 +40,7 @@ class FileEventLog:
     def append(self, match_id: str, event: Event) -> None:
         with jsonl.locked(self._path(match_id), exclusive=True) as fd:
             lines, end = jsonl.read_complete(fd)
-            jsonl.truncate_torn_tail(fd, end)  # round-2 N1: a torn, never-acknowledged write is dropped
+            jsonl.truncate_torn_tail(fd, end)  # a torn, never-acknowledged write is dropped
             events, prev = _verify(lines)
             expected = events[-1].seq + 1 if events else 0
             if event.seq != expected:

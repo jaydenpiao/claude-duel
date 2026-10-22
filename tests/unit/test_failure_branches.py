@@ -1,4 +1,4 @@
-"""Failure branches named in quality review L4: each one gets a targeted test."""
+"""Failure branches named in an earlier quality review: each one gets a targeted test."""
 
 from __future__ import annotations
 

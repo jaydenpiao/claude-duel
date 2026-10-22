@@ -1,4 +1,4 @@
-"""One shared redactor (M1) and red-team PR #23 regressions: F1 format strings, F2 flag variants, class statements."""
+"""One shared redactor and red-team PR #23 regressions: format strings, flag variants, class statements."""
 
 from __future__ import annotations
 

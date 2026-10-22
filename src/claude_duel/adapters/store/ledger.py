@@ -1,6 +1,6 @@
 """Persistent append-only spend ledger (JSON lines), shared by every match, run and process.
 
-R3-6: ``reserve`` appends a worst-case entry before a provider call; the charge that follows carries
+``reserve`` appends a worst-case entry before a provider call; the charge that follows carries
 ``settles`` and cancels it. A crash in between leaves the reservation counted (over, never under).
 
 All reads and appends hold ``flock`` on the ledger file, so totals are consistent

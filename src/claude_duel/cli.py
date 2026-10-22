@@ -238,7 +238,7 @@ def _ratings(settings: Settings, boot: int, fmt: str) -> int:
     for mid in logs.ids():
         try:
             states.append(fold(mid, logs.read(mid)))
-        except DuelError as exc:  # arch round 3: one bad or newer log never aborts the table
+        except DuelError as exc:  # one bad or newer log never aborts the table
             skipped.append(mid)
             log(_LOG, logging.WARNING, "ratings: skipped unreadable match log", match_id=mid, error=str(exc))
     if skipped:

@@ -1,4 +1,4 @@
-"""Release gate L2: the README architecture diagram names every port and the main layers."""
+"""Release gate: the README architecture diagram names every port and the main layers."""
 
 from __future__ import annotations
 

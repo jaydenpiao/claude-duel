@@ -26,7 +26,7 @@ def derive_flag(secret: str, challenge_id: str) -> str:
 
 
 def flag_of(secret: str, cid: str, epoch: int = 0) -> str:
-    """Flag of challenge ``cid`` built on repair try ``epoch`` (R3-2); epoch 0 is the original derivation."""
+    """Flag of challenge ``cid`` built on repair try ``epoch``; epoch 0 is the original derivation."""
     return derive_flag(secret, cid if epoch == 0 else f"{cid}~{epoch}")
 
 
@@ -66,7 +66,7 @@ _DEC = re.compile(r"\d{2,3}")
 
 @lru_cache(maxsize=256)
 def _needles(flag: str) -> frozenset[str]:
-    """R3-5: every MIN_PART-char window of the digest under transforms a regex can't enumerate."""
+    """every MIN_PART-char window of the digest under transforms a regex can't enumerate."""
     inner = _inner(flag)
     forms = [inner, inner[::-1], flag.encode().hex(), inner.encode().hex()]
     forms += ["".join(chr(ord(c) + k) for c in inner).lower() for k in range(-_SHIFTS, _SHIFTS + 1) if k]
@@ -89,7 +89,7 @@ def _canonical_leak(text: str, flag: str) -> bool:
 
 def assert_no_flag(text: str, flag: str, where: str) -> None:
     """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, case-changed, spaced, split
-    (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes (R3-5)."""
+    (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes."""
     if flag in text or _variant_pattern(flag).search(text) or _canonical_leak(text, flag):
         raise FlagLeakError(f"flag would leak via {where}")
 
@@ -98,7 +98,7 @@ def redact(text: str, flags: tuple[str, ...] = ()) -> str:
     for f in flags:
         text = _variant_pattern(f).sub(REDACTED, text.replace(f, REDACTED))
         if _canonical_leak(text, f):
-            return REDACTED  # R3-5: an encoding with no clean span to cut out; withhold the whole text
+            return REDACTED  # an encoding with no clean span to cut out; withhold the whole text
     return FLAG_PATTERN.sub(REDACTED, text)
 
 

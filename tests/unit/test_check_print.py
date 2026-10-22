@@ -1,4 +1,4 @@
-"""R3-3: check-form authors cannot reach FLAG by rebinding print (or replacing check)."""
+"""Check-form authors cannot reach FLAG by rebinding print (or replacing check)."""
 
 from __future__ import annotations
 

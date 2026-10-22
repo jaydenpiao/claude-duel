@@ -1,4 +1,4 @@
-"""R3-6: a provider call is reserved in the ledger before it runs, so a crash before the charge is still counted."""
+"""a provider call is reserved in the ledger before it runs, so a crash before the charge is still counted."""
 
 from __future__ import annotations
 
