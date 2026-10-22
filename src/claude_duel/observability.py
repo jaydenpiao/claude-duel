@@ -78,13 +78,31 @@ class NullMetrics:
         return None
 
 
+Tags = tuple[tuple[str, str], ...]
+
+
+def _key(tags: dict[str, str]) -> Tags:
+    return tuple(sorted(tags.items()))
+
+
 class InMemoryMetrics:
+    """Counters and timings, aggregated per name and per (name, tags)."""
+
     def __init__(self) -> None:
         self.counters: dict[str, int] = defaultdict(int)
         self.timings: dict[str, list[float]] = defaultdict(list)
+        self.tagged_counters: dict[tuple[str, Tags], int] = defaultdict(int)
+        self.tagged_timings: dict[tuple[str, Tags], list[float]] = defaultdict(list)
 
     def incr(self, name: str, value: int = 1, **tags: str) -> None:
         self.counters[name] += value
+        self.tagged_counters[name, _key(tags)] += value
 
     def timing(self, name: str, seconds: float, **tags: str) -> None:
         self.timings[name].append(seconds)
+        self.tagged_timings[name, _key(tags)].append(seconds)
+
+    def summary(self) -> dict[str, object]:
+        """Flat, log-friendly snapshot: counters plus count/total seconds per timing."""
+        timings = {k: {"n": len(v), "s": round(sum(v), 3)} for k, v in sorted(self.timings.items())}
+        return {"counters": dict(sorted(self.counters.items())), "timings": timings}
