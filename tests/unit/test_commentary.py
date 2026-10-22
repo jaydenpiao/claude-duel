@@ -13,12 +13,12 @@ from claude_duel.app.budget import BudgetLimits
 from claude_duel.app.session import play
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.models import Event, Rules
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.commentary import Commentary, scrub, snippet
+from tests.helpers import FLAG, forfeit_events, match_events
 
 SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "commentary_fake_match.txt"
-FLAG = "DUEL{0123456789abcdef0123456789abcdef}"
 
 
 def _commentary(out: io.StringIO, match_id: str = "snap") -> Commentary:
@@ -53,15 +53,7 @@ def test_scrub_and_snippet() -> None:
 
 
 def _state_events(*extra: Event) -> list[Event]:
-    state = MatchState(
-        match_id="m",
-        secret="s",
-        agents=(AgentSpec(name="alice"), AgentSpec(name="bob")),
-        rules=Rules(rounds=1),
-        limits=SandboxLimits(),
-    )
-    first = Event(seq=0, type=ev.MATCH_CREATED, trace_id="t", data=ev.created_data(state))
-    return [first, *extra]
+    return match_events(*extra)
 
 
 def _render(events: list[Event]) -> str:
@@ -74,21 +66,7 @@ def _render(events: list[Event]) -> str:
 
 
 def test_forfeit_rejected_failed_and_recovered_lines() -> None:
-    forfeit = {"id": "c1", "round": 1, "author": "alice", "spec": None, "forfeit_reason": f"malformed {FLAG}"}
-    events = _state_events(
-        Event(seq=1, type=ev.STAGE_CHANGED, trace_id="t", data={"to": "build"}),
-        Event(seq=2, type=ev.CHALLENGE_BUILT, trace_id="t", data={"challenge": forfeit}),
-        Event(seq=3, type=ev.STAGE_CHANGED, trace_id="t", data={"to": "validate"}),
-        Event(
-            seq=4,
-            type=ev.CHALLENGE_VALIDATED,
-            trace_id="t",
-            data={"validation": {"challenge_id": "c1", "valid": False, "reason": "forfeit"}},
-        ),
-        Event(seq=5, type=ev.MATCH_FAILED, trace_id="t", data={"reason": "RuntimeError: boom"}),
-        Event(seq=6, type=ev.MATCH_RECOVERED, trace_id="t", data={}),
-    )
-    text = _render(events)
+    text = _render(forfeit_events("forfeit", "RuntimeError: boom"))
     assert FLAG not in text
     assert "alice forfeited a challenge: malformed DUEL{<redacted>}" in text
     assert "arena check on alice's 'forfeit': rejected ✗ (forfeit) -5" in text

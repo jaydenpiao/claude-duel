@@ -10,6 +10,8 @@ import sys
 import uuid
 from pathlib import Path
 
+from rich.console import Console
+
 from claude_duel.app.container import build_event_log, build_ledger, build_store
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
@@ -18,6 +20,7 @@ from claude_duel.domain.errors import DuelError
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.scoring import match_stats
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
+from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.commentary import Commentary
 
 _LOG = logging.getLogger(__name__)
@@ -35,6 +38,15 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("run", "resume"):
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
+        )
+        sub.choices[name].add_argument(
+            "--view",
+            choices=("auto", "arena", "commentary"),
+            default="auto",
+            help="text output style; auto: arena on a terminal, commentary otherwise",
+        )
+        sub.choices[name].add_argument(
+            "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
@@ -57,19 +69,26 @@ def _summary(state: MatchState) -> str:
     )
 
 
-def _run(settings: Settings, match_id: str | None, fmt: str) -> int:
+def _observer(settings: Settings, mid: str, args: argparse.Namespace) -> Commentary | ArenaView | None:
+    if args.format != "text":
+        return None
+    limit, lifetime = settings.budget.key_limit_usd, build_ledger(settings).total_usd
+    if args.view == "arena" or (args.view == "auto" and sys.stdout.isatty()):
+        return ArenaView(Console(), mid, limit, lifetime, pace=max(args.pace, 0.0))
+    return Commentary(sys.stdout, mid, limit, lifetime)
+
+
+def _run(settings: Settings, match_id: str | None, args: argparse.Namespace) -> int:
     metrics = InMemoryMetrics()
     mid = match_id or uuid.uuid4().hex[:12]
-    commentary = (
-        Commentary(sys.stdout, mid, settings.budget.key_limit_usd, build_ledger(settings).total_usd)
-        if fmt == "text"
-        else None
-    )
+    observer = _observer(settings, mid, args)
     try:
-        state = play(settings, mid, metrics, commentary)
+        state = play(settings, mid, metrics, observer)
     finally:
+        if isinstance(observer, ArenaView):
+            observer.close()
         log(_LOG, logging.INFO, "metrics", match_id=mid, **metrics.summary())
-    if commentary is None:
+    if observer is None:
         print(_summary(state))
         return 0
     report = replay(build_store(settings).load(mid), build_event_log(settings).read(mid))
@@ -95,9 +114,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     settings = load_settings(args.config)
     configure_logging(settings.log_level)
     if args.cmd == "run":
-        return _run(settings, args.match_id, args.format)
+        return _run(settings, args.match_id, args)
     if args.cmd == "resume":
-        return _run(settings, args.match_id, args.format) if _exists(settings, args.match_id) else 2
+        return _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
     if args.transcript:
         print("\n".join(report.transcript))

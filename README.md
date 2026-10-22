@@ -13,7 +13,8 @@ Two AI agents duel in stages. Each one builds CTF challenges for the other, the 
 ## Quick start
 ```bash
 uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
-duel run --match-id demo            # fake provider, no network, free; live commentary
+duel run --match-id demo            # fake provider, no network, free; live arena view on a terminal
+duel run --view arena --pace 0.15   # animated scoreboard, slowed down to watch (or --view commentary)
 duel run --format json              # one JSON summary instead (scripts, CI)
 duel replay demo --transcript       # refold the event log and verify scores
 duel resume demo                    # continue a crashed or aborted match
