@@ -7,6 +7,7 @@ import secrets
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import (
     build_budget,
+    build_driver_lock,
     build_engine,
     build_series_log,
     build_store,
@@ -37,6 +38,13 @@ def play_tournament(
     settings: Settings, tournament_id: str, rule: tr.TournamentRule, metrics: Metrics
 ) -> tr.TournamentState:
     """Play pairings in order until none are left. Resuming keeps the saved rule and seed."""
+    with build_driver_lock(settings, tournament_id, "tournament"):  # one driver per id; a second fails fast
+        return _play_tournament(settings, tournament_id, rule, metrics)
+
+
+def _play_tournament(
+    settings: Settings, tournament_id: str, rule: tr.TournamentRule, metrics: Metrics
+) -> tr.TournamentState:
     log = build_tournament_log(settings)
     events = log.read(tournament_id)
     if not events:
