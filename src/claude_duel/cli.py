@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay, card, estimate."""
+"""`duel` command line: run, resume, replay, card, estimate, series."""
 
 from __future__ import annotations
 
@@ -17,12 +17,14 @@ from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import build_event_log, build_ledger, build_store
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
+from claude_duel.app.series import play_series, verify_series
 from claude_duel.app.session import play
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.scoring import match_stats
+from claude_duel.domain.series import SeriesRule
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
@@ -59,6 +61,10 @@ def _parser() -> argparse.ArgumentParser:
     est = sub.add_parser("estimate", help="offline worst-case cost per match for each preset (no API calls)")
     est.add_argument("--mode", help="one preset (default: all)")
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
+    series = sub.add_parser("series", help="play or resume a best-of-N series of matches, then verify it")
+    series.add_argument("--series-id", help="explicit id (re-running an existing id resumes it)")
+    series.add_argument("--games", type=int, default=3, help="best of N (odd, default 3)")
+    series.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -131,6 +137,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2
     if args.cmd == "estimate":
         return _estimate(settings, args.mode, args.model)
+    if args.cmd == "series":
+        return _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format)
     if args.cmd == "card":
         return _card(settings, args.match_id, args.out)
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
@@ -153,6 +161,34 @@ def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
         raise ConfigError(str(exc.args[0])) from exc
     print(render(rows))
     return 0
+
+
+def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
+    try:
+        rule = SeriesRule(games=games)
+    except ValueError as exc:
+        raise ConfigError(f"bad series: {exc}") from exc
+    metrics = InMemoryMetrics()
+    state = play_series(settings, series_id, rule, metrics)
+    report = verify_series(settings, series_id)
+    winner = state.winner()
+    if fmt == "json":
+        out = {
+            "series_id": series_id,
+            "best_of": state.rule.games,
+            "wins": state.wins(),
+            "winner": winner,
+            "games": [g.model_dump() for g in state.games],
+            "verified": report.consistent,
+        }
+        print(json.dumps(out))
+    else:
+        for g in state.games:
+            print(f"game {g.game_no} ({g.match_id}): {g.winner or 'draw'} · {g.scores}")
+        result = "undecided" if not state.done() else f"winner: {winner}" if winner else "drawn"
+        print(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
+        print(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
+    return 0 if report.consistent and state.done() else 1
 
 
 def _card(settings: Settings, match_id: str, out: Path | None) -> int:

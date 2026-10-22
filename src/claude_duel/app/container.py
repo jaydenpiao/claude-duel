@@ -65,6 +65,11 @@ def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
 
 
+def build_series_log(settings: Settings) -> FileEventLog:
+    """Series logs (#38) are ordinary hash-chained event logs named ``<series_id>.series.jsonl``."""
+    return FileEventLog(settings.store_dir, suffix=".series.jsonl")
+
+
 def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 
