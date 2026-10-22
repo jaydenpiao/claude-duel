@@ -272,14 +272,7 @@ class MatchEngine:
             completion = self._complete(state, agent, prompt, "build")
             self._note(state, agent, completion.text)
             try:
-                if completion.truncated:
-                    raise MalformedOutputError(TRUNCATED)
-                last = agents.parse_challenge(completion.text)
-                last, problem = self._shape(state, last)
-                if problem is None and state.rules.variety:
-                    problem = variety.repeat_reason(state, agent, last)
-                if problem is None:
-                    last, problem, probed = self._assess(state, cid, agent, last)
+                last, problem, probed = self._judge(state, cid, agent, completion)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -290,6 +283,21 @@ class MatchEngine:
             self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
             errors = state.build_errors[cid]
         return (last, None, False) if last is not None else (None, errors[-1], False)
+
+    def _judge(
+        self, state: MatchState, cid: str, agent: str, completion: Completion
+    ) -> tuple[ChallengeSpec, str | None, bool]:
+        """Parse, shape, variety and assess one build answer (spec, problem, probe_solved);
+        raises ``MalformedOutputError`` if unparseable."""
+        if completion.truncated:
+            raise MalformedOutputError(TRUNCATED)
+        spec, problem = self._shape(state, agents.parse_challenge(completion.text))
+        if problem is None and state.rules.variety:
+            problem = variety.repeat_reason(state, agent, spec)
+        probed = False
+        if problem is None:
+            spec, problem, probed = self._assess(state, cid, agent, spec)
+        return spec, problem, probed
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
