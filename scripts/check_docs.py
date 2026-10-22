@@ -88,6 +88,20 @@ def check_modules(root: Path = ROOT) -> list[str]:
     return errors
 
 
+_CODE = re.compile(r"\bR\d-\d+\b|\b[BHML]\d\b|round-\d N\d|arch round \d|arch #\d")
+
+
+def check_codes(root: Path = ROOT) -> list[str]:
+    """Private review codes (``R3-2``, ``M2``, ``arch round 3``) explain nothing to outside readers."""
+    files = sorted(f for d in ("src", "tests") for f in (root / d).rglob("*") if f.suffix in {".py", ".md"})
+    return [
+        f"{f.relative_to(root)}:{i}: review code {m.group()!r}; use the rationale, an issue or an ADR"
+        for f in files
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+        if (m := _CODE.search(line))
+    ]
+
+
 def check_links(root: Path = ROOT) -> list[str]:
     want = {"CLAUDE.md": "AGENTS.md", ".cursor/skills": "../.agents/skills"}
     return [
@@ -102,7 +116,7 @@ def main() -> int:
     from claude_duel import cli, config  # noqa: PLC0415 - import from this checkout, not site-packages
 
     errors = check_paths() + check_options(cli_options(cli._parser())) + check_env(config.ENV_VARS)
-    errors += check_modules() + check_links()
+    errors += check_modules() + check_links() + check_codes()
     print("\n".join(errors) or "docs ok")
     return 1 if errors else 0
 

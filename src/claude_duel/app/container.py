@@ -142,7 +142,7 @@ def build_engine(
 ) -> MatchEngine:
     """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps.
 
-    ``budget`` is the invocation's shared ``CostBudget`` (R3-1): a series or tournament passes one so
+    ``budget`` is the invocation's shared ``CostBudget``: a series or tournament passes one so
     ``run_max_*`` spans every game it plays; omitted, the engine gets a fresh one (a single match)."""
     for agent in agents:
         check_model_allowed(settings.model_for(agent), settings.allow_premium)

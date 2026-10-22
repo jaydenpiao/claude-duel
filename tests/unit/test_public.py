@@ -24,7 +24,7 @@ def test_challenge_keeps_only_difficulty() -> None:
         "author": "alice",
         "flag_epoch": 0,
         "spec": {"difficulty": 2},
-    }  # titles are free text (L1)
+    }  # titles are free text
     assert out == {"challenge": kept}
 
 

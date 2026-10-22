@@ -25,3 +25,6 @@ CI runs on a self-hosted runner; see "CI (self-hosted runner)" in AGENTS.md.
 - Branches: short kebab-case, e.g. `sandbox-limits`.
 - PR titles: short, in the same style as commits.
 - PR descriptions: 2 to 4 short bullets.
+
+## Conduct
+This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md).

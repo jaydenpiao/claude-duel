@@ -51,7 +51,7 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             scores[atk.attacker] += solve_award(ch.spec, facts.round_no, atk.attempts, rule)
         else:
             award = defense_award(ch.spec, facts.round_no, rule)
-            scores[ch.author] += award // 2 if ch.spec.probe_solved else award
+            scores[ch.author] += award // 2 if ch.probe_solved else award
     return scores
 
 

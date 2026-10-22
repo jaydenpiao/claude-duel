@@ -1,4 +1,4 @@
-"""Security review fixes for duel sync: TLS for remote hosts (M1) and encoded-flag detection (L1)."""
+"""Security review fixes for duel sync: TLS for remote hosts and encoded-flag detection."""
 
 from __future__ import annotations
 
