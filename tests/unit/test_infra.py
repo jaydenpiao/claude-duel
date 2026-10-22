@@ -61,7 +61,7 @@ class TestStore:
         with store.lock("m1"):
             pass
 
-    def test_secret_lives_only_in_its_own_0600_file(self, tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]  # M2
+    def test_secret_lives_only_in_its_own_0600_file(self, tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
         s = new_state()
         FileMatchStore(tmp_path).save(s)
         assert s.secret not in (tmp_path / "m1.json").read_text()
@@ -161,7 +161,7 @@ class TestLogging:
         NullMetrics().timing("x", 1.0)
 
 
-def test_docker_memory_swap_equals_memory() -> None:  # M5: no swap beyond the memory limit
+def test_docker_memory_swap_equals_memory() -> None:  # no swap beyond the memory limit
     argv = DockerSandbox().argv("duel-x", SandboxLimits(memory_mb=96))
     assert argv[argv.index("--memory") + 1] == "96m"
     assert argv[argv.index("--memory-swap") + 1] == "96m"

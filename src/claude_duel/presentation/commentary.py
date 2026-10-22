@@ -13,6 +13,7 @@ from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.presentation.common import (
     MatchFold,
+    agent_cost,
     attempt_view,
     board,
     defense,
@@ -93,6 +94,7 @@ class Commentary(MatchFold):
     def _scored(self, s: MatchState, e: Event) -> None:
         self._say(f"scoreboard after round {e.data['round']}: {board(s)}")
         self._say(f"spend: {self._spend(s)}")
+        self._costs(s)
 
     def _flagged(self, s: MatchState, e: Event) -> None:
         f = s.findings[-1]
@@ -109,7 +111,13 @@ class Commentary(MatchFold):
         self._say()
         self._say(RULE)
         self._say(result(s))
-        self._say(f"{s.usage.calls} model calls · {s.usage.tokens} tokens · {self._spend(s)}")
+        u = s.usage
+        self._say(f"{u.calls} model calls · in {u.input_tokens:,} · out {u.output_tokens:,} tokens · {self._spend(s)}")
+        self._costs(s)
+
+    def _costs(self, s: MatchState) -> None:
+        for a in s.agents:
+            self._say(f"  {a.name}: {agent_cost(s, a.name)}")
 
     def _spend(self, s: MatchState) -> str:
         return spend(s, self._lifetime(), self._key_limit)

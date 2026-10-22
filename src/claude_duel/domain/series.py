@@ -14,9 +14,11 @@ from collections.abc import Iterable
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
 
 SERIES_CREATED, GAME_FINISHED = "series_created", "game_finished"
+SERIES_SCHEMA_VERSION = 1  # Event.v of series events, versioned apart from match events (#139)
 
 
 class SeriesRule(BaseModel):
@@ -121,11 +123,13 @@ def fold(series_id: str, events: Iterable[Event]) -> SeriesState:
     first = next(it, None)
     if first is None or first.type != SERIES_CREATED:
         raise EventLogCorruptError("series log does not start with series_created")
-    state = SeriesState.model_validate({"series_id": series_id, **first.data})
+    check_version(first, SERIES_SCHEMA_VERSION, "series event")
+    state = typed(SeriesState, {"series_id": series_id, **first.data})
     for e in it:
+        check_version(e, SERIES_SCHEMA_VERSION, "series event")
         if e.type != GAME_FINISHED:
             raise EventLogCorruptError(f"unknown series event {e.type!r}")
-        game = Game.model_validate(e.data)
+        game = typed(Game, e.data)
         if game.game_no != state.next_game():
             raise EventLogCorruptError(f"game {game.game_no} recorded out of order")
         state.games.append(game)

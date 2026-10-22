@@ -1,4 +1,4 @@
-"""Connection-string checks shared by the results transports, with no driver import (M1 of the security review)."""
+"""Connection-string checks shared by the results transports, with no driver import."""
 
 from __future__ import annotations
 

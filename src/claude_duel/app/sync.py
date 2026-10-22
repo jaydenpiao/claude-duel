@@ -149,7 +149,7 @@ def _verified(log: EventLog, snapshots: MatchStore, mid: str) -> tuple[MatchStat
     report = replay(state, [e for _, e in chain])
     if not chain or not report.consistent:
         raise ReplayMismatchError("replay mismatch: " + (", ".join(report.mismatches) or "no events"))
-    for _, e in chain:  # logs from before the record-time guard (R3-2) were never checked
+    for _, e in chain:  # logs from before the record-time guard were never checked
         if flag_shaped(json.dumps(e.data)):
             raise FlagLeakError(f"flag-shaped text in event {e.seq} ({e.type})")
     return state, chain

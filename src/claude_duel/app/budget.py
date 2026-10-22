@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import MatchState
-from claude_duel.ports import Completion, SpendLedger
+from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
 # and deliberately not configurable: a config that could add models or lower prices would bypass the spend caps.
@@ -25,12 +25,36 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-4.1-mini": (0.40, 1.60),
+    # Current lineups, standard (non-batch, short-context, global) list prices as of 2026-10-22:
+    # https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing
+    "claude-haiku-5-5": (0.10, 0.50),  # prompts up to 100k tokens; arena prompts are far below that
+    "gpt-6-luna": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "gpt-6.1-sol": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "gpt-5.6-sol": (4.00, 20.00),
+    "claude-fable-5-1": (10.00, 50.00),
+    "gpt-6-astra": (10.00, 50.00),
 }
+# Top-tier models (#10): priced and allowlisted, but refused unless a config sets ``allow_premium = true``,
+# so a typo or a default can never start a costly match. The spend caps still apply on top.
+PREMIUM: frozenset[str] = frozenset(
+    {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-5.6-sol", "claude-fable-5-1", "gpt-6-astra"}
+)
+VENDORS = {"claude-": "anthropic", "gpt-": "openai"}
 
 
-def check_model_allowed(model: str) -> None:
+def vendor_of(model: str) -> str:
+    if model == FAKE_MODEL:
+        return "fake"
+    return next((v for prefix, v in VENDORS.items() if model.startswith(prefix)), "unknown")
+
+
+def check_model_allowed(model: str, allow_premium: bool = False) -> None:
     if model not in DEFAULT_PRICES:
         raise ConfigError(f"model {model!r} is not in the allowlist: {sorted(DEFAULT_PRICES)}")
+    if model in PREMIUM and not allow_premium:
+        raise ConfigError(f"model {model!r} is premium; set allow_premium = true in the config to use it")
 
 
 class BudgetLimits(BaseModel):
@@ -84,11 +108,21 @@ class CostBudget:
                 raise BudgetExceededError(f"budget exceeded: {what}")
         self.check_lifetime()
 
-    def charge(self, match_id: str, model: str, completion: Completion) -> float:
+    def reserve(self, match_id: str, model: str, request: CompletionRequest) -> str:
+        """ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
+        pin, pout = self._prices[model]
+        usd = (len(request.system) + len(request.prompt)) * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
+        return self._ledger.reserve(match_id, model, usd)
+
+    def release(self, match_id: str, model: str, reservation: str) -> None:
+        """The call failed without a charge: cancel its reservation."""
+        self._ledger.record(match_id, model, 0, 0.0, settles=reservation)
+
+    def charge(self, match_id: str, model: str, completion: Completion, reservation: str | None = None) -> float:
         """Count the call against the run caps and the shared ledger; return its cost in USD."""
         usd = self.cost(model, completion)
         self.run_calls += 1
         self.run_usd += usd
         # Every call is ledgered, $0 included, so mispriced or free models stay visible.
-        self._ledger.record(match_id, model, completion.total_tokens, usd)
+        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation)
         return usd

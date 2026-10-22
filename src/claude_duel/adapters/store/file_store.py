@@ -81,7 +81,7 @@ class FileMatchStore:
         secret = path.with_suffix(".secret")
         if secret.exists():
             state.secret = secret.read_text(encoding="utf-8")
-        if not state.secret:  # a pre-M2 file carries it inline (moved out on next save); otherwise it is lost
+        if not state.secret:  # an older file carries it inline (moved out on next save); otherwise it is lost
             raise MatchNotFoundError(f"{match_id}: match secret missing ({secret.name})")
         return state
 
