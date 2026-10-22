@@ -72,7 +72,29 @@ False positives are expected (the policy already blocks most of these). Findings
 | detector dry-run on fake provider + adversarial fixtures | n/a | 0.00 |
 | reserve (retries, longer outputs) | n/a | 0.30 |
 | **Total cap** | | **≤ $1.98** |
-Enforce with `run_max_usd = 2.0`, `match_max_usd = 0.05` in an `experiment.toml`, plus the lifetime ledger (spend so far + 2 must be < $40).
+**Approved by lead (2026-10-22, 11:12 AM PDT): the $2 run, using a run-specific cap override. Defaults are not raised.**
+
+*How the override is applied*
+- A new CLI flag is scoped to one invocation: `duel experiment stakes --prereg docs/runs/stakes-prereg.md --run-max-usd 2.00 --override-reason "stakes-prereg-v1"` (a new subcommand; the existing `duel bench` stays a manifest solve-rate tool). There is **no** config file key or `DUEL_*` env var for it, so it can't leak into dev/staging/prod configs or CI. The existing `DUEL_RUN_MAX_USD` is not reused for this, because it changes defaults for every command in a shell session.
+- It is applied in `app/container.py` only, by building `BudgetLimits` as `settings.budget.model_copy(update={"run_max_usd": override})` for that process's `CostBudget`. `Settings` and `configs/*.toml` are untouched.
+- Guard rails, validated before any call:
+  - The override may only raise `run_max_usd`, never `match_max_usd` (stays 0.05 via the experiment's rules), `lifetime_max_usd` ($40) or `key_limit_usd` ($50).
+  - It must be <= a hard ceiling `RUN_OVERRIDE_CEILING_USD = 2.00` (a code constant).
+  - `ledger.total_usd() + override` must be <= `lifetime_max_usd`, or it is refused upfront.
+  - `--override-reason` is required.
+- The strictest limit still wins (wallet → match → run (overridden) → lifetime).
+
+*How it's logged*
+- At startup there's one `WARNING` log line: `budget override: run_max_usd 0.50 -> 2.00 (reason=stakes-prereg-v1, ceiling=2.00, lifetime spent=$X/$40)`.
+- A `budget_overridden{field, default, value, reason, ceiling}` event goes into every match log of that run, right after `match_created`, so replay and `docs/runs/` reports show it. Match scoring ignores it.
+- A ledger row `{"kind":"override", run_id, value, reason}` is written ($0) for auditing. The JSON summary carries `budget.overrides: [...]`, and the commentary footer says `run cap overridden to $2.00 (stakes-prereg-v1)`.
+
+*Tests*
+- Defaults stay unchanged: `BudgetLimits()` and `load_settings(configs/{dev,staging,prod}.toml)` still give run caps $0.50/$1.00/$2.00 and match caps $0.25/$0.50/$1.00 before and after a run with the override (snapshot the resolved settings).
+- No leakage: two `CostBudget`s built in one test, with and without the override, keep independent limits. A subsequent `duel run` in the same process or with the same env uses the default.
+- Guard rails: override > ceiling, override < default, missing reason, an attempt to override `match_max_usd`/`lifetime_max_usd`, and ledger + override > $40 each fail with `ConfigError` before any provider call (fake provider call count == 0).
+- Enforcement: with a fake priced model, the run stops at exactly the overridden cap (<= 1 in-flight call overshoot, as documented).
+- Logging: the event, warning line, ledger row and JSON field are present only when an override is used, and absent otherwise. The commentary snapshot without the override is unchanged.
 - **Statistics, honestly:** the unit is the challenge (nano: 180 matches × 4 = 720 challenges, 240 per arm), paired by seed. Use McNemar or a paired logistic GLMM (random effect per seed) on validity and capture, with Holm correction across 3 framings × ~4 primary metrics. With 240 per arm and a ~60% base rate, the minimum detectable difference is ~**12–13 percentage points** (α=.05, power .8, two-sided). Smaller effects, which the 2025 null study predicts, **won't be detectable**; a null result here means "no large effect", not "no effect". Tamper findings at a ~0–1% base rate can't be compared statistically at this n. Report counts with exact (Clopper-Pearson) CIs and read every finding by hand. Pre-register metrics and analysis in `docs/runs/stakes-prereg.md` before any spend. The mini slice is descriptive only.
 
 ## 6. Ranked ideas
