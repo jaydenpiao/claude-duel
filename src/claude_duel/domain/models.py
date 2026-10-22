@@ -41,13 +41,15 @@ class SandboxLimits(_Frozen):
 class ScoringRule(_Frozen):
     """Which pure scorer (``scoring.SCORERS``) and its parameters (ADR 0007)."""
 
-    kind: Literal["classic", "efficiency"] = "classic"
+    kind: Literal["classic", "efficiency", "timed"] = "classic"
     solve_points: int = 10
     defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
     invalid_penalty: int = 5
     # efficiency (#35): a capture loses floor(max_penalty * tokens_used / reference_tokens) points, never below 1
     max_penalty: int = Field(default=10, ge=0)
     reference_tokens: int = Field(default=4000, ge=1)
+    # timed (#36): a capture loses min(full - 1, floor(max_penalty * min(1, tokens_used / par_tokens)))
+    par_tokens: int = Field(default=8000, ge=1)
 
 
 _LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
@@ -65,6 +67,17 @@ class WalletRule(_Frozen):
 
     per_agent_tokens: int | None = Field(default=None, ge=1)
     per_agent_usd: float | None = Field(default=None, gt=0)
+
+
+class ClockRule(_Frozen):
+    """Token game clock (#36, mode ``blitz``): a per-agent bank of clock tokens plus a Fischer increment per call.
+
+    Clock time is tokens, never wall time (lead decision), so flag falls replay exactly.
+    """
+
+    bank_tokens: int | None = Field(default=None, ge=1)
+    increment_tokens: int = Field(default=0, ge=0)
+    input_divisor: int = Field(default=4, ge=1)
 
 
 class MemoryRule(_Frozen):
@@ -95,6 +108,7 @@ class Rules(_Frozen):
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
     wallet: WalletRule = WalletRule()
+    clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
@@ -187,6 +201,7 @@ class Usage(BaseModel):
     calls: int = 0
     tokens: int = 0
     usd: float = 0.0
+    clock_tokens: int = 0  # token-clock charge (#36): output + input // clock.input_divisor, per agent
     elapsed_ms: int = 0  # recorded provider time; the match deadline is measured on it, so resume keeps it
 
 

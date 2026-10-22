@@ -178,6 +178,8 @@ class MatchEngine:
             tokens=completion.total_tokens,
             usd=usd,
             elapsed_ms=round(elapsed * 1000),
+            input_tokens=completion.input_tokens,
+            output_tokens=completion.output_tokens,
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion

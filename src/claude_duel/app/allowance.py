@@ -1,4 +1,4 @@
-"""Per-agent wallets (#35): a game rule folded from ``call_charged``, checked before the safety caps.
+"""Per-agent allowances (#35 wallets, #36 token clock): one fold over ``call_charged``, checked before the caps.
 
 ``CostBudget`` stays the safety floor; a wallet only tightens it. A call that starts under the wallet is
 allowed, so an agent can overshoot by at most one call (same convention as ``CostBudget.check``).
@@ -16,7 +16,23 @@ def empty(state: MatchState, agent: str) -> str | None:
         return f"wallet empty: {agent} used {used.tokens}/{wallet.per_agent_tokens} tokens"
     if wallet.per_agent_usd is not None and used.usd >= wallet.per_agent_usd:
         return f"wallet empty: {agent} spent ${used.usd:.4f}/${wallet.per_agent_usd}"
-    return None
+    return clock_fallen(state, agent)
+
+
+def clock_left(state: MatchState, agent: str) -> int | None:
+    """Clock tokens ``agent`` has left (bank + increments - charged), or None without a clock."""
+    clock = state.rules.clock
+    if clock.bank_tokens is None:
+        return None
+    used = state.usage_by_agent.get(agent, Usage())
+    return clock.bank_tokens + clock.increment_tokens * used.calls - used.clock_tokens
+
+
+def clock_fallen(state: MatchState, agent: str) -> str | None:
+    left = clock_left(state, agent)
+    if left is None or left > 0:
+        return None
+    return f"clock: {agent}'s flag fell ({left} clock tokens left)"
 
 
 def check(state: MatchState, agent: str) -> None:

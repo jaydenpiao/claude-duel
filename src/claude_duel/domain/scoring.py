@@ -54,16 +54,31 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     return scores
 
 
-def efficiency(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
-    """Classic, except a capture is discounted by the attack's recorded tokens (never below 1; defenses unchanged)."""
+def _discounted(facts: RoundFacts, rule: ScoringRule, award: Callable[[int, int, ScoringRule], int]) -> dict[str, int]:
+    """Classic, with each capture's value replaced by ``award(full, tokens_used, rule)``; defenses unchanged."""
     scores = classic(facts, rule)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
-            scores[atk.attacker] -= full - efficiency_award(full, atk.tokens_used, rule)
+            scores[atk.attacker] -= full - award(full, atk.tokens_used, rule)
     return scores
+
+
+def efficiency(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
+    """Classic, except a capture is discounted by the attack's recorded tokens (never below 1; defenses unchanged)."""
+    return _discounted(facts, rule, efficiency_award)
+
+
+def timed(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
+    """Blitz scoring (#36): a slow capture (in recorded tokens against ``par_tokens``) is worth less, never below 1."""
+    return _discounted(facts, rule, timed_award)
+
+
+def timed_award(full: int, tokens_used: int, rule: ScoringRule) -> int:
+    slow = min(full - 1, rule.max_penalty * min(tokens_used, rule.par_tokens) // rule.par_tokens)
+    return full - slow
 
 
 def efficiency_award(full: int, tokens_used: int, rule: ScoringRule) -> int:
@@ -71,7 +86,7 @@ def efficiency_award(full: int, tokens_used: int, rule: ScoringRule) -> int:
     return max(1, full - rule.max_penalty * tokens_used // rule.reference_tokens)
 
 
-SCORERS: dict[str, Scorer] = {"classic": classic, "efficiency": efficiency}
+SCORERS: dict[str, Scorer] = {"classic": classic, "efficiency": efficiency, "timed": timed}
 
 
 def solve_award(spec: ChallengeSpec, round_no: int, attempts: int, rule: ScoringRule) -> int:
