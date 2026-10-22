@@ -11,9 +11,11 @@ from rich.console import Console
 from rich.spinner import Spinner
 
 from claude_duel import cli
+from claude_duel.app.container import build_event_log
 from claude_duel.app.session import play
 from claude_duel.config import Settings
-from claude_duel.domain.models import Rules
+from claude_duel.domain import events as ev
+from claude_duel.domain.models import Event, Rules
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.arena import ArenaModel, ArenaView, Player, frame, meter, sparkline, tug
 from tests.helpers import FLAG, forfeit_events
@@ -94,3 +96,29 @@ def test_cli_view_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     assert "🏆 winner:" in capsys.readouterr().out
     assert cli.main(["run", "--match-id", "b"]) == 0  # not a TTY: commentary
     assert "scoreboard after round" in capsys.readouterr().out
+
+
+def test_attack_started_animates_and_old_logs_replay(tmp_path: Path) -> None:
+    settings = Settings(store_dir=tmp_path, sandbox="subprocess", rules=Rules(rounds=1))
+    seen: list[str] = []
+    view = ArenaView(_console(), "m", 50.0, lambda: 0.0)
+
+    def spy(e: Event) -> None:
+        view(e)
+        if e.type == ev.ATTACK_STARTED:
+            seen.append(view.model.now)
+
+    state = play(settings, "m", InMemoryMetrics(), spy)
+    view.close()
+    assert seen
+    assert "attacking" in seen[0]
+    assert seen[0].endswith("... try 1/4")
+    events = build_event_log(settings).read("m")
+    # a log written before attack_started existed: same events without them, renumbered
+    old = [e for e in events if e.type != ev.ATTACK_STARTED]
+    old = [e.model_copy(update={"seq": i}) for i, e in enumerate(old)]
+    folded = ev.initial_state("m", old[0])
+    for e in old:
+        ev.apply(folded, e)
+    assert folded.scores == state.scores
+    assert folded.attempts == state.attempts

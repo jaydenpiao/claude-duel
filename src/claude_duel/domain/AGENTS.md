@@ -6,7 +6,7 @@ Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to i
 - `state_machine.py`: `_ALLOWED` transitions, `next_stage`, `transition`, `recover`.
 - `flags.py`: `derive_flag`, `assert_no_flag`, `redact`, `FLAG_PATTERN` (`DUEL{hex}`).
 - `policy.py`: static AST check of challenge (and solver) source, plus `answer_exposed` (hidden-answer rule, ADR 0006).
-- `events.py`: event types, one typed payload model per type, `SCHEMA_VERSION`, `payload()` validation, `apply`/`fold` (ADR 0004).
+- `events.py`: event types, one typed payload model per type, `SCHEMA_VERSION`, `payload()` validation, `apply`/`fold` (ADR 0004). `attack_started` (key, try_no) is emitted before each attack call for presentation; its handler changes no state, so logs written before it existed replay identically.
 - `modes.py`: `MODES` presets (plain `Rules`: classic, quick, gated, checked); `config.load_settings` applies `[rules] mode` / `DUEL_MODE` first, then the config's own fields.
 - `contract.py`: the `check` challenge form (`compose`, `WRAPPER`, `solver_program`; ADR 0010).
 - `findings.py`: tamper detector (`scan_build`, `scan_payload`); logged as `finding_flagged`, never scored (ADR 0008). `policy.reason_code` gives rejection reasons a machine code.
