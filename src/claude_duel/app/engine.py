@@ -213,9 +213,10 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
-                agent, state.round, index, state.rules, error, last, self._memory(state, agent)
+                agent, state.round, index, state.rules, error, last, self._memory(state, agent), self._scratch(state)
             )
             completion = self._call(state, agent, self._request(state, prompt, "build"))
+            self._note(state, agent, completion.text)
             try:
                 last = agents.parse_challenge(completion.text)
                 last, problem = self._shape(state, last)
@@ -277,6 +278,21 @@ class MatchEngine:
         for cid in state.challenges:
             assert_no_flag(text, derive_flag(state.secret, cid), "memory")
         return text
+
+    @staticmethod
+    def _scratch(state: MatchState) -> bool:
+        return state.rules.memory.kind == "summary+scratchpad"
+
+    def _note(self, state: MatchState, agent: str, text: str) -> None:
+        """Record the reply's private note (scratchpad memory only), redacted against every flag of the match."""
+        note = agents.parse_notes(text) if self._scratch(state) else ""
+        if not note:
+            return
+        flags = tuple(derive_flag(state.secret, cid) for cid in state.challenges)
+        note = redact(note, flags)
+        for f in flags:
+            assert_no_flag(note, f, "note")
+        self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
     def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
         return CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
@@ -373,10 +389,12 @@ class MatchEngine:
                 len(history) + 1,
                 pairs,
                 self._memory(state, attacker),
+                self._scratch(state),
             )
             assert_no_flag(prompt, flag, "attack prompt")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
             completion = self._call(state, attacker, self._request(state, prompt, "attack"))
+            self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
 

@@ -41,6 +41,7 @@ ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
+NOTE_RECORDED = "note_recorded"
 
 SCHEMA_VERSION = 1  # Event.v of new events; 0 = written before versioning (same payload shapes)
 
@@ -107,6 +108,14 @@ class ChallengeAttacked(_Payload):
     attack: Attack
 
 
+class NoteRecorded(_Payload):
+    """An agent's private scratchpad note (memory kind ``summary+scratchpad``), already flag-redacted."""
+
+    agent: str
+    round: int
+    text: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
@@ -168,6 +177,10 @@ def _attacked(state: MatchState, p: ChallengeAttacked) -> None:
     state.attacks[p.key] = p.attack
 
 
+def _noted(state: MatchState, p: NoteRecorded) -> None:
+    state.notes.setdefault(p.agent, {})[p.round] = p.text  # last note of the round wins
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -187,6 +200,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
     FINDING_FLAGGED: (FindingFlagged, _flagged),
+    NOTE_RECORDED: (NoteRecorded, _noted),
 }
 
 

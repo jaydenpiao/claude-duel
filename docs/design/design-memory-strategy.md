@@ -10,7 +10,7 @@ In round N+1, each agent gets a bounded, flag-free, fenced summary of rounds 1..
 2. **Opponent's challenges you attacked**: title, difficulty, outcome, your attempts count, last payload. A compact "technique tag" comes from a cheap static classifier over the opponent's source AST (`maze`, `hash-check`, `checksum`, `state-machine`, `vm`, `other`), done with `ast`, no LLM, deterministic.
 3. **Opponent tendencies**: counts of the opponent's tags so far, and their average attempts to capture.
 4. **Scoreboard** after round N.
-5. **Your scratchpad** (if `kind="summary+scratchpad"`): the agent's own note from the previous round.
+5. **Your scratchpad** (if `kind="summary+scratchpad"`, built in #34): the agent's own latest note from an earlier round.
 
 Bounded context: hard cap `rule.max_chars` (default 1500 chars, about 400 tokens). Truncation is deterministic: oldest rounds are dropped first, then sections 3, then 2, with a marker `[older rounds omitted]`.
 
