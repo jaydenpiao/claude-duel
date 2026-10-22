@@ -15,6 +15,9 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it; real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. Tests: `tests/integration/test_docker_sandbox.py`.
 - Never pass the host env through; the child env is only a minimal PATH.
 
+## metrics/
+- `jsonl_metrics.py`: `JsonlMetrics` appends one scrubbed JSON line per counter or timing (match id, trace id, tags) to `<store>/metrics.jsonl` under the shared flock; `TeeMetrics` fans out to several sinks. Picked by `Settings.metrics` in `container.build_metrics` (#11).
+
 ## store/
 - `file_store.py`: atomic JSON save (tmp + fsync + rename, mode 0600) without the secret, which is written once to `<id>.secret` (0600); `load` fails closed if it is missing and migrates pre-M2 files that carried it inline, non-blocking `flock` on `<id>.lock` (`MatchLockedError`); the kernel releases it if the holder dies, so locks never go stale. Never unlink lock files. Match ids must be alphanumeric/hyphen.
 - `jsonl.py`: shared flock + fsync append-only JSON-lines helpers used by the ledger and event log.
