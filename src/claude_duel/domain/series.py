@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
-from claude_duel.domain.models import AgentSpec, Event, MatchState
+from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
 
 SERIES_CREATED, GAME_FINISHED = "series_created", "game_finished"
 
@@ -49,6 +49,8 @@ class SeriesState(BaseModel):
     seed: str
     rule: SeriesRule
     agents: tuple[AgentSpec, AgentSpec]
+    rules: Rules | None = None  # pinned in series_created (None in older logs: the config at the time applied)
+    limits: SandboxLimits | None = None
     games: list[Game] = Field(default_factory=list)
 
     def wins(self) -> dict[str, int]:
