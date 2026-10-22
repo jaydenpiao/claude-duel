@@ -15,7 +15,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
+from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, RunOverride, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
@@ -101,9 +101,15 @@ def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 
 
-def build_budget(settings: Settings) -> CostBudget:
-    """One per process invocation: its run counters are what ``run_max_calls``/``run_max_usd`` cap."""
-    return CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES)
+def build_budget(settings: Settings, override: RunOverride | None = None) -> CostBudget:
+    """One per process invocation: its run counters are what ``run_max_calls``/``run_max_usd`` cap.
+
+    ``override`` (``duel experiment`` only) is the one place a cap is raised: a copy of the limits, so the
+    configured defaults and every other ``CostBudget`` are untouched."""
+    limits = settings.budget
+    if override is not None:
+        limits = limits.model_copy(update={override.field: override.value})
+    return CostBudget(limits, build_ledger(settings), DEFAULT_PRICES, override)
 
 
 def gate_agent(settings: Settings, agents: tuple[AgentSpec, AgentSpec]) -> AgentSpec:
