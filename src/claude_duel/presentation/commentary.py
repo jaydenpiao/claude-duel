@@ -90,6 +90,10 @@ class Commentary(MatchFold):
         self._say(f"scoreboard after round {e.data['round']}: {board(s)}")
         self._say(f"spend: {self._spend(s)}")
 
+    def _flagged(self, s: MatchState, e: Event) -> None:
+        f = s.findings[-1]
+        self._say(f"  ⚑ finding ({f.severity}): {f.agent} · {f.category} · {f.rule_id} (logged, not scored)")
+
     def _recovered(self, s: MatchState, e: Event) -> None:
         self._say("resuming where the match stopped")
 

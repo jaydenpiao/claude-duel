@@ -28,6 +28,7 @@ HOOKS = {
     ev.ROUND_SCORED: "_scored",
     ev.MATCH_FAILED: "_failed",
     ev.MATCH_RECOVERED: "_recovered",
+    ev.FINDING_FLAGGED: "_flagged",
 }
 
 

@@ -12,12 +12,14 @@ All matches had 3 rounds with 1 challenge per side per round, 3 attack tries, up
 | hard-6 | nano vs mini | + debug-print tip | 0/6 | 0 | 0 | $0.0153 |
 | hard-7 | nano vs mini | maze-centred design | 0/6 | 0 | 0 | $0.0202 |
 | hard-8 | nano vs mini | + solver field | 0/6 | 0 | 0 | $0.0206 |
-| hard-9 | nano vs mini | solver = copied check + search | 1/6 | 0 | 1 | $0.0178 |
-| hard-10 | nano vs mini | check(s) structure | 2/6 | 0 | 2 | $0.0196 |
-| hard-11 | nano vs mini | + crash type/line, `sys.exit` and `_` allowed | 2/6 | 0 | 2 (one each) | $0.0189 |
+| hard-9 | nano vs mini | none: the intended "copy check + search" solver prompt failed to apply, so this is a rerun of hard-8 | 1/6 | 0 | 1 | $0.0178 |
+| hard-10 | nano vs mini | none: the intended `check(s)` prompt also failed to apply (another rerun of hard-8) | 2/6 | 0 | 2 | $0.0196 |
+| hard-11 | nano vs mini | + crash type/line, `sys.exit` and `_` allowed (solver prompt still the hard-8 one) | 2/6 | 0 | 2 (one each) | $0.0189 |
 | hard-mm-1 | mini vs mini | same as hard-11 | 1/6 | 0 | 1 | $0.0409 |
 | hard-gate-1 | nano vs mini | + difficulty gate (nano probe) | 1/6 | 0 | 1 | $0.0264 |
 
 The 13 matches cost $0.2643 in total. For comparison, the earlier tune-1..4 matches, before the hidden-answer rule, had 15/24 valid challenges and 15 captures out of 15 attacks, all on the first try, with 0 defenses.
 
 **Findings.** Hidden answers and defense-first scoring do produce defenses, and both sides defended once in hard-11. Validity is what limits us now. Low-tier authors (and mini as well) usually write a reference payload or solver that their own challenge rejects. No match had a capture and a defense at the same time, so none of them is demo-worthy yet. The next lever (tracked as an issue) is for the arena to search for the answer itself: the author declares `check(s)`, an alphabet and a length, and the arena searches inside one sandbox run.
+
+**Correction (later on 2026-10-22).** The search-solver prompt edits planned for hard-9 and hard-10 never reached the code, so the shipped prompt is the hard-8 solver wording. hard-9 to hard-11 differ from hard-8 only by the changes listed in their rows. Untested idea: a search-based solver prompt, tracked in #27.

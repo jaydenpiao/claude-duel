@@ -7,6 +7,7 @@ import logging
 import secrets
 
 from claude_duel.app.container import build_engine, build_store, pin_agents
+from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
 from claude_duel.domain.errors import MatchNotFoundError
 from claude_duel.domain.models import MatchState
@@ -30,6 +31,7 @@ def play(settings: Settings, match_id: str, metrics: Metrics, observer: EventObs
             state = MatchState(
                 match_id=match_id,
                 secret=secrets.token_hex(32),
+                framing_text=framing_text(settings.rules.framing),
                 seed=settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16],
                 agents=pin_agents(settings),
                 rules=settings.rules,
