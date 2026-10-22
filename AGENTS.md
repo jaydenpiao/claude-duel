@@ -36,6 +36,25 @@ ruff check . && ruff format --check . && mypy src && python scripts/check_docs.p
 ```
 `pytest` excludes `live` tests and fails under 90% coverage (branch). `docker`-marked tests run against a real daemon and skip when none is reachable. CI runs Python 3.11, 3.12, 3.13.
 
+## CI (self-hosted box runner)
+
+GitHub-hosted runners are unavailable for this private repo (billing), so every workflow job runs on
+`runs-on: [self-hosted, box]` (job names unchanged). The runners live on the dev box:
+
+- Three ephemeral runners (`box-runner`, `box-runner2`, `box-runner3`, labels `self-hosted,box`), each registered for
+  one job, then re-registered by `scripts/box-ci/runner-loop.sh [N]` with a wiped `_work` dir.
+- Jobs run as the unprivileged user `ghrunner` with `env -i`: no `OPENAI_API_KEY` and no box credentials. The runner
+  can't reach the host Docker daemon. It uses its own rootless dockerd (`scripts/box-ci/dockerd-rootless.sh`,
+  socket `/home/ghrunner/.run/docker.sock`).
+- Rootless Docker without systemd can't enforce cgroup limits, so `docker_probe` refuses it. The real-Docker sandbox
+  tests then skip on the runner. Run them locally against a rootful daemon (`sudo -n docker` is picked up by the
+  `docker_cmd` fixture).
+- Start: `sudo scripts/box-ci/dockerd-rootless.sh`, then `scripts/box-ci/restart-runners.sh` (or per runner, N in "" 2 3:
+  `nohup scripts/box-ci/runner-loop.sh $N >> /workspace/box-ci/runner$N.log 2>&1 &`).
+- Stop: `kill $(cat /workspace/box-ci/runner-loop*.pid); sudo pkill -u ghrunner`, then delete the offline runners
+  (`gh api repos/jaydenpiao/claude-duel/actions/runners`, `gh api -X DELETE .../runners/<id>`).
+- Logs: `/workspace/box-ci/runner*.log`.
+
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
 - PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).

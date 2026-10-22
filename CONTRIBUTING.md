@@ -11,6 +11,8 @@ ruff check . && ruff format --check . && mypy src && vulture && pylint src tests
 ```
 Coverage must stay at or above 90%. CI also fails on complexity over 10, dead code, duplicated code, commented-out code and TODOs without an issue link (see AGENTS.md). New failure handling needs a test that triggers it.
 
+CI runs on a self-hosted box runner; see "CI (self-hosted box runner)" in AGENTS.md.
+
 ## Rules
 - Domain code (`src/claude_duel/domain`) stays pure, with no I/O.
 - New providers, sandboxes or stores go behind the Protocols in `ports.py` and are wired only in `app/container.py`.
