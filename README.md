@@ -21,6 +21,7 @@ duel run --format json              # one JSON summary instead (scripts, CI)
 duel card demo [--out card.svg]     # shareable SVG card: models, score, rounds, spend, replay-verified log hash
 duel replay demo --transcript       # refold the event log and verify scores
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
+duel tournament                     # round robin (<= 6) or Swiss over the config's [[tournament.entrants]]
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match
 duel estimate [--mode capped]       # offline worst-case $ per match for each preset (no API calls)
 duel resume demo                    # continue a crashed or aborted match
@@ -93,6 +94,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_RUN_MAX_CALLS` | `[budget] run_max_calls` | 200 |
 | `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 40 |
 | `DUEL_DOCKER` | docker command, e.g. `"sudo docker"` | `docker` |
+| `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
 
 `OPENAI_API_KEY` is read from the environment only.
 

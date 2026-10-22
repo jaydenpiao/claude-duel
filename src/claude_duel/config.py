@@ -14,6 +14,7 @@ from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.domain.modes import preset
+from claude_duel.domain.tournament import TournamentRule
 
 
 class Settings(BaseModel):
@@ -29,12 +30,14 @@ class Settings(BaseModel):
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
     gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
+    tournament: TournamentRule | None = None  # [tournament] entrants for `duel tournament` (#39)
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
+    docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
 
     def model_for(self, agent: AgentSpec) -> str:
         """The single place an agent's effective model is resolved."""
@@ -45,6 +48,7 @@ class Settings(BaseModel):
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
+    "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_OPENAI_MODEL": "openai_model",
