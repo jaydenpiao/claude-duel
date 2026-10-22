@@ -14,6 +14,7 @@ from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.domain.modes import preset
+from claude_duel.domain.tournament import TournamentRule
 
 
 class Settings(BaseModel):
@@ -29,6 +30,7 @@ class Settings(BaseModel):
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
     gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
+    tournament: TournamentRule | None = None  # [tournament] entrants for `duel tournament` (#39)
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
