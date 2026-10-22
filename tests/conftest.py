@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
@@ -75,12 +75,25 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
     return make
 
 
+def find_docker(env: Mapping[str, str]) -> tuple[tuple[str, ...] | None, list[str]]:
+    """The first working docker CLI (DUEL_DOCKER, plain docker, or passwordless sudo), plus each refusal reason."""
+    candidates = [tuple(shlex.split(env["DUEL_DOCKER"]))] if env.get("DUEL_DOCKER") else []
+    candidates += [("docker",), ("sudo", "-n", "docker")]
+    reasons = []
+    for cmd in candidates:
+        problem = docker_probe(cmd)
+        if problem is None:
+            return cmd, reasons
+        reasons.append(f"{' '.join(cmd)}: {problem}")
+    return None, reasons
+
+
 @pytest.fixture(scope="session")
 def docker_cmd() -> tuple[str, ...]:
-    """A working docker CLI (DUEL_DOCKER, plain docker, or passwordless sudo); skips the test otherwise."""
-    candidates = [tuple(shlex.split(os.environ["DUEL_DOCKER"]))] if os.environ.get("DUEL_DOCKER") else []
-    candidates += [("docker",), ("sudo", "-n", "docker")]
-    for cmd in candidates:
-        if docker_probe(cmd) is None:
-            return cmd
+    """A working docker CLI; skips the test otherwise, or fails it when DUEL_REQUIRE_DOCKER=1 (CI)."""
+    cmd, reasons = find_docker(os.environ)
+    if cmd is not None:
+        return cmd
+    if os.environ.get("DUEL_REQUIRE_DOCKER") == "1":
+        pytest.fail("DUEL_REQUIRE_DOCKER=1 but no usable docker: " + "; ".join(reasons), pytrace=False)
     pytest.skip("docker daemon not reachable")
