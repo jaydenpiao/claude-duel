@@ -36,6 +36,13 @@ ruff check . && ruff format --check . && mypy src && python scripts/check_docs.p
 ```
 `pytest` excludes `live` tests and fails under 90% coverage (branch). `docker`-marked tests run against a real daemon and skip when none is reachable. CI runs Python 3.11, 3.12, 3.13.
 
+## CI (self-hosted runner)
+
+Workflows run on `runs-on: [self-hosted, box]` (job names unchanged), a maintainer-operated runner for this private
+repo only. Jobs run as an unprivileged user with no API keys. The real-Docker sandbox tests skip when the daemon
+can't enforce cgroup limits (`docker_probe`); run them locally against a rootful daemon. Fork PR workflows stay
+disabled. Operating notes live outside the repo.
+
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
 - PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).
