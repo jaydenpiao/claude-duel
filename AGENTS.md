@@ -20,7 +20,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 configs/{dev,staging,prod}.toml   per-env model + budget
 docs/requirements.md docs/design.md docs/demo.tape (README GIF) docs/adr/NNNN-*.md
 docs/design/                      design specs (see its README)
-docs/runs/                        live-run reports
+docs/runs/                        live-run reports and pre-registrations (launch: launch-prereg.md + launch.toml)
 src/claude_duel/                  code (see above)
 tests/{unit,integration,e2e}/     see tests/AGENTS.md
 .github/workflows/{ci,security,staging,release}.yml  (+ dependabot.yml, SECURITY.md)

@@ -1,0 +1,19 @@
+# Pinned launch rules (docs/runs/launch-prereg.md). Fake agents as written; for the real run set
+# provider/model per the chosen tier and alternate which vendor is "a" per seed.
+sandbox = "docker"
+[[agents]]
+name = "a"
+[[agents]]
+name = "b"
+[rules]
+mode = "checked"
+rounds = 3
+challenges_per_round = 1
+max_attempts = 3
+max_output_tokens = 8000
+reasoning_effort = "low"
+variety = true
+framing = { kind = "neutral" }
+[budget]
+match_max_usd = 0.75
+run_max_usd = 20.0
