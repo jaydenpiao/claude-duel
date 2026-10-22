@@ -178,6 +178,7 @@ class Challenge(_Frozen):
     author: str
     spec: ChallengeSpec | None
     forfeit_reason: str | None = None
+    flag_epoch: int = 0  # R3-2: the repair try that built it; each try runs under its own flag (0 in older logs)
 
 
 class Validation(_Frozen):

@@ -16,6 +16,7 @@ Use cases and wiring. Root: [AGENTS.md](../../../AGENTS.md).
 - `container.py`: `make_provider`, `make_sandbox` (fails closed for real models), `build_store`, `pin_agents`, `build_engine(settings, metrics, store, agents, observer, budget)`. `build_budget` makes the one `CostBudget` per invocation: `play_series`/`play_tournament` create it once and pass it to every game (R3-1), so `run_max_calls`/`run_max_usd` span the whole series or tournament. New adapters are wired here and nowhere else.
 
 Gotchas
+- R3-2: every flag comes from `MatchEngine._flag_for` (a fresh flag per repair try until the challenge is built), the solver-failure reason is redacted, and `_record` refuses any event whose JSON carries a flag variant of the match (`_no_flags`).
 - Every prompt must pass `assert_no_flag`; attacker-visible output must go through `redact`.
 - `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.openai_model`.
 
