@@ -43,7 +43,7 @@ def play_series(
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
     settings = pinned(settings, state.rules, state.limits, series_id)
-    budget = budget or build_budget(settings)  # R3-1: one run budget across every game of this invocation
+    budget = budget or build_budget(settings)  # one run budget across every game of this invocation
     while not state.done():
         if state.spent_usd() >= state.rule.series_max_usd:
             raise BudgetExceededError(f"series cost ${state.spent_usd():.4f}/${state.rule.series_max_usd}")

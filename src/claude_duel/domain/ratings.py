@@ -38,7 +38,7 @@ class Rating:
 
 
 def entrant(agent: AgentSpec) -> str:
-    """Rating identity. A handicapped agent is a separate entrant (arch round 3), never pooled with the plain one."""
+    """Rating identity. A handicapped agent is a separate entrant, never pooled with the plain one."""
     base = (
         f"fake:{agent.model or 'fake'}@skill{agent.skill}"
         if agent.provider == "fake"

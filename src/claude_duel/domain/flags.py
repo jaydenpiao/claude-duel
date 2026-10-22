@@ -26,7 +26,7 @@ def derive_flag(secret: str, challenge_id: str) -> str:
 
 
 def flag_of(secret: str, cid: str, epoch: int = 0) -> str:
-    """Flag of challenge ``cid`` built on repair try ``epoch`` (R3-2); epoch 0 is the original derivation."""
+    """Flag of challenge ``cid`` built on repair try ``epoch``; epoch 0 is the original derivation."""
     return derive_flag(secret, cid if epoch == 0 else f"{cid}~{epoch}")
 
 

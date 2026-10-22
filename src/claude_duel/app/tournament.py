@@ -41,7 +41,7 @@ def play_tournament(
         log.append(tournament_id, events[0])
     state = tr.fold(tournament_id, events)
     settings = pinned(settings, state.rules, state.limits, tournament_id)
-    budget = build_budget(settings)  # R3-1: run caps span the whole tournament
+    budget = build_budget(settings)  # run caps span the whole tournament
     specs = {e.name: e for e in state.rule.entrants}
     while (nxt := state.next_pair()) is not None:
         if state.spent_usd() >= state.rule.tournament_max_usd:
