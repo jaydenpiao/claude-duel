@@ -18,7 +18,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 ## Directory map
 ```
 configs/{dev,staging,prod}.toml   per-env model + budget
-docs/requirements.md docs/design.md docs/adr/NNNN-*.md
+docs/requirements.md docs/design.md docs/demo.tape (README GIF) docs/adr/NNNN-*.md
 docs/design/                      design specs (see its README)
 docs/runs/                        live-run reports
 src/claude_duel/                  code (see above)
