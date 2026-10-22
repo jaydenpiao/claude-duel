@@ -8,7 +8,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, score_round
 
-_COMPARED = ("stage", "round", "challenges", "validations", "attacks", "attempts", "scores", "usage")
+_COMPARED = ("stage", "round", "challenges", "validations", "attacks", "attempts", "scores", "usage", "notes")
 
 
 @dataclass(frozen=True)

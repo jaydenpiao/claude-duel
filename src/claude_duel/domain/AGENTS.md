@@ -11,7 +11,7 @@ Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to i
 - `contract.py`: the `check` challenge form (`compose`, `WRAPPER`, `solver_program`; ADR 0010).
 - `findings.py`: tamper detector (`scan_build`, `scan_payload`); logged as `finding_flagged`, never scored (ADR 0008). `policy.reason_code` gives rejection reasons a machine code.
 - `scoring.py`: `score_round` builds `RoundFacts` and dispatches to `SCORERS[rules.scoring.kind]` (only `classic` today, ADR 0007); `solve_award`/`defense_award` are the shared base new scorers compose; `add_scores` (deterministic, replay depends on it). Every scorer must pass `TestScorerInvariants`. `match_stats` gives valid/capture rates for run reports.
-- `memory.py`: between-round memory (#19): a pure, bounded, flag-free summary of past rounds built from event-sourced state (own outcomes, opponent challenges and tendencies, scoreboard); never `solver` or `reference_payload`.
+- `memory.py`: between-round memory (#19): a pure, bounded, flag-free summary of past rounds built from event-sourced state (own outcomes, opponent challenges and tendencies, scoreboard); never `solver` or `reference_payload`. Kind `summary+scratchpad` (#34) adds the agent's own last note: replies may carry an optional `"notes"` (<= 500 chars), recorded as `note_recorded{agent, round, text}` after redaction against every flag of the match, folded into `MatchState.notes`, and shown only to its author.
 - `errors.py`: `DuelError` hierarchy; CLI maps any `DuelError` to exit 2.
 
 Gotchas

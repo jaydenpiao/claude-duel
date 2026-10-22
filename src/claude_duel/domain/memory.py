@@ -13,6 +13,7 @@ from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
 
 OMITTED = "[older rounds omitted]"
 PAYLOAD_CHARS = 120
+NOTE_CHARS = 500
 _TAGS = (  # first match wins; names seen anywhere in the source
     ("hash-check", {"hashlib"}),
     ("vm", {"stack", "pop", "ip", "pc", "ops", "program"}),
@@ -48,6 +49,8 @@ def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) 
     by_challenge = {a.challenge_id: a for a in state.attacks.values()}
     rounds = [_round_block(state, r, agent, by_challenge, rule) for r in range(1, upto_round + 1)]
     tail = [_tendencies(state, opponent, upto_round, by_challenge), f"Scoreboard: {_board(state)}"]
+    if rule.kind == "summary+scratchpad":
+        tail.append(_scratchpad(state, agent, upto_round))
     dropped = False
     while True:
         text = "\n".join([*([OMITTED] if dropped else []), *rounds, *tail])
@@ -100,6 +103,14 @@ def _tendencies(state: MatchState, opponent: str, upto: int, attacks: dict[str, 
     solves = [a.attempts for a in attacks.values() if a.attacker == opponent and a.solved]
     pace = f"{sum(solves) / len(solves):.1f} tries per capture" if solves else "no captures yet"
     return f"Opponent builds: {dict(sorted(tags.items())) or 'none'}; opponent attacks: {pace}"
+
+
+def _scratchpad(state: MatchState, agent: str, upto: int) -> str:
+    notes = state.notes.get(agent, {})
+    last = max((r for r in notes if r <= upto), default=None)
+    if last is None:
+        return "Your scratchpad: (empty)"
+    return f"Your scratchpad (round {last}, private):\n{redact(notes[last])[:NOTE_CHARS]}"
 
 
 def _board(state: MatchState) -> str:

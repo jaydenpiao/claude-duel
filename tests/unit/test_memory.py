@@ -6,10 +6,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import memory
 from claude_duel.domain.flags import derive_flag
-from claude_duel.domain.models import MemoryRule
+from claude_duel.domain.models import AgentSpec, MatchState, MemoryRule, Rules, SandboxLimits
 from claude_duel.ports import Completion, CompletionRequest
 
 ON = {"kind": "summary"}
@@ -90,3 +91,48 @@ def test_technique_tags() -> None:
     assert memory.technique('grid = ["S.G"]') == "maze"
     assert memory.technique("x = sum(ord(c) for c in 'ab')") == "checksum"
     assert memory.technique("def (:") == "other"
+
+
+SCRATCH = {"kind": "summary+scratchpad"}
+LEAK = "DUEL{" + "ab" * 16 + "}"
+
+
+class Notetaker(Recorder):
+    """Fake provider that adds a private note (with a flag-shaped leak attempt) to every reply."""
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        out = super().complete(request)
+        rnd = request.prompt.count("Round ")  # differs per round, so the last note is identifiable
+        note = f'{{"notes": "alice-plan-{rnd} {LEAK}", '
+        return out.model_copy(update={"text": out.text.replace("{", note, 1)})
+
+
+def test_scratchpad_notes_are_private_redacted_and_replayed(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    alice, bob = Notetaker(2), Recorder(5)
+    engine = make_engine({"alice": alice, "bob": bob})
+    state = engine.run(new_state(rounds=3, memory=SCRATCH))
+    assert set(state.notes) == {"alice"}
+    assert sorted(state.notes["alice"]) == [1, 2, 3]
+    assert all(LEAK not in t and "alice-plan-" in t for t in state.notes["alice"].values())
+    later = [p for p in alice.prompts if "ROUND: 3 of" in p]
+    assert later
+    assert all("Your scratchpad (round 2, private)" in p for p in later)
+    assert all("private note to yourself" in p for p in alice.prompts)
+    assert not any("alice-plan-" in p for p in bob.prompts)
+    events = event_log.read(state.match_id)
+    assert any(e.type == ev.NOTE_RECORDED for e in events)
+    assert replay(state, events).consistent
+
+
+def test_summary_kind_ignores_notes(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice, bob = Notetaker(2), Recorder(5)
+    state = make_engine({"alice": alice, "bob": bob}).run(new_state(rounds=2, memory=ON))
+    assert state.notes == {}
+    assert not any("private note" in p for p in alice.prompts)
+
+
+def test_empty_scratchpad_line() -> None:
+    s = MatchState(
+        match_id="m", agents=(AgentSpec(name="a"), AgentSpec(name="b")), rules=Rules(), limits=SandboxLimits()
+    )
+    assert "Your scratchpad: (empty)" in memory.summarize(s, "a", 1, MemoryRule(kind="summary+scratchpad"))
