@@ -6,10 +6,12 @@
 <rect x="40" y="160" width="500" height="22" rx="4" fill="#1f2937"/>
 <rect x="40" y="160" width="500" height="22" rx="4" fill="#22d3ee"/>
 <text x="560" y="178" font-size="22" fill="#f9fafb" font-weight="bold">96</text>
+<text x="40" y="200" font-size="13" fill="#9ca3af" font-weight="normal">in 1,200 · out 300 (think 0) · $0.0020 · $0.0010/capture · —/defense</text>
 <text x="40" y="220" font-size="18" fill="#e879f9" font-weight="bold">bob (gpt-4.1-mini)</text>
 <rect x="40" y="230" width="500" height="22" rx="4" fill="#1f2937"/>
 <rect x="40" y="230" width="0" height="22" rx="4" fill="#e879f9"/>
 <text x="560" y="248" font-size="22" fill="#f9fafb" font-weight="bold">-5</text>
+<text x="40" y="270" font-size="13" fill="#9ca3af" font-weight="normal">in 900 · out 200</text>
 <text x="40" y="320" font-size="22" fill="#fde047" font-weight="bold">winner: alice · alice 96  bob -5</text>
 <text x="40" y="355" font-size="16" fill="#9ca3af" font-weight="normal">$0.0031 · 30 model calls · 9696 tokens</text>
 <text x="40" y="390" font-size="16" fill="#86efac" font-weight="normal">replay verified ✓ · log 0123456789abcdef</text>

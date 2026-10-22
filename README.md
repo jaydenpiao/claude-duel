@@ -108,6 +108,8 @@ Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-
 
 **Output cap and thinking** (#145): `[rules] max_output_tokens` (default 1500, reasoning included) and `[rules] reasoning_effort` (`low`/`medium`/`high`, default vendor default) go to every agent identically. Both vendors get the same strict answer schema as structured output. A reply cut off at the cap gets exactly one call asking for brevity; a second cut-off is the failure reason `truncated`. Thinking/reasoning tokens are logged per call (`reasoning_tokens`) and billed as output.
 
+**Tokens and cost per agent** (#146): the arena, the per-round and final commentary, and the replay card show each agent's tokens in, tokens out (with the thinking/reasoning share, already billed as output), dollars, `$/capture` (its attack spend over its captures) and `$/defense` (its remaining build spend over its challenges that held). Every call counts, including failed or truncated ones; `—` means none yet.
+
 `provider = "anthropic"` uses `ANTHROPIC_API_KEY` (env only, never in config). Prompt caching is off and cache tokens are billed at the full input rate, so accounting matches OpenAI.
 
 **Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.
