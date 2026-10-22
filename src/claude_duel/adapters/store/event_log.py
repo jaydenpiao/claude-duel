@@ -48,6 +48,10 @@ class FileEventLog:
             record = {"prev": prev, "hash": _digest(prev, event), "event": _wire(event)}
             jsonl.append(fd, (json.dumps(record, sort_keys=True) + "\n").encode())
 
+    def ids(self) -> list[str]:
+        """Every log id in the store, sorted."""
+        return sorted(p.name[: -len(self._suffix)] for p in self._root.glob(f"*{self._suffix}"))
+
     def read(self, match_id: str) -> list[Event]:
         path = self._path(match_id)
         if not path.exists():

@@ -21,6 +21,7 @@ duel run --format json              # one JSON summary instead (scripts, CI)
 duel card demo [--out card.svg]     # shareable SVG card: models, score, rounds, spend, replay-verified log hash
 duel replay demo --transcript       # refold the event log and verify scores
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
+duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match
 duel estimate [--mode capped]       # offline worst-case $ per match for each preset (no API calls)
 duel resume demo                    # continue a crashed or aborted match
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
