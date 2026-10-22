@@ -215,6 +215,15 @@ class ArenaView(MatchFold):
         ch, title, _ = verdict(s, e)
         self.model.log(f"check {ch.author}'s {title!r}: {verdict_text(s, e)}")
 
+    def _started(self, s: MatchState, e: Event) -> None:
+        cid, _, attacker = str(e.data["key"]).rpartition(":")
+        ch = s.challenges[cid]
+        title = scrub(ch.spec.title) if ch.spec else "forfeit"
+        self.model.busy = True
+        self.model.now = (
+            f"{attacker} attacking {ch.author}'s {title!r}... try {e.data['try_no']}/{s.rules.max_attempts}"
+        )
+
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)
         self.model.now = f"{a.attacker} attacking {a.author}'s {a.title!r} (try {a.try_no}/{s.rules.max_attempts})"

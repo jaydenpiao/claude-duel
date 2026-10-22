@@ -313,6 +313,7 @@ class MatchEngine:
                 attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, pairs
             )
             assert_no_flag(prompt, flag, "attack prompt")
+            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
             completion = self._call(
                 state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
             )

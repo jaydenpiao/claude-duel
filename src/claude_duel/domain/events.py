@@ -35,6 +35,7 @@ CALL_CHARGED = "call_charged"
 BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
 CHALLENGE_VALIDATED = "challenge_validated"
+ATTACK_STARTED = "attack_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
@@ -84,6 +85,13 @@ class ChallengeBuilt(_Payload):
 
 class ChallengeValidated(_Payload):
     validation: Validation
+
+
+class AttackStarted(_Payload):
+    """An attack attempt is about to be made (presentation only; absent from older logs)."""
+
+    key: str
+    try_no: int
 
 
 class AttackAttempted(_Payload):
@@ -136,6 +144,10 @@ def _validated(state: MatchState, p: ChallengeValidated) -> None:
     state.validations[p.validation.challenge_id] = p.validation
 
 
+def _started(state: MatchState, p: AttackStarted) -> None:
+    return None  # no state change: replay of logs with or without it is identical
+
+
 def _attempted(state: MatchState, p: AttackAttempted) -> None:
     state.attempts.setdefault(p.key, []).append(p.attempt)
 
@@ -158,6 +170,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     BUILD_REJECTED: (BuildRejected, _rejected),
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
+    ATTACK_STARTED: (AttackStarted, _started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),

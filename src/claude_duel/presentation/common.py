@@ -22,6 +22,7 @@ HOOKS = {
     ev.STAGE_CHANGED: "_stage",
     ev.CHALLENGE_BUILT: "_built",
     ev.CHALLENGE_VALIDATED: "_validated",
+    ev.ATTACK_STARTED: "_started",
     ev.ATTACK_ATTEMPTED: "_attempted",
     ev.CHALLENGE_ATTACKED: "_attacked",
     ev.ROUND_SCORED: "_scored",
