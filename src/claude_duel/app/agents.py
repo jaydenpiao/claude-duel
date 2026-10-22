@@ -154,6 +154,7 @@ def build_prompt(
     previous: ChallengeSpec | None = None,
     memory: str = "",
     scratchpad: bool = False,
+    variety: tuple[str, ...] = (),
 ) -> str:
     lines = [
         "TASK: BUILD",
@@ -163,6 +164,7 @@ def build_prompt(
         "Write a Python 3 CTF challenge. Your opponent sees the source and description and must find the input.",
         *(_program_rules(rules, round_no) if rules.challenge_form == "program" else _check_rules(rules, round_no)),
     ]
+    lines += variety
     lines += memory_lines(memory, scratchpad)
     if previous is not None:
         lines.append(
@@ -202,7 +204,15 @@ _RETURN_KEYS = (
     'Return JSON with keys in this order: {"title", "description", "source", "solver", "reference_payload", '
     '"difficulty" (1-3)}.'
 )
-_HINTS = (  # top live rejection causes (docs/runs/2026-10-22-validity.md) -> one concrete next step
+_HINTS = (
+    ("banned name: exit", "Do not call exit(): end the solver with print(answer) and break, or let it finish. "),
+    ("solver failed (exit -9)", "Your solver printed too much: print only the one accepting input, then break. "),
+    ("import not allowed: collections", "collections is not allowed: use lists and dicts. "),
+    (
+        "appears in the source",
+        "Do not store the answer or a target in the source, even transformed: make check()"
+        " test properties (lengths, sums, positions, a simulated walk) that only the answer satisfies. ",
+    ),  # top live rejection causes (docs/runs/2026-10-22-validity.md) -> one concrete next step
     (
         "solver failed (exit 0)",
         "Your solver printed nothing: either its search found no input check() accepts "

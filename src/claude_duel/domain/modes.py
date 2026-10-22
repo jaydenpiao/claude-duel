@@ -6,7 +6,7 @@ MODES: dict[str, Rules] = {
     "classic": Rules(),
     "quick": Rules(mode="quick", rounds=1, challenges_per_round=1),
     "gated": Rules(mode="gated", difficulty_gate=True),
-    "checked": Rules(mode="checked", challenge_form="check", max_format_retries=3),
+    "checked": Rules(mode="checked", challenge_form="check", max_format_retries=3, variety=True),
     # Scored modes (#67) run on a token clock, so provider latency never decides a result; the wall-clock
     # match_deadline_s stays only as a safety backstop that fails (never scores) a match.
     "efficiency": Rules(

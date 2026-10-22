@@ -103,6 +103,10 @@ def test_check_prompt_states_the_contract() -> None:
         ("reference_payload must be at least 4 characters", "at least 4"),
         ("banned attribute: __dict__", "FLAG is already a global"),
         ("solver: import not allowed: random", "recurrence"),
+        ("solver: banned name: exit (use sys.exit())", "Do not call exit()"),
+        ("solver failed (exit -9); it printed 'a'", "only the one accepting input"),
+        ("solver: import not allowed: collections", "lists and dicts"),
+        ("the accepting input appears in the source as shifted or XORed char codes", "test properties"),
     ],
 )
 def test_repair_hints(error: str, hint: str) -> None:

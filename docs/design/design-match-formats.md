@@ -21,6 +21,9 @@ A **match** stays exactly what it is today: N rounds, one event log, one `MatchS
 - Handicaps: `Handicap` on `AgentSpec`, recorded in `match_created`, shown in commentary (`handicap alice: tries -1, ...`); `score_offset` applies to the result via `MatchState.final_scores()`, not to replayed round scores.
 - Series: `domain/series.py` + `app/series.py`, `duel series --games N`; logs as `<id>.series.jsonl`. Not yet: the sudden-death 1-round tiebreak (a game tied on score and attack tokens is drawn), tournaments and ratings (#39).
 
+## Built (#39, first PR)
+- Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Not yet: tournaments (round robin / Swiss) and the `decay` scorer.
+
 ## Cost
 A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.45; double round robin ~$0.90. A Swiss of 8 entrants x 5 rounds is 20 matches, ~$0.60. Add `series_max_usd` (default $2) checked before each game against the ledger.
 
@@ -28,7 +31,7 @@ A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.
 - [x] A series log replays: every child match verifies, and the series winner recomputes.
 - [x] Bo3 stops after 2-0.
 - [x] Sides alternate; seeds derive deterministically.
-- [ ] Ratings are identical regardless of log file order (BT), with Elo order documented.
+- [x] Ratings are identical regardless of log file order (BT), with Elo order documented.
 - [x] Handicaps are recorded and show in commentary.
 
 ## Test ideas
