@@ -15,8 +15,8 @@ THEMES = (
     "string recurrence (a key built by a loop)",
     "bit manipulation (xor, shifts, masks on char codes)",
     "state machine (transitions over input symbols)",
-    "word arithmetic (letters stand for digits)",
-    "permutation or sorting puzzle (reorder to a target)",
+    "weighted checksum (each position has a weight; several sums must hold)",
+    "modular arithmetic (the input encodes numbers that must satisfy congruences)",
 )
 
 
@@ -36,7 +36,8 @@ def prompt_lines(state: MatchState, agent: str, index: int) -> list[str]:
     seed = state.seed or state.match_id
     lines = [
         f"THEME for this challenge: {theme(seed, agent, state.round, index, state.rules.challenges_per_round)}. "
-        "Build that kind of puzzle; do not reuse an earlier design."
+        "Build that kind of puzzle; do not reuse an earlier design. Define the answer by properties check() "
+        "tests, never by a target string or list in the source."
     ]
     past = past_designs(state, agent)
     if past:
