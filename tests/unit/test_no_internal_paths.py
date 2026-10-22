@@ -1,4 +1,4 @@
-"""Release gate H1: tracked files must not leak maintainer host paths."""
+"""Release gate: tracked files must not leak maintainer host paths."""
 
 import re
 import subprocess
