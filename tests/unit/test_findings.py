@@ -101,7 +101,7 @@ class Recorder:
         return self.fake.complete(request)
 
 
-@pytest.mark.parametrize("kind", ["neutral", "competitive", "survival"])
+@pytest.mark.parametrize("kind", ["neutral", "notice", "competitive", "survival"])
 def test_framing_changes_only_the_system_paragraph(make_engine, new_state, kind: str) -> None:  # type: ignore[no-untyped-def]
     def run(framing: str, tag: str) -> tuple[list[str], object]:
         alice, bob = Recorder(), Recorder()
@@ -133,3 +133,7 @@ def test_framing_text_is_pinned_in_match_created(make_engine, new_state, event_l
     s.framing_text = "pinned text v1"
     state = make_engine().run(s)
     assert ev.initial_state(state.match_id, event_log.read(state.match_id)[0]).framing_text == "pinned text v1"
+
+
+def test_notice_is_exactly_the_rules_sentence() -> None:
+    assert framing_text(FramingRule(kind="notice")) == RULES_SENTENCE
