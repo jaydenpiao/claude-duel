@@ -35,7 +35,8 @@ class Settings(BaseModel):
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
-    database_url: SecretStr | None = None  # DATABASE_URL: results DB owner, for `duel sync` (ADR 0012)
+    database_url: SecretStr | None = None  # DATABASE_URL: a duel_ingest login, for `duel sync` (ADR 0012)
+    migrate_database_url: SecretStr | None = None  # MIGRATE_DATABASE_URL: schema owner, for migrate and --rebuild
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
@@ -79,6 +80,7 @@ _ENV_BUDGET = {
 _ENV_SECRETS = {
     "OPENAI_API_KEY": "openai_api_key",
     "DATABASE_URL": "database_url",
+    "MIGRATE_DATABASE_URL": "migrate_database_url",
     "EXPORT_DATABASE_URL": "export_database_url",
 }
 _ENV_SECTIONS = {"rules": _ENV_RULES, "budget": _ENV_BUDGET}

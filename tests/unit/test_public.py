@@ -14,11 +14,17 @@ def _event(kind: str, data: dict[str, object]) -> Event:
     return Event(v=1, seq=0, type=kind, trace_id="t", data=data)
 
 
-def test_challenge_keeps_only_title_and_difficulty() -> None:
+def test_challenge_keeps_only_difficulty() -> None:
     spec = {"title": "t", "difficulty": 2, "source": FLAG, "reference_payload": FLAG, "solver": "x", "description": "d"}
     challenge = {"id": "c1", "round": 1, "author": "alice", "spec": spec, "flag_epoch": 0}
     out = public_data(_event(ev.CHALLENGE_BUILT, {"challenge": challenge}))
-    kept = {"id": "c1", "round": 1, "author": "alice", "flag_epoch": 0, "spec": {"title": "t", "difficulty": 2}}
+    kept = {
+        "id": "c1",
+        "round": 1,
+        "author": "alice",
+        "flag_epoch": 0,
+        "spec": {"difficulty": 2},
+    }  # titles are free text (L1)
     assert out == {"challenge": kept}
 
 

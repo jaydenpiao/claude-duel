@@ -24,6 +24,8 @@ from claude_duel.app.container import (
     build_public_reader,
     build_results,
     build_store,
+    git_sha,
+    migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.export import write as write_export
@@ -91,9 +93,14 @@ def _parser() -> argparse.ArgumentParser:
     tour.add_argument("--tournament-id", help="explicit id (re-running an existing id resumes it)")
     tour.add_argument("--format", choices=("text", "json"), default="text")
     syn = sub.add_parser("sync", help="verify, replay and load every match log into the results DB (DATABASE_URL)")
-    syn.add_argument("--rebuild", action="store_true", help="empty the results tables first, then reload")
+    syn.add_argument(
+        "--rebuild", action="store_true", help="empty and reload the derived tables in one transaction (schema owner)"
+    )
     syn.add_argument("--boot", type=int, default=200, help="bootstrap resamples for the ratings snapshot")
     syn.add_argument("--format", choices=("text", "json"), default="text")
+    db_p = sub.add_parser("db", help="results database administration")
+    db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
+    db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
     exp = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
     exp.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
     replay_p = sub.choices["replay"]
@@ -172,6 +179,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "card": lambda: _card(settings, args.match_id, args.out),
         "sync": lambda: _sync(settings, args.rebuild, max(args.boot, 0), args.format),
         "export": lambda: _export(settings, args.out),
+        "db": lambda: _migrate(settings),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
     }
     if args.cmd in handlers:
@@ -299,11 +307,16 @@ def _card(settings: Settings, match_id: str, out: Path | None) -> int:
     return 0 if report.consistent else 1
 
 
+def _migrate(settings: Settings) -> int:
+    applied = migrate_results(settings)
+    print(f"migrations applied: {', '.join(applied)}" if applied else "migrations: up to date")
+    return 0
+
+
 def _sync(settings: Settings, rebuild: bool, boot: int, fmt: str) -> int:
-    db = build_results(settings)
-    if rebuild:
-        db.clear()
-    report = sync(build_event_log(settings), build_store(settings), db, boot=boot)
+    db = build_results(settings, owner=rebuild)
+    log, snaps = build_event_log(settings), build_store(settings)
+    report = sync(log, snaps, db, boot=boot, rebuild=rebuild, git_sha=git_sha())
     if fmt == "json":
         print(json.dumps(dataclasses.asdict(report)))
     else:

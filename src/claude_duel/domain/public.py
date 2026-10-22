@@ -2,11 +2,14 @@
 
 An allowlist per event kind keeps only facts (ids, rounds, scores, tokens, cost, verdicts). Challenge source,
 reference payloads, solvers, attack payloads and sandbox output, scratchpad notes and finding excerpts are
-dropped, and every kept string goes through ``flags.scrub``. Unknown kinds keep nothing.
+dropped. Free text is never stored: sync can't know the flags (it never opens ``.secret``), so a string is kept
+only if it is short and token-shaped (ids, models, verdicts, stage names), then scrubbed; anything else, such as a
+build error, failure reason or challenge title, becomes ``FREE_TEXT``. Unknown kinds keep nothing.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import cast
 
@@ -34,7 +37,14 @@ _KEEP: Mapping[str, tuple[str, ...]] = {
 }
 # Nested objects lose these keys wherever they appear.
 _DROP = frozenset({"source", "reference_payload", "solver", "payload", "output", "excerpt", "text"})
-_SPEC_KEEP = ("title", "difficulty", "probe_solved")
+_SPEC_KEEP = ("difficulty", "probe_solved")
+FREE_TEXT = "<text omitted>"
+_TOKEN = re.compile(r"[\w.:/@+\-]{0,64}")  # one token, no spaces or braces
+
+
+def public_text(value: str) -> str:
+    """A string safe to store without knowing the flags: a scrubbed token, else ``FREE_TEXT``."""
+    return scrub(value) if _TOKEN.fullmatch(value) else FREE_TEXT
 
 
 def public_data(event: Event) -> _Json:
@@ -57,5 +67,5 @@ def _clean(value: object) -> object:
     if isinstance(value, list | tuple):
         return [_clean(v) for v in value]
     if isinstance(value, str):
-        return scrub(value)
+        return public_text(value)
     return value

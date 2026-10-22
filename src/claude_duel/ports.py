@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from claude_duel.domain.models import Event, MatchState, SandboxLimits
+from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
 Purpose = Literal["build", "attack"]
 
@@ -59,6 +61,10 @@ class MatchStore(Protocol):
 
     def lock(self, match_id: str) -> MatchLock: ...
 
+    def snapshot(self, match_id: str) -> MatchState:
+        """The saved state without its secret; the secret file is never opened (``duel sync``)."""
+        ...
+
 
 class MatchLock(Protocol):
     def __enter__(self) -> MatchLock: ...
@@ -85,6 +91,12 @@ class EventLog(Protocol):
 
     def read(self, match_id: str) -> list[Event]: ...
 
+    def ids(self) -> list[str]: ...
+
+    def chain(self, match_id: str) -> list[tuple[str, Event]]:
+        """Verified ``(hash, event)`` pairs in order; raises a ``DuelError`` if the chain is broken."""
+        ...
+
 
 EventObserver = Callable[[Event], None]
 """Called with each event after it is durably appended (e.g. the CLI commentary)."""
@@ -94,19 +106,34 @@ Row = dict[str, object]
 
 
 class ResultsStore(Protocol):
-    """Derived results index fed by ``duel sync`` (ADR 0012); rebuildable from the event logs."""
+    """Derived results index fed by ``duel sync`` (ADR 0012); rebuildable from the event logs.
 
-    def stored_hashes(self, match_id: str) -> set[str]: ...
+    Run ids are client-generated (uuid hex) so a run is identifiable even if the DB call that records it fails.
+    """
 
-    def ingest(self, tables: dict[str, list[Row]]) -> int: ...
+    def stored(self, match_id: str) -> Stored: ...
 
-    def start_run(self) -> int: ...
+    def ingest(self, projection: MatchProjection) -> int:
+        """Write one match atomically and idempotently; return how many new events were inserted."""
+        ...
 
-    def reject(self, run_id: int, match_id: str, reason: str) -> None: ...
+    def start_run(self, run_id: str, git_sha: str | None) -> None: ...
 
-    def finish_run(self, run_id: int, counts: dict[str, int], ratings: list[Row]) -> None: ...
+    def reject(self, run_id: str, match_id: str, reason: str) -> None:
+        """Record why a match was not loaded and hide any earlier copy of it from the public views."""
+        ...
 
-    def clear(self) -> None: ...
+    def last_ratings_digest(self) -> str | None:
+        """Digest of the inputs behind the newest ``ok`` run's ratings snapshot, if any."""
+        ...
+
+    def finish_run(
+        self, run_id: str, status: RunStatus, counts: RunCounts, ratings: list[RatingRow], digest: str | None
+    ) -> None: ...
+
+    def rebuilding(self) -> AbstractContextManager[None]:
+        """Empty the derived tables and reload inside one transaction; history and first-seen times are kept."""
+        ...
 
 
 class PublicSource(Protocol):

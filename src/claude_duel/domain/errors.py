@@ -83,3 +83,11 @@ class WalletEmptyError(DuelError):
 
 class HistoryRewrittenError(DuelError):
     """``duel sync`` found an event hash in the results database that its log no longer has; it halts (ADR 0012)."""
+
+
+class ReplayMismatchError(DuelError):
+    """A match's snapshot does not match the replay of its event log (``duel sync`` rejects it)."""
+
+
+class ResultsDbError(DuelError):
+    """A results database operation failed; the message carries the error class and SQLSTATE only."""

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 from collections.abc import Iterable
+from pathlib import Path
 
 from pydantic import SecretStr
 
@@ -16,14 +19,21 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.adapters.store.postgres import PostgresResults, PublicReader, connect, migrate
+from claude_duel.adapters.store.postgres import (
+    PostgresResults,
+    PublicReader,
+    connect,
+    migrate,
+    refuse_superuser,
+    require_current,
+)
 from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, LLMProvider, Metrics, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, ResultsStore, Sandbox
 
 _LOG = logging.getLogger(__name__)
 
@@ -155,11 +165,44 @@ def _db_url(secret: SecretStr | None, var: str) -> str:
     return secret.get_secret_value()
 
 
-def build_results(settings: Settings) -> PostgresResults:
-    """Connect with ``DATABASE_URL`` and apply pending migrations."""
-    conn = connect(_db_url(settings.database_url, "DATABASE_URL"))
-    migrate(conn)
+def _owner_url(settings: Settings) -> str:
+    if settings.migrate_database_url is not None:
+        return _db_url(settings.migrate_database_url, "MIGRATE_DATABASE_URL")
+    return _db_url(settings.database_url, "MIGRATE_DATABASE_URL (or DATABASE_URL)")
+
+
+def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
+    """Connect with ``DATABASE_URL`` (or the owner's ``MIGRATE_DATABASE_URL`` for ``--rebuild``); never migrates.
+
+    Fails clearly if migrations are pending: run ``duel db migrate``.
+    """
+    conn = connect(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
+    refuse_superuser(conn)
+    require_current(conn)
     return PostgresResults(conn)
+
+
+def migrate_results(settings: Settings) -> list[str]:
+    """``duel db migrate``: apply pending migrations as the schema owner. Returns the names applied."""
+    return migrate(connect(_owner_url(settings)))
+
+
+def git_sha() -> str | None:
+    """The commit ``duel sync`` runs from (recorded per run), or None outside a checkout."""
+    if sha := os.environ.get("GITHUB_SHA"):
+        return sha
+    try:
+        out = subprocess.run(  # fixed argv, no shell
+            ["git", "rev-parse", "HEAD"],  # noqa: S607
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None
 
 
 def build_public_reader(settings: Settings) -> PublicReader:

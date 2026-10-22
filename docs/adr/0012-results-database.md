@@ -37,3 +37,18 @@ queryable index, and a future public page needs data that provably holds no flag
 - Transport: `PostgresResults` uses psycopg over 5432. Sync talks only to the `ResultsStore` port, so a
   Neon SQL-over-HTTPS adapter (`POST https://<host>/sql`, `Neon-Connection-String` header) can be added
   behind it if 5432 stays blocked; migrations would then be sent statement by statement.
+
+
+## Amendments (review fixes, 2026-10-22)
+
+- Migrations are forward-only and checksummed (`duel.schema_migrations`); only `duel db migrate` applies them, under an
+  advisory lock, as the owner (`MIGRATE_DATABASE_URL`). `duel sync` refuses a schema that is behind or edited.
+- `duel sync` runs as `duel_ingest` (select/insert/update, no delete or truncate); superuser and BYPASSRLS roles are
+  refused. `--rebuild` truncates derived tables inside one transaction (rolled back on failure) and needs the owner;
+  `duel.match_first_seen` survives rebuilds.
+- Sync runs carry status (`running|ok|halted|failed`), `finished_at`, `git_sha` and a ratings digest; ratings are only
+  re-snapshotted when inputs change. Rejected matches are flagged and hidden from `public_v`. Daily views are approximate.
+- Security: non-local hosts need `sslmode=require` or stricter; reject reasons and DB errors are redacted (class and
+  SQLSTATE only); free text is omitted from stored events and legacy logs are checked for plain, rot13 and
+  decimal-encoded flags; default EXECUTE is revoked from PUBLIC and any SECURITY DEFINER function in `duel`/`public_v`
+  blocks sync and export; CI Postgres is pinned by digest with a random per-job password.
