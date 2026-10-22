@@ -37,6 +37,17 @@ class PermanentProviderError(ProviderError):
     """Non-retryable provider failure (bad request, auth)."""
 
 
+class QuotaExceededError(PermanentProviderError):
+    """Provider account is out of quota or funds. Never retried; aborts the match."""
+
+
+class BudgetExceededError(DuelError):
+    """Arena cost circuit breaker tripped."""
+
+
+ABORTING_ERRORS: tuple[type[Exception], ...] = (QuotaExceededError, BudgetExceededError)
+
+
 class MalformedOutputError(DuelError):
     """Model output could not be parsed."""
 

@@ -84,6 +84,14 @@ class Attack(_Frozen):
     reason: str
 
 
+class Usage(BaseModel):
+    """Cumulative provider usage for one match (persisted, survives resume)."""
+
+    calls: int = 0
+    tokens: int = 0
+    usd: float = 0.0
+
+
 class Event(_Frozen):
     seq: int
     type: str
@@ -109,6 +117,8 @@ class MatchState(BaseModel):
     scores: dict[str, int] = Field(default_factory=dict)
     events: list[Event] = Field(default_factory=list)
     failure: str | None = None
+    failed_stage: Stage | None = None
+    usage: Usage = Field(default_factory=Usage)
 
     def opponent(self, name: str) -> str:
         a, b = self.agents

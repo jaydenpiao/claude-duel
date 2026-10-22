@@ -26,6 +26,7 @@ def next_stage(state: MatchState) -> Stage:
 
 def transition(state: MatchState, target: Stage) -> None:
     if target is Stage.FAILED and state.stage not in TERMINAL:
+        state.failed_stage = state.stage
         state.stage = target
         return
     if target not in _ALLOWED[state.stage]:
@@ -33,3 +34,10 @@ def transition(state: MatchState, target: Stage) -> None:
     if target is Stage.BUILD:
         state.round += 1
     state.stage = target
+
+
+def recover(state: MatchState) -> None:
+    """Re-open a failed match at the stage it failed in (work units are idempotent)."""
+    if state.stage is not Stage.FAILED or state.failed_stage is None:
+        raise InvalidTransitionError(f"cannot recover from {state.stage}")
+    state.stage, state.failed_stage, state.failure = state.failed_stage, None, None

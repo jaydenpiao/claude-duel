@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from claude_duel.domain.errors import (
     PermanentProviderError,
     ProviderTimeoutError,
+    QuotaExceededError,
     RateLimitError,
     TransientProviderError,
 )
@@ -24,6 +25,8 @@ def _retry_after(resp: httpx.Response) -> float | None:
 
 def raise_for_status(resp: httpx.Response) -> None:
     """Map HTTP status to the provider error taxonomy (shared by HTTP adapters)."""
+    if resp.status_code == 429 and "insufficient_quota" in resp.text:
+        raise QuotaExceededError("openai quota exhausted or spend limit reached; top up or raise the limit")
     if resp.status_code == 429:
         raise RateLimitError("rate limited", _retry_after(resp))
     if resp.status_code >= 500 or resp.status_code == 408:
