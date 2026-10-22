@@ -47,7 +47,7 @@ class SandboxLimits(_Frozen):
     cpu_seconds: int = Field(default=1, gt=0)
     memory_mb: int = Field(default=128, gt=0)
     max_output_bytes: int = Field(default=4096, gt=0)
-    pids_limit: int = Field(default=32, gt=0)
+    pids_limit: int = Field(default=64, gt=0)  # >= 64 so gVisor (runsc) can start
     cpus: float = Field(default=0.5, gt=0)
 
 
