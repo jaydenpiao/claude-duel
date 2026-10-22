@@ -1,4 +1,9 @@
-"""Cost circuit breaker: per-match (persisted), per-run (in-memory) and lifetime (ledger) caps."""
+"""Cost circuit breaker.
+
+Caps: per match (persisted in state), per run (this process only), and lifetime (the shared
+ledger, re-read before every call so concurrent processes see each other's spend). Concurrent
+processes can each overshoot the lifetime cap by at most one in-flight call.
+"""
 
 from __future__ import annotations
 
@@ -78,5 +83,5 @@ class CostBudget:
         state.usage.usd += usd
         self.run_calls += 1
         self.run_usd += usd
-        if usd > 0:
-            self._ledger.record(state.match_id, model, completion.total_tokens, usd)
+        # Every call is ledgered, $0 included, so mispriced or free models stay visible.
+        self._ledger.record(state.match_id, model, completion.total_tokens, usd)

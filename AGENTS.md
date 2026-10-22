@@ -38,7 +38,7 @@ ruff check . && ruff format --check . && mypy src && pytest
 
 ## Cost rules
 - Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
-- Caps: per match (persisted in `state.usage`), per run (in memory), lifetime from `.duel/ledger.jsonl` (`$40`, user's key has a $50 hard limit). Quota errors abort, never retry.
+- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`, user's key has a $50 hard limit), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
 - `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
 
 ## Security invariants
