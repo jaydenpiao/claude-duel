@@ -24,7 +24,7 @@ def docker_probe(docker: Sequence[str]) -> str | None:
     """Return why the Docker sandbox can't be used, or None if the daemon is reachable with seccomp."""
     try:
         proc = subprocess.run(  # noqa: S603 - fixed arena argv
-            [*docker, "info", "--format", "{{.ServerVersion}}|{{json .SecurityOptions}}"],
+            [*docker, "info", "--format", "{{.ServerVersion}}|{{.CgroupDriver}}|{{json .SecurityOptions}}"],
             capture_output=True,
             text=True,
             timeout=_PROBE_SECONDS,
@@ -32,11 +32,14 @@ def docker_probe(docker: Sequence[str]) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"docker not runnable: {type(exc).__name__}"
-    version, _, options = proc.stdout.strip().partition("|")
+    version, _, rest = proc.stdout.strip().partition("|")
+    cgroups, _, options = rest.partition("|")
     if proc.returncode != 0 or not version:
         return "docker daemon unreachable"
     if "name=seccomp" not in options:
         return "docker seccomp profile not active"
+    if cgroups == "none":  # e.g. rootless without systemd: --memory/--pids-limit/--cpus would be silently ignored
+        return "docker cannot enforce cgroup limits (cgroup driver none)"
     return None
 
 
