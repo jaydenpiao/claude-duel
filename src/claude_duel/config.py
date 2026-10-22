@@ -35,6 +35,7 @@ class Settings(BaseModel):
     openai_api_key: SecretStr | None = None
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
+    metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
 
     def model_for(self, agent: AgentSpec) -> str:
         """The single place an agent's effective model is resolved."""
@@ -45,6 +46,7 @@ class Settings(BaseModel):
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
+    "DUEL_METRICS": "metrics",
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_OPENAI_MODEL": "openai_model",

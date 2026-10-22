@@ -16,7 +16,7 @@ from pathlib import Path
 from rich.console import Console
 
 from claude_duel.app.budget import check_model_allowed
-from claude_duel.app.container import build_event_log, build_ledger, build_store
+from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
 from claude_duel.app.series import play_series, verify_series
@@ -108,7 +108,7 @@ def _run(settings: Settings, match_id: str | None, args: argparse.Namespace) -> 
     mid = match_id or uuid.uuid4().hex[:12]
     observer = _observer(settings, mid, args)
     try:
-        state = play(settings, mid, metrics, observer)
+        state = play(settings, mid, build_metrics(settings, mid, metrics), observer)
     finally:
         if isinstance(observer, ArenaView):
             observer.close()
@@ -175,8 +175,7 @@ def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
         rule = SeriesRule(games=games)
     except ValueError as exc:
         raise ConfigError(f"bad series: {exc}") from exc
-    metrics = InMemoryMetrics()
-    state = play_series(settings, series_id, rule, metrics)
+    state = play_series(settings, series_id, rule, build_metrics(settings, series_id, InMemoryMetrics()))
     report = verify_series(settings, series_id)
     winner = state.winner()
     if fmt == "json":

@@ -91,6 +91,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_RUN_MAX_CALLS` | `[budget] run_max_calls` | 200 |
 | `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 40 |
 | `DUEL_DOCKER` | docker command, e.g. `"sudo docker"` | `docker` |
+| `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 
 `OPENAI_API_KEY` is read from the environment only.
 
