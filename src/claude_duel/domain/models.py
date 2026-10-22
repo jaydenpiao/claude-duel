@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Stage(StrEnum):
@@ -37,6 +38,18 @@ class SandboxLimits(_Frozen):
     cpus: float = Field(default=0.5, gt=0)
 
 
+class ScoringRule(_Frozen):
+    """Which pure scorer (``scoring.SCORERS``) and its parameters (ADR 0007)."""
+
+    kind: Literal["classic"] = "classic"
+    solve_points: int = 10
+    defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
+    invalid_penalty: int = 5
+
+
+_LEGACY_SCORING = ("solve_points", "defense_points", "invalid_penalty")
+
+
 class Rules(_Frozen):
     rounds: int = Field(default=3, ge=1, le=20)
     challenges_per_round: int = Field(default=2, ge=1, le=10)
@@ -44,12 +57,23 @@ class Rules(_Frozen):
     attack_token_budget: int = Field(default=20_000, ge=1)
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
-    solve_points: int = 10
-    defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
-    invalid_penalty: int = 5
+    scoring: ScoringRule = ScoringRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _move_legacy_scoring(cls, data: Any) -> Any:
+        """Pre-0007 configs and logged rules had the scoring numbers at top level; move them under ``scoring``."""
+        if not isinstance(data, dict) or not any(k in data for k in _LEGACY_SCORING):
+            return data
+        data = dict(data)
+        moved = {k: data.pop(k) for k in _LEGACY_SCORING if k in data}
+        scoring = data.get("scoring")
+        base = scoring.model_dump() if isinstance(scoring, ScoringRule) else dict(scoring or {})
+        data["scoring"] = moved | base
+        return data
 
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""

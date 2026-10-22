@@ -18,10 +18,19 @@ from claude_duel.domain.models import (
     MatchState,
     Rules,
     SandboxLimits,
+    ScoringRule,
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import add_scores, defense_award, match_stats, score_round, solve_award
+from claude_duel.domain.scoring import (
+    SCORERS,
+    RoundFacts,
+    add_scores,
+    defense_award,
+    match_stats,
+    score_round,
+    solve_award,
+)
 from claude_duel.domain.state_machine import next_stage, transition
 
 SRC = 'import sys\nif sys.stdin.read() == "x":\n    print(FLAG)\n'
@@ -161,7 +170,7 @@ class TestScoring:
     @given(st.integers(1, 3), st.integers(1, 3), st.integers(1, 50))
     def test_defense_worth_at_least_any_capture(self, difficulty: int, round_no: int, attempts: int) -> None:
         ch = spec(difficulty=difficulty)
-        assert defense_award(ch, round_no, Rules()) >= solve_award(ch, round_no, attempts, Rules())
+        assert defense_award(ch, round_no, ScoringRule()) >= solve_award(ch, round_no, attempts, ScoringRule())
 
     def test_defended_rewards_author(self) -> None:
         assert _round(valid=True, solved=False) == {"a": 20, "b": 0}
@@ -187,3 +196,57 @@ def test_match_stats_rates() -> None:
     assert match_stats(s) == {
         "challenges": 2, "valid": 1, "valid_rate": 0.5, "captures": 0, "defenses": 1, "capture_rate": 0.0
     }  # fmt: skip
+
+
+_OUTCOME = st.sampled_from(["invalid", "forfeit", "held", "captured"])
+
+
+def _facts(outcomes: list[tuple[str, int, int]], round_no: int) -> RoundFacts:
+    challenges, validations, attacks = [], {}, {}
+    for i, (outcome, difficulty, attempts) in enumerate(outcomes):
+        cid, author = f"c{i}", "ab"[i % 2]
+        ch = Challenge(
+            id=cid, round=round_no, author=author, spec=None if outcome == "forfeit" else spec(difficulty=difficulty)
+        )
+        challenges.append(ch)
+        validations[cid] = Validation(challenge_id=cid, valid=outcome in ("held", "captured"), reason="r")
+        if outcome in ("held", "captured"):
+            attacks[cid] = Attack(
+                challenge_id=cid, attacker="ba"[i % 2], solved=outcome == "captured", attempts=attempts,
+                tokens_used=1, reason="r",
+            )  # fmt: skip
+    return RoundFacts(round_no, ("a", "b"), tuple(challenges), validations, attacks)
+
+
+@pytest.mark.parametrize("kind", sorted(SCORERS))
+class TestScorerInvariants:
+    """ADR 0007: every registered scorer satisfies these."""
+
+    @given(st.lists(st.tuples(_OUTCOME, st.integers(1, 3), st.integers(1, 20)), max_size=6), st.integers(1, 5))
+    def test_keys_and_order_invariance(self, kind: str, outcomes: list[tuple[str, int, int]], round_no: int) -> None:
+        facts = _facts(outcomes, round_no)
+        delta = SCORERS[kind](facts, ScoringRule())
+        assert set(delta) == {"a", "b"}
+        shuffled = RoundFacts(
+            round_no, ("b", "a"), facts.challenges, dict(reversed(facts.validations.items())), facts.attacks
+        )
+        assert SCORERS[kind](shuffled, ScoringRule()) == delta
+
+    @given(st.integers(1, 3), st.integers(1, 5), st.integers(1, 50))
+    def test_defense_at_least_capture(self, kind: str, difficulty: int, round_no: int, attempts: int) -> None:
+        held = SCORERS[kind](_facts([("held", difficulty, attempts)], round_no), ScoringRule())["a"]
+        captured = SCORERS[kind](_facts([("captured", difficulty, attempts)], round_no), ScoringRule())["b"]
+        assert held >= captured
+
+    @given(st.sampled_from(["invalid", "forfeit"]), st.integers(1, 5))
+    def test_invalid_never_pays_author(self, kind: str, outcome: str, round_no: int) -> None:
+        assert SCORERS[kind](_facts([(outcome, 1, 1)], round_no), ScoringRule())["a"] <= 0
+
+
+def test_legacy_top_level_scoring_fields_move_under_scoring() -> None:
+    legacy = Rules.model_validate({"rounds": 2, "solve_points": 7, "invalid_penalty": 1})
+    assert legacy.scoring == ScoringRule(solve_points=7, invalid_penalty=1)
+    assert "solve_points" not in legacy.model_dump()
+    assert Rules.model_validate({"solve_points": 3, "scoring": {"defense_points": 4}}).scoring == ScoringRule(
+        solve_points=3, defense_points=4
+    )
