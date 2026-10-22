@@ -71,3 +71,7 @@ class EventLogCorruptError(DuelError):
 
 class SandboxRefusedError(DuelError):
     """A sandbox was asked to run code it must never run (e.g. model-written code outside Docker)."""
+
+
+class DeadlineExceededError(DuelError):
+    """The match used up ``rules.match_deadline_s`` of recorded provider time (#13)."""

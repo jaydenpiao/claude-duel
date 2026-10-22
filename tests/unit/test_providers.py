@@ -154,3 +154,42 @@ class TestFake:
     def test_attacker_exhausts_knowledge(self) -> None:
         req = CompletionRequest(system="s", prompt="TASK: ATTACK\nAGENT: a\nATTEMPT: 99", purpose="attack")
         assert "guess-99" in FakeProvider(skill=len(TEMPLATES)).complete(req).text
+
+
+class TestDeadline:
+    def make(self, inner: Scripted, sleeps: list[float], now: list[float], deadline: float) -> RetryingProvider:
+        def sleep(s: float) -> None:
+            sleeps.append(s)
+            now[0] += s
+
+        return RetryingProvider(
+            inner,
+            InMemoryMetrics(),
+            max_retries=10,
+            base_delay=1,
+            max_delay=8,
+            sleep=sleep,
+            rng=random.Random(0),
+            deadline_s=deadline,
+            clock=lambda: now[0],
+        )
+
+    def test_retry_after_above_cap_fails_fast(self) -> None:
+        sleeps: list[float] = []
+        inner = Scripted(RateLimitError("429", retry_after=60), "ok")
+        with pytest.raises(RateLimitError):
+            self.make(inner, sleeps, [0.0], 120).complete(REQ)
+        assert (sleeps, inner.calls) == ([], 1)
+
+    def test_stops_before_passing_the_call_deadline(self) -> None:
+        sleeps: list[float] = []
+        inner = Scripted(*[RateLimitError("429", retry_after=4)] * 10, "ok")
+        with pytest.raises(RateLimitError):
+            self.make(inner, sleeps, [0.0], 10).complete(REQ)
+        assert sum(sleeps) <= 10
+        assert inner.calls < 10
+
+    def test_within_deadline_still_retries(self) -> None:
+        sleeps: list[float] = []
+        inner = Scripted(RateLimitError("429", retry_after=2), "ok")
+        assert self.make(inner, sleeps, [0.0], 10).complete(REQ).text == "ok"

@@ -133,6 +133,7 @@ def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.calls += 1
     state.usage.tokens += p.tokens
     state.usage.usd += p.usd
+    state.usage.elapsed_ms += p.elapsed_ms
 
 
 def _rejected(state: MatchState, p: BuildRejected) -> None:

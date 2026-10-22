@@ -12,7 +12,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 - `config.py` (TOML then `DUEL_*` env; every variable and the allowed models are listed in README), `observability.py` (logging, metrics), `cli.py` (`--format text|json`, `--view auto|arena|commentary`, `--pace`; text ends with `replay verified ✓`).
 
 ## Match lifecycle (`domain/state_machine.py`)
-`pending -> build -> validate -> attack -> score -> (build | complete)`; any non-terminal stage can go to `failed`. `build` increments `round`. `score` goes to `complete` when `round >= rules.rounds`. `recover()` reopens a failed match at `failed_stage`; stage work is idempotent (skips ids already in `challenges`/`validations`/`attacks`). State is saved after every unit of work.
+`pending -> build -> validate -> attack -> score -> (build | complete)`; any non-terminal stage can go to `failed`. `build` increments `round`. `score` goes to `complete` when `round >= rules.rounds`. A match fails with a `deadline` reason once recorded provider time (`usage.elapsed_ms`, summed from `call_charged`) reaches `rules.match_deadline_s` (900s). The total is event-sourced, so resume never resets it. `recover()` reopens a failed match at `failed_stage`; stage work is idempotent (skips ids already in `challenges`/`validations`/`attacks`). State is saved after every unit of work.
 
 ## Directory map
 ```

@@ -31,6 +31,7 @@ class Settings(BaseModel):
     budget: BudgetLimits = BudgetLimits()
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
+    provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim"
