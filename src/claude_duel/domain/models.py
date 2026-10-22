@@ -45,8 +45,11 @@ class Rules(_Frozen):
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     solve_points: int = 10
-    defense_points: int = 6
+    defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
     invalid_penalty: int = 5
+    difficulty_gate: bool = Field(
+        default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
+    )
 
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""
@@ -60,6 +63,11 @@ class ChallengeSpec(_Frozen):
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
+    solver: str = Field(
+        default="",
+        max_length=8192,
+        description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
+    )
     difficulty: int = Field(ge=1, le=3)
 
 

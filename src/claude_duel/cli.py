@@ -16,6 +16,7 @@ from claude_duel.app.session import play
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import DuelError
 from claude_duel.domain.models import MatchState
+from claude_duel.domain.scoring import match_stats
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.commentary import Commentary
 
@@ -51,6 +52,7 @@ def _summary(state: MatchState) -> str:
             "calls": u.calls,
             "tokens": u.tokens,
             "est_usd": round(u.usd, 6),
+            **match_stats(state),
         }
     )
 

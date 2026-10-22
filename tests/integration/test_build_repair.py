@@ -41,7 +41,9 @@ def test_invalid_answer_is_repaired_with_the_reason(make_engine, new_state) -> N
     assert "FLAG is injected by the arena" in alice.prompts[1]
     mine = next(c for c in state.challenges.values() if c.author == "alice")
     assert state.validations[mine.id].valid
-    assert state.build_errors[mine.id] == ["FLAG is injected by the arena; never assign or define it"]
+    assert [e.split(" (")[0] for e in state.build_errors[mine.id]] == [
+        "FLAG is injected by the arena; never assign or define it"
+    ]
     assert state.usage.calls >= 2  # the repair call is charged like any other
 
 
@@ -80,5 +82,47 @@ def test_prompt_states_the_policy_and_its_example_is_valid() -> None:
 def test_recorded_failures_are_caught_by_policy() -> None:
     for name in ("nano_invents_flag", "mini_invents_flag"):
         spec = agents.parse_challenge(recorded(name))
-        assert policy.check(spec, 4096) == "FLAG is injected by the arena; never assign or define it"
+        assert (policy.check(spec, 4096) or "").startswith("FLAG is injected by the arena; never assign or define it")
     assert policy.check(agents.parse_challenge(recorded("nano_repaired")), 4096) is None
+
+
+def test_plaintext_answer_is_rejected_and_explained(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    bob = Scripted(recorded("mini_plaintext"))
+    state = make_engine({"alice": FakeProvider(), "bob": bob}).run(new_state(rounds=1, challenges_per_round=1))
+    assert "appears in the source; derive it with logic" in bob.prompts[1]
+    mine = next(c for c in state.challenges.values() if c.author == "bob")
+    assert not state.validations[mine.id].valid
+
+
+class Probe:
+    """Difficulty-gate stand-in that always answers the example maze's path."""
+
+    name = "probe"
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        return Completion(text='{"payload": "DDRR"}', input_tokens=80, output_tokens=8)
+
+
+def test_solver_output_becomes_reference(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    bob = Scripted(recorded("mini_solver"))
+    state = make_engine({"alice": FakeProvider(), "bob": bob}).run(new_state(rounds=1, challenges_per_round=1))
+    mine = next(c for c in state.challenges.values() if c.author == "bob")
+    assert state.validations[mine.id].valid
+    assert mine.spec is not None
+    assert mine.spec.reference_payload
+
+
+def test_difficulty_gate_sends_easy_challenge_to_repair(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = Scripted(json.dumps(agents.EXAMPLE_CHALLENGE), recorded("mini_solver"))
+    engine = make_engine({"alice": alice, "bob": FakeProvider(), "gate": Probe()})
+    state = engine.run(new_state(rounds=1, challenges_per_round=1, difficulty_gate=True))
+    mine = next(c for c in state.challenges.values() if c.author == "alice")
+    assert state.build_errors[mine.id][0].startswith("too easy")
+    assert "too easy" in alice.prompts[1]
+    assert state.validations[mine.id].valid  # the harder repair held against the probe
+
+
+def test_difficulty_gate_off_by_default(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = Scripted(json.dumps(agents.EXAMPLE_CHALLENGE))
+    make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    assert len(alice.prompts) == 1

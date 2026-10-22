@@ -4,9 +4,9 @@
 - FR1 A match pits two agents against each other over N rounds.
 - FR2 Each round has four stages: Build, Validate, Attack, Score.
 - FR3 Build: each agent authors `challenges_per_round` CTF challenges (description, Python source, reference payload, difficulty 1-3). The arena injects a per-challenge secret flag as the global `FLAG` at run time (sent over stdin, never argv or env); authors never see it.
-- FR4 Validate: a challenge is valid only if it passes static policy (size, banned capabilities, no flag-shaped literals), the reference payload yields the flag, and an empty payload does not. Invalid challenges cost the author points.
+- FR4 Validate: a challenge is valid only if it passes static policy (size, banned capabilities, no flag-shaped literals, and the accepting input not visible in the source in any obvious encoding), the reference payload (or the output of the author's hidden `solver` program) yields the flag, and an empty payload does not. Invalid challenges cost the author points.
 - FR5 Attack: each agent attacks every valid opponent challenge within step (attempt) and token budgets. Previous attempt outputs are fed back.
-- FR6 Score: deterministic, pure scoring; difficulty and round multipliers escalate stakes each round.
+- FR6 Score: deterministic, pure scoring; difficulty and round multipliers escalate stakes each round. A defense is worth at least as much as a capture (ADR 0006). An optional difficulty gate (`rules.difficulty_gate`, cheap `gate_model`) sends challenges solved by one probe attempt back to repair.
 - FR7 Every decision is appended to an event log; `duel replay` recomputes scores from the log and must match.
 - FR8 CLI: `duel run`, `duel resume`, `duel replay`.
 - FR9 Providers: deterministic fake (default/tests), Anthropic, OpenAI (enabled when API key env var is set).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import threading
 import time
@@ -23,7 +24,7 @@ LIM = SandboxLimits(wall_seconds=2, cpu_seconds=1, memory_mb=128, max_output_byt
 
 
 def spec(source: str) -> ChallengeSpec:
-    return ChallengeSpec(title="t", description="d", source=source, reference_payload="x", difficulty=1)
+    return ChallengeSpec(title="t", description="d", source=source, reference_payload="hidden-input", difficulty=1)
 
 
 BYPASSES = [
@@ -119,7 +120,11 @@ class TestSubprocess:
     def test_runtime_refuses_what_policy_bans(self, source: str) -> None:  # N1 defence in depth
         r = self.sb.run(source + "\n", "", FLAG, LIM)
         assert r.exit_code != 0
-        assert r.stdout == ""
+        assert re.fullmatch(r"error: (NameError|ImportError|AttributeError) at line \d+\n", r.stdout)
+
+    def test_crash_report_never_quotes_the_message(self) -> None:  # int(FLAG) would put FLAG in the message
+        r = self.sb.run("x = int(FLAG)\n", "", FLAG, LIM)
+        assert (r.exit_code, r.stdout) == (1, "error: ValueError at line 1\n")
 
     def test_runtime_builtins_are_minimal(self) -> None:
         src = (

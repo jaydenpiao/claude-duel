@@ -1,0 +1,5 @@
+{
+ "model": "gpt-4.1-mini",
+ "note": "live tune-3 answer: plaintext password the attacker reads off the source",
+ "content": "{\"title\": \"Hash Chain Lock\", \"description\": \"Input a string whose SHA256 hash, when hashed again, matches the SHA256 of 'open-sesame'. If correct, print the FLAG.\", \"source\": \"import sys, hashlib\\n\\ndata = sys.stdin.read().strip()\\nif data:\\n    target = hashlib.sha256(b'open-sesame').hexdigest()\\n    h1 = hashlib.sha256(data.encode()).hexdigest()\\n    h2 = hashlib.sha256(h1.encode()).hexdigest()\\n    if h2 == target:\\n        print(FLAG)\\n\", \"reference_payload\": \"open-sesame\", \"difficulty\": 2}"
+}

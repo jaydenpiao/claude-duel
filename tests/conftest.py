@@ -68,7 +68,7 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
             event_log,
             metrics or InMemoryMetrics(),
             CostBudget(budget or BudgetLimits(), FileSpendLedger(store_root / "ledger.jsonl"), DEFAULT_PRICES),
-            {"alice": "fake-1", "bob": "fake-1"},
+            dict.fromkeys(providers, "fake-1"),
             observer,
         )
 
