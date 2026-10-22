@@ -109,3 +109,11 @@ def test_store_assigns_created_seq(tmp_path: Path) -> None:
         log.append(m, Event(seq=1, type="x", trace_id="t", data={}))
     assert [log.read(m)[0].data["created_seq"] for m in ("m-b", "m-a")] == [0, 1]
     assert "created_seq" not in log.read("m-a")[1].data
+
+
+def test_bootstrap_ci_ignores_resamples_without_the_entrant() -> None:
+    """Arch round 3 #10: a rarely seen strong entrant's CI is not dragged to 1500 by resamples that miss it."""
+    rs = [*_round_robin(20), Result("zz-1", "solo", "s1", 1.0), Result("zz-2", "solo", "s2", 1.0)]
+    solo = next(r for r in ratings(rs, boot=200) if r.entrant == "solo")
+    assert solo.bt > ELO_START
+    assert solo.lo > ELO_START  # with the old 1500 fill-in, ~13% of resamples sat at exactly 1500
