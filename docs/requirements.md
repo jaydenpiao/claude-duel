@@ -29,4 +29,4 @@
 | Infinite loop / memory bomb | CPU, address-space, file-size, wall-clock limits; output truncated |
 | Flag leakage | Flags derived via HMAC, never in prompts (guarded), redacted from logs and attack feedback |
 | Crash mid-match | Atomic checkpoint per unit; `duel resume` continues; completed units skipped |
-| Concurrent runs on one match | Lock file per match |
+| Concurrent runs on one match | `flock` per match held across load, recover and run; released by the kernel on crash |

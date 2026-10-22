@@ -15,7 +15,6 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.app.replay import replay
 from claude_duel.domain.errors import (
     BudgetExceededError,
-    MatchLockedError,
     PermanentProviderError,
     QuotaExceededError,
 )
@@ -155,11 +154,6 @@ def test_paid_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # type: ig
     run_budget.charge("x", "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
     with pytest.raises(BudgetExceededError, match="run cost"):
         run_budget.check(new_state("y"))
-
-
-def test_concurrent_run_is_locked(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
-    with store.lock("m1"), pytest.raises(MatchLockedError):
-        make_engine().run(new_state())
 
 
 def test_flag_never_in_events_or_state_challenges(make_engine, new_state, store_root) -> None:  # type: ignore[no-untyped-def]

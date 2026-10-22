@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
 
@@ -10,20 +11,33 @@ from claude_duel.domain.models import MatchState
 
 
 class FileLock:
+    """Non-blocking ``flock`` on a held fd. The kernel drops it when the holder dies, so locks never go stale.
+
+    The lock file is never unlinked: deleting it would let two processes lock different inodes.
+    """
+
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._fd: int | None = None
 
     def __enter__(self) -> FileLock:
+        if self._fd is not None:
+            raise MatchLockedError(f"{self._path.name} is already held by this lock")
+        fd = os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError as exc:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            os.close(fd)
             raise MatchLockedError(f"{self._path.name} is held by another process") from exc
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())  # diagnostics only; the flock is the lock
+        self._fd = fd
         return self
 
     def __exit__(self, *exc: object) -> None:
-        self._path.unlink(missing_ok=True)
+        if self._fd is not None:
+            os.close(self._fd)  # releases the flock
+            self._fd = None
 
 
 class FileMatchStore:

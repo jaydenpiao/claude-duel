@@ -13,7 +13,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.app.budget import CostBudget
+from claude_duel.app.budget import CostBudget, check_model_allowed
 from claude_duel.app.engine import MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
@@ -60,8 +60,18 @@ def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
 
 
-def build_engine(settings: Settings, metrics: Metrics, store: FileMatchStore) -> MatchEngine:
-    agents = settings.agents
+def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
+    """Agents with their effective model written in, so a saved match never depends on later config."""
+    a, b = (agent.model_copy(update={"model": settings.model_for(agent)}) for agent in settings.agents)
+    return a, b
+
+
+def build_engine(
+    settings: Settings, metrics: Metrics, store: FileMatchStore, agents: tuple[AgentSpec, AgentSpec]
+) -> MatchEngine:
+    """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps."""
+    for agent in agents:
+        check_model_allowed(settings.model_for(agent), settings.prices)
     return MatchEngine(
         {a.name: make_provider(a, settings, metrics) for a in agents},
         make_sandbox(settings, agents),
