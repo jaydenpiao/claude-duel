@@ -14,8 +14,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.app import agents
-from claude_duel.app.budget import DEFAULT_PRICES, CostBudget
-from claude_duel.app.container import build_ledger, make_provider, make_sandbox
+from claude_duel.app.budget import CostBudget
+from claude_duel.app.container import build_budget, make_provider, make_sandbox
 from claude_duel.app.engine import MALFORMED
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError, MalformedOutputError
@@ -129,7 +129,7 @@ def run_bench(settings: Settings, manifest: Path, tries: int, bench_id: str) -> 
     """
     tasks = load_tasks(manifest)
     sandbox = make_sandbox(settings, settings.agents)
-    budget = CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES)
+    budget = build_budget(settings)
     budget.check_lifetime()
     state = MatchState(match_id=bench_id, agents=settings.agents, rules=Rules(), limits=settings.limits)
     results = []
