@@ -103,14 +103,6 @@ def check_caps(settings: Settings, caps: tuple[SpendCap, ...]) -> None:
             raise BudgetExceededError(f"{cap.label} cost ${spent:.4f}/${cap.max_usd}")
 
 
-def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None, log_id: str) -> Settings:
-    """Settings with the rules and limits pinned when the series/tournament was created; warns on config drift."""
-    rules, limits = rules or settings.rules, limits or settings.limits
-    if (rules, limits) != (settings.rules, settings.limits):
-        log(_LOG, logging.WARNING, "config differs from the saved series; resuming with the saved rules", id=log_id)
-    return settings.model_copy(update={"rules": rules, "limits": limits})
-
-
 @dataclass(frozen=True)
 class SeriesReport:
     consistent: bool
