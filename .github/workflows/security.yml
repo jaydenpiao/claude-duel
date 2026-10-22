@@ -18,7 +18,7 @@ jobs:
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       - run: uv venv && uv pip install -e '.[dev]'
       - name: dependency vulnerabilities (runtime + dev, pinned as installed)
-        run: uv pip freeze --exclude-editable > /tmp/req.txt && .venv/bin/pip-audit --strict --disable-pip --no-deps -r /tmp/req.txt
+        run: uv pip freeze --exclude-editable > ${{ runner.temp }}/req.txt && .venv/bin/pip-audit --strict --disable-pip --no-deps -r ${{ runner.temp }}/req.txt
   secrets:
     runs-on: [self-hosted, box]
     permissions:
