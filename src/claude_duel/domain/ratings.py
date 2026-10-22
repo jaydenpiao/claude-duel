@@ -86,6 +86,11 @@ def elo(rs: Iterable[Result], k: float = ELO_K) -> dict[str, float]:
     return r
 
 
+def _mm_denominator(n: str, p: dict[str, float], games: list[tuple[str, str, float]]) -> float:
+    """One MM step's denominator for ``n``: the virtual game vs the anchor (strength 1) plus its real games."""
+    return 1 / (p[n] + 1.0) + sum(1 / (p[a] + p[b]) for a, b, _ in games if n in (a, b))
+
+
 def bradley_terry(rs: Iterable[Result], iters: int = 200) -> dict[str, float]:
     """MM fit (Hunter 2004) with draws as half wins and one virtual draw per entrant against a 1500 anchor,
     so undefeated or winless entrants stay finite. Reported on the Elo scale, anchored at 1500."""
@@ -99,12 +104,7 @@ def bradley_terry(rs: Iterable[Result], iters: int = 200) -> dict[str, float]:
         wins[b] += 1 - s
     p = dict.fromkeys(names, 1.0)
     for _ in range(iters):
-        nxt = {}
-        for n in names:
-            denom = 1 / (p[n] + 1.0)  # virtual game vs the anchor (strength 1)
-            denom += sum(1 / (p[a] + p[b]) for a, b, _ in games if n in (a, b))
-            nxt[n] = wins[n] / denom
-        p = nxt
+        p = {n: wins[n] / _mm_denominator(n, p, games) for n in names}
     return {n: ELO_START + 400 * math.log10(v) for n, v in p.items()}
 
 

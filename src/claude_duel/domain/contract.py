@@ -38,23 +38,49 @@ def definitions(source: str) -> str:
     return source
 
 
+def _bound(node: ast.AST, check_def: ast.FunctionDef) -> tuple[str, ...]:
+    """Names one node binds (``check_def`` itself is the one allowed binding of ``check``)."""
+    if isinstance(node, ast.Name):
+        return (node.id,) if isinstance(node.ctx, (ast.Store, ast.Del)) else ()
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return () if node is check_def else (node.name,)
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name,)
+    if isinstance(node, ast.arg):
+        return (node.arg,)
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return tuple(node.names)
+    return ()
+
+
 def _rebinds(tree: ast.Module, check_def: ast.FunctionDef) -> set[str]:
     """Protected names the author binds: assignments, defs, classes, imports, args, globals, decorators on check."""
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            out.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node is not check_def:
-            out.add(node.name)
-        elif isinstance(node, ast.alias):
-            out.add(node.asname or node.name)
-        elif isinstance(node, ast.arg):
-            out.add(node.arg)
-        elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            out.update(node.names)
+    out = {name for node in ast.walk(tree) for name in _bound(node, check_def)}
     if check_def.decorator_list:
         out.add("check")
     return out & _PROTECTED
+
+
+def _io_used(tree: ast.Module) -> set[str]:
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    return (names | {n.name for n in ast.walk(tree) if isinstance(n, ast.alias)}) & _IO_NAMES
+
+
+def _problem(tree: ast.Module) -> str | None:
+    """Why a parsed ``check`` source can't be composed, or None."""
+    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "check"]
+    if len(funcs) != 1 or len(funcs[0].args.args) != 1:
+        return "the source must define exactly one top-level function check(s) taking the input string"
+    rebound = _rebinds(tree, funcs[0])
+    if rebound:
+        return f"do not rebind {', '.join(sorted(rebound))}: the arena owns print and calls your one check(s)"
+    used = _io_used(tree)
+    if used:
+        return (
+            f"do not use {', '.join(sorted(used))}: the arena reads stdin and prints FLAG when check(s) returns "
+            "True; write only check(s) and its helpers"
+        )
+    return None
 
 
 def compose(source: str) -> tuple[str, str | None]:
@@ -64,22 +90,8 @@ def compose(source: str) -> tuple[str, str | None]:
         tree = ast.parse(own)
     except SyntaxError as exc:
         return own, f"syntax error: {exc.msg} (line {exc.lineno})"
-    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "check"]
-    if len(funcs) != 1 or len(funcs[0].args.args) != 1:
-        return own, "the source must define exactly one top-level function check(s) taking the input string"
-    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
-        n.name for n in ast.walk(tree) if isinstance(n, ast.alias)
-    }
-    rebound = _rebinds(tree, funcs[0])
-    if rebound:
-        return own, f"do not rebind {', '.join(sorted(rebound))}: the arena owns print and calls your one check(s)"
-    used = names & _IO_NAMES
-    if used:
-        return own, (
-            f"do not use {', '.join(sorted(used))}: the arena reads stdin and prints FLAG when check(s) returns "
-            "True; write only check(s) and its helpers"
-        )
-    return own + WRAPPER, None
+    reason = _problem(tree)
+    return (own, reason) if reason else (own + WRAPPER, None)
 
 
 def solver_program(source: str, solver: str) -> str:

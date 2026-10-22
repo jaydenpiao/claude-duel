@@ -20,7 +20,7 @@ from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.replay import replay
-from claude_duel.app.series import play_series, verify_series
+from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
 from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
@@ -30,7 +30,7 @@ from claude_duel.domain.models import MatchState
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
-from claude_duel.domain.series import SeriesRule
+from claude_duel.domain.series import SeriesRule, SeriesState
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
@@ -205,24 +205,31 @@ def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
         raise ConfigError(f"bad series: {exc}") from exc
     state = play_series(settings, series_id, rule, build_metrics(settings, series_id, InMemoryMetrics()))
     report = verify_series(settings, series_id)
-    winner = state.winner()
     if fmt == "json":
-        out = {
-            "series_id": series_id,
-            "best_of": state.rule.games,
-            "wins": state.wins(),
-            "winner": winner,
-            "games": [g.model_dump() for g in state.games],
-            "verified": report.consistent,
-        }
-        print(json.dumps(out))
+        print(json.dumps(_series_json(series_id, state, report.consistent)))
     else:
-        for g in state.games:
-            print(f"game {g.game_no} ({g.match_id}): {g.winner or 'draw'} · {g.scores}")
-        result = "undecided" if not state.done() else f"winner: {winner}" if winner else "drawn"
-        print(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
-        print(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
+        print("\n".join(_series_text(series_id, state, report)))
     return 0 if report.consistent and state.done() else 1
+
+
+def _series_json(series_id: str, state: SeriesState, verified: bool) -> dict[str, object]:
+    return {
+        "series_id": series_id,
+        "best_of": state.rule.games,
+        "wins": state.wins(),
+        "winner": state.winner(),
+        "games": [g.model_dump() for g in state.games],
+        "verified": verified,
+    }
+
+
+def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> list[str]:
+    lines = [f"game {g.game_no} ({g.match_id}): {g.winner or 'draw'} · {g.scores}" for g in state.games]
+    winner = state.winner()
+    result = "undecided" if not state.done() else f"winner: {winner}" if winner else "drawn"
+    lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
+    lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
+    return lines
 
 
 def _ratings(settings: Settings, boot: int, fmt: str) -> int:
