@@ -1,14 +1,16 @@
-"""`duel` command line: run, resume, replay, card, estimate, series."""
+"""`duel` command line: run, resume, replay, card, estimate, series, ratings."""
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import os
 import sys
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.console import Console
@@ -21,8 +23,10 @@ from claude_duel.app.series import play_series, verify_series
 from claude_duel.app.session import play
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
+from claude_duel.domain.events import fold
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.modes import MODES, preset
+from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
 from claude_duel.domain.series import SeriesRule
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
@@ -65,6 +69,9 @@ def _parser() -> argparse.ArgumentParser:
     series.add_argument("--series-id", help="explicit id (re-running an existing id resumes it)")
     series.add_argument("--games", type=int, default=3, help="best of N (odd, default 3)")
     series.add_argument("--format", choices=("text", "json"), default="text")
+    rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
+    rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
+    rat.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -131,16 +138,16 @@ def main(argv: list[str] | None = None) -> int:
 def _dispatch(args: argparse.Namespace) -> int:
     settings = load_settings(args.config)
     configure_logging(settings.log_level)
-    if args.cmd == "run":
-        return _run(settings, args.match_id, args)
-    if args.cmd == "resume":
-        return _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2
-    if args.cmd == "estimate":
-        return _estimate(settings, args.mode, args.model)
-    if args.cmd == "series":
-        return _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format)
-    if args.cmd == "card":
-        return _card(settings, args.match_id, args.out)
+    handlers: dict[str, Callable[[], int]] = {
+        "run": lambda: _run(settings, args.match_id, args),
+        "resume": lambda: _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2,
+        "estimate": lambda: _estimate(settings, args.mode, args.model),
+        "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
+        "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
+        "card": lambda: _card(settings, args.match_id, args.out),
+    }
+    if args.cmd in handlers:
+        return handlers[args.cmd]()
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
     if args.transcript:
         print("\n".join(report.transcript))
@@ -189,6 +196,18 @@ def _series(settings: Settings, series_id: str, games: int, fmt: str) -> int:
         print(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
         print(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return 0 if report.consistent and state.done() else 1
+
+
+def _ratings(settings: Settings, boot: int, fmt: str) -> int:
+    log = build_event_log(settings)
+    table = ratings(results(fold(mid, log.read(mid)) for mid in log.ids()), boot=boot)
+    if fmt == "json":
+        print(json.dumps([dataclasses.asdict(r) for r in table]))
+        return 0
+    print(f"{'entrant':<32}{'games':>6}{'bt':>7}{'95% ci':>14}{'elo':>7}")
+    for r in table:
+        print(f"{r.entrant:<32}{r.games:>6}{r.bt:>7.0f}{f'{r.lo:.0f}-{r.hi:.0f}':>14}{r.elo:>7.0f}")
+    return 0
 
 
 def _card(settings: Settings, match_id: str, out: Path | None) -> int:
