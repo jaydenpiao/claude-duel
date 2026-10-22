@@ -17,6 +17,7 @@ Each unit has a key (`build:r1:alice:0`, `attack:r1:bob:<challenge>`). The engin
 `flag = DUEL{hmac_sha256(match_secret, challenge_id)[:32]}`. The secret is generated per match and stored only in the state file (never logged).
 
 ## Scoring (per round r, multiplier m=r)
+- scorer `rules.scoring.kind` (registry `scoring.SCORERS`, ADR 0007); `classic`:
 - invalid/forfeited challenge: author `-invalid_penalty*m`
 - solved: attacker `+solve_points*difficulty*m - (attempts-1)`, floored at 1
 - valid and unsolved: author `+defense_points*difficulty*m` (defense_points >= solve_points, ADR 0006)

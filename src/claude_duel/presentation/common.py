@@ -84,7 +84,7 @@ def attempt_view(s: MatchState, e: Event) -> AttemptView:
     ch = s.challenges[cid]
     assert ch.spec is not None, "only valid challenges are attacked"
     captured = s.attempts[key][-1].captured
-    award = solve_award(ch.spec, ch.round, n, s.rules) if captured else 0
+    award = solve_award(ch.spec, ch.round, n, s.rules.scoring) if captured else 0
     return AttemptView(attacker, ch.author, scrub(ch.spec.title), n, captured, award)
 
 
@@ -95,7 +95,7 @@ def defense(s: MatchState, e: Event) -> tuple[Attack, Challenge, int] | None:
     assert ch.spec is not None, "only valid challenges are attacked"
     if atk.solved:
         return None
-    return atk, ch, defense_award(ch.spec, ch.round, s.rules)
+    return atk, ch, defense_award(ch.spec, ch.round, s.rules.scoring)
 
 
 def verdict(s: MatchState, e: Event) -> tuple[Challenge, str, bool]:
@@ -109,7 +109,7 @@ def verdict(s: MatchState, e: Event) -> tuple[Challenge, str, bool]:
 def verdict_text(s: MatchState, e: Event) -> str:
     v = Validation.model_validate(e.data["validation"])
     ch = s.challenges[v.challenge_id]
-    return "solvable ✓" if v.valid else f"rejected ✗ ({scrub(v.reason)}) -{s.rules.invalid_penalty * ch.round}"
+    return "solvable ✓" if v.valid else f"rejected ✗ ({scrub(v.reason)}) -{s.rules.scoring.invalid_penalty * ch.round}"
 
 
 def board(s: MatchState) -> str:
