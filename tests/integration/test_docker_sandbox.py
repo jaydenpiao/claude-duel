@@ -7,7 +7,10 @@ import subprocess
 import pytest
 
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
-from claude_duel.domain.models import SandboxLimits
+from claude_duel.app.container import make_sandbox
+from claude_duel.config import Settings
+from claude_duel.domain.errors import ConfigError
+from claude_duel.domain.models import AgentSpec, SandboxLimits
 
 pytestmark = pytest.mark.docker
 
@@ -25,6 +28,18 @@ def _leftover(docker_cmd: tuple[str, ...], name_prefix: str = "duel-") -> str:
         [*docker_cmd, "ps", "-aq", "--filter", f"name={name_prefix}"], capture_output=True, text=True, check=True
     )
     return out.stdout.strip()
+
+
+def test_health_ok_and_broken_image(sb: DockerSandbox, docker_cmd: tuple[str, ...]) -> None:
+    assert sb.health() is None
+    broken = DockerSandbox(docker_cmd, image="claude-duel-missing-image:none")
+    assert "self-test container failed" in (broken.health() or "")
+
+
+def test_auto_rejects_broken_docker_for_real_models(docker_cmd: tuple[str, ...]) -> None:
+    settings = Settings(sandbox="auto", docker_command=docker_cmd, docker_image="claude-duel-missing-image:none")
+    with pytest.raises(ConfigError, match="self-test"):
+        make_sandbox(settings, (AgentSpec(name="a", provider="openai"), AgentSpec(name="b")))
 
 
 def test_flag_reveal(sb: DockerSandbox) -> None:

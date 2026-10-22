@@ -17,6 +17,7 @@ STARTUP_GRACE_SECONDS = 5.0
 TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires
 SIGNAL_EXIT_BASE = 128  # container exit status 128+N means killed by signal N
 _PROBE_SECONDS = 10.0
+_SELF_TEST_FLAG = "DUEL{" + "0" * 32 + "}"
 
 
 def docker_probe(docker: Sequence[str]) -> str | None:
@@ -44,11 +45,21 @@ class DockerSandbox:
         self._docker = tuple(docker)
         self._image = image
 
+    def health(self) -> str | None:
+        """Why this sandbox can't run challenges, or None. Probes the daemon, then runs a real self-test container."""
+        problem = docker_probe(self._docker)
+        if problem is not None:
+            return problem
+        result = self.run("print(FLAG)", "", _SELF_TEST_FLAG, SandboxLimits())
+        if result.stdout.strip() != _SELF_TEST_FLAG:
+            return f"self-test container failed (exit {result.exit_code}, killed={result.killed_reason})"
+        return None
+
     def argv(self, name: str, limits: SandboxLimits) -> list[str]:
         """Container argv. Carries neither the flag nor the source: both go over stdin."""
         mem = f"{limits.memory_mb}m"
         return [
-            *self._docker, "run", "--rm", "-i", "--name", name,
+            *self._docker, "run", "--rm", "-i", "--pull", "never", "--name", name,
             "--network", "none",
             "--read-only",
             "--tmpfs", "/tmp:size=1m,noexec,nosuid,nodev",  # noqa: S108 - container-private tmpfs
