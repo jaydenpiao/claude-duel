@@ -18,6 +18,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.presentation.common import (
     MatchFold,
@@ -26,7 +27,6 @@ from claude_duel.presentation.common import (
     defense,
     leader,
     result,
-    scrub,
     spend,
     verdict,
     verdict_text,
@@ -214,6 +214,15 @@ class ArenaView(MatchFold):
     def _validated(self, s: MatchState, e: Event) -> None:
         ch, title, _ = verdict(s, e)
         self.model.log(f"check {ch.author}'s {title!r}: {verdict_text(s, e)}")
+
+    def _started(self, s: MatchState, e: Event) -> None:
+        cid, _, attacker = str(e.data["key"]).rpartition(":")
+        ch = s.challenges[cid]
+        title = scrub(ch.spec.title) if ch.spec else "forfeit"
+        self.model.busy = True
+        self.model.now = (
+            f"{attacker} attacking {ch.author}'s {title!r}... try {e.data['try_no']}/{s.rules.max_attempts}"
+        )
 
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)

@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TextIO
 
+from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.presentation.common import (
     MatchFold,
@@ -16,7 +17,6 @@ from claude_duel.presentation.common import (
     board,
     defense,
     result,
-    scrub,
     snippet,
     spend,
     verdict,

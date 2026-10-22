@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from xml.sax.saxutils import escape
 
 from claude_duel.app.replay import ReplayReport
+from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Event, MatchState
-from claude_duel.presentation.common import result, scrub
+from claude_duel.presentation.common import result
 
 WIDTH, HEIGHT = 800, 420
 COLORS = ("#22d3ee", "#e879f9")
