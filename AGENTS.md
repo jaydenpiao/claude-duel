@@ -57,6 +57,7 @@ ruff check . && ruff format --check . && mypy src && vulture && pylint src tests
 - Every failure path gets a test that triggers it.
 
 ## Git style
+- `main` is protected: changes land only by PR, squash or rebase (linear history), with `check (3.11/3.12/3.13)`, `audit`, `secrets`, `codeql` and `image` green on an up-to-date branch. No force pushes or deletion. Never bypass it as admin.
 - Commits: short lowercase imperative, e.g. `add match state machine`. Branches: kebab-case, e.g. `sandbox-limits`. PR title like a commit; body 2-4 short bullets. No emoji.
 
 ## Definition of done
