@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render a `duel fight` page to video: headless Chrome draws each frame, ffmpeg encodes it.
 # usage: scripts/render_fight.sh fight.html out.mp4 [out.gif]
-#   MP4: 1280x720, 30fps, H.264 + the page's seeded sound. GIF: 640px wide, 15fps (palettegen/paletteuse).
+#   MP4: 1280x720, 30fps, H.264 + the page's seeded sound. GIF: 640px wide, 15fps (64-colour palette, no dither: ~5MB for 45s).
 # Needs google-chrome (or $CHROME), node >= 20 and ffmpeg. No network, no API calls.
 set -euo pipefail
 [[ $# -ge 2 ]] || { echo "usage: $0 fight.html out.mp4 [out.gif]" >&2; exit 2; }
@@ -13,6 +13,6 @@ ffmpeg -loglevel error -y -framerate 30 -i "$frames/f%05d.png" -i "$frames/audio
   -c:v libx264 -pix_fmt yuv420p -crf 18 -c:a aac -b:a 128k -shortest -movflags +faststart "$mp4"
 if [[ -n $gif ]]; then
   ffmpeg -loglevel error -y -framerate 30 -i "$frames/f%05d.png" \
-    -vf "fps=15,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" "$gif"
+    -vf "fps=15,scale=640:-1:flags=bilinear,split[a][b];[a]palettegen=max_colors=64:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" "$gif"
 fi
 echo "rendered: $mp4${gif:+ $gif}"
