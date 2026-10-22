@@ -5,7 +5,7 @@ on:
 permissions: {}
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
     permissions:
       contents: write
       packages: write
