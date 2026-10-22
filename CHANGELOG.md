@@ -5,6 +5,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
+  for imports of escape modules such as `os` or `subprocess`.
+
 ## [0.1.0]
 First public release.
 
