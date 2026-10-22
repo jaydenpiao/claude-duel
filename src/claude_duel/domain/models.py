@@ -47,7 +47,7 @@ class SandboxLimits(_Frozen):
     cpu_seconds: int = Field(default=1, gt=0)
     memory_mb: int = Field(default=128, gt=0)
     max_output_bytes: int = Field(default=4096, gt=0)
-    pids_limit: int = Field(default=32, gt=0)
+    pids_limit: int = Field(default=64, gt=0)  # >= 64 so gVisor (runsc) can start
     cpus: float = Field(default=0.5, gt=0)
 
 
@@ -118,6 +118,9 @@ class Rules(_Frozen):
         default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
     )
     retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
+    retry_feedback: bool = Field(
+        default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
+    )
     attack_token_budget: int = Field(default=20_000, ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
