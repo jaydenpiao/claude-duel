@@ -15,5 +15,8 @@ Model-authored challenge code is untrusted. It is checked by an AST allowlist (`
 - Dependabot for pip, GitHub Actions and the Docker base image
 - All actions pinned to commit SHAs; every workflow defaults to `permissions: {}` and grants per job
 
+## Branch protection
+`main` requires a PR with all CI and security checks green on an up-to-date branch, linear history, and blocks force pushes and deletion. Admins are not exempted by policy; do not bypass.
+
 ## Image
 Non-root (uid 10001), code root-owned, pip/setuptools removed. Run with `--read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp --tmpfs /app/.duel:uid=10001,gid=10001,mode=0700` (staging does).
