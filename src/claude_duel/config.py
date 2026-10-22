@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, BudgetLimits, check_model_allowed
+from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.domain.modes import preset
@@ -29,7 +29,6 @@ class Settings(BaseModel):
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
     gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
-    prices: dict[str, tuple[float, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     openai_api_key: SecretStr | None = None
@@ -116,7 +115,7 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-    check_model_allowed(settings.openai_model, settings.prices)
+    check_model_allowed(settings.openai_model)
     for agent in settings.agents:
-        check_model_allowed(settings.model_for(agent), settings.prices)
+        check_model_allowed(settings.model_for(agent))
     return settings

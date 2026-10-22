@@ -15,7 +15,8 @@ from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import MatchState
 from claude_duel.ports import Completion, SpendLedger
 
-# Default USD per 1M tokens (input, output). Low/medium-tier models only; override via [prices] in config.
+# USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
+# and deliberately not configurable: a config that could add models or lower prices would bypass the spend caps.
 FAKE_MODEL = "fake-1"
 DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     FAKE_MODEL: (0.0, 0.0),
@@ -27,9 +28,9 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
 }
 
 
-def check_model_allowed(model: str, prices: Mapping[str, tuple[float, float]]) -> None:
-    if model not in prices:
-        raise ConfigError(f"model {model!r} is not in the price table / allowlist: {sorted(prices)}")
+def check_model_allowed(model: str) -> None:
+    if model not in DEFAULT_PRICES:
+        raise ConfigError(f"model {model!r} is not in the allowlist: {sorted(DEFAULT_PRICES)}")
 
 
 class BudgetLimits(BaseModel):

@@ -44,7 +44,7 @@ flowchart LR
 Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
 
 ## Cost controls
-- Allowlist of low-cost models with a configurable `[prices]` table.
+- Code-defined allowlist of low-cost models (`app/budget.py:DEFAULT_PRICES`); config cannot add models or change prices.
 - Per-match caps (calls, tokens, USD; $0.25 dev / $0.50 staging / $1.00 prod), per-run caps, and a persistent ledger (`.duel/ledger.jsonl`) with a $40 lifetime ceiling. Once that ceiling is hit, new work is refused.
 - A provider `insufficient_quota` error is never retried. The match fails cleanly and can be resumed later.
 
