@@ -16,6 +16,7 @@ from claude_duel.domain.models import (
     AgentSpec,
     Attack,
     AttackAttempt,
+    CapHit,
     Challenge,
     Event,
     Finding,
@@ -33,6 +34,7 @@ MATCH_CREATED = "match_created"
 STAGE_CHANGED = "stage_changed"
 MATCH_FAILED = "match_failed"
 MATCH_RECOVERED = "match_recovered"
+MATCH_CAPPED = "match_capped"
 CALL_CHARGED = "call_charged"
 BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
@@ -86,6 +88,10 @@ class StageChanged(_Payload):
 
 class MatchFailed(_Payload):
     reason: str
+
+
+class MatchCapped(_Payload):
+    hit: CapHit
 
 
 class MatchRecovered(_Payload):
@@ -168,12 +174,18 @@ def _failed(state: MatchState, p: MatchFailed) -> None:
     state.failure = p.reason
 
 
+def _capped(state: MatchState, p: MatchCapped) -> None:
+    transition(state, Stage.CAPPED)
+    state.capped = p.hit
+
+
 def _recovered(state: MatchState, p: MatchRecovered) -> None:
     recover(state)
 
 
 def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.calls += 1
+    state.last_agent = p.agent
     state.usage.tokens += p.tokens
     state.usage.usd += p.usd
     state.usage.elapsed_ms += p.elapsed_ms
@@ -228,6 +240,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     STAGE_CHANGED: (StageChanged, _stage),
     MATCH_FAILED: (MatchFailed, _failed),
     MATCH_RECOVERED: (MatchRecovered, _recovered),
+    MATCH_CAPPED: (MatchCapped, _capped),
     CALL_CHARGED: (CallCharged, _charged),
     BUILD_REJECTED: (BuildRejected, _rejected),
     CHALLENGE_BUILT: (ChallengeBuilt, _built),

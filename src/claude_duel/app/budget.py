@@ -11,7 +11,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from claude_duel.domain.errors import BudgetExceededError, ConfigError
+from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
@@ -96,10 +96,14 @@ class CostBudget:
     def check(self, state: MatchState) -> None:
         """Raise before a call that would start above any cap."""
         u, lim = state.usage, self.limits
-        breaches = [
-            (u.calls >= lim.match_max_calls, f"match calls {u.calls}/{lim.match_max_calls}"),
-            (u.tokens >= lim.match_max_tokens, f"match tokens {u.tokens}/{lim.match_max_tokens}"),
-            (u.usd >= lim.match_max_usd, f"match cost ${u.usd:.4f}/${lim.match_max_usd}"),
+        for limit, spent, cap in (
+            ("match_calls", u.calls, lim.match_max_calls),
+            ("match_tokens", u.tokens, lim.match_max_tokens),
+            ("match_usd", u.usd, lim.match_max_usd),
+        ):
+            if spent >= cap:
+                raise MatchCapError(limit, spent, cap)  # terminal CAPPED, never resumable (ADR 0014)
+        breaches = [  # run and lifetime caps stay resumable failures
             (self.run_calls >= lim.run_max_calls, f"run calls {self.run_calls}/{lim.run_max_calls}"),
             (self.run_usd >= lim.run_max_usd, f"run cost ${self.run_usd:.4f}/${lim.run_max_usd}"),
         ]
