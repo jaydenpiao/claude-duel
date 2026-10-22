@@ -11,8 +11,9 @@ from pathlib import Path
 from claude_duel.app.container import build_engine
 from claude_duel.app.replay import replay
 from claude_duel.config import Settings, load_settings
-from claude_duel.domain.errors import DuelError
-from claude_duel.domain.models import MatchState
+from claude_duel.domain.errors import DuelError, MatchNotFoundError
+from claude_duel.domain.models import MatchState, Stage
+from claude_duel.domain.state_machine import recover
 from claude_duel.observability import InMemoryMetrics, configure_logging
 
 
@@ -32,7 +33,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def _summary(state: MatchState) -> str:
     board = ", ".join(f"{k}={v}" for k, v in sorted(state.scores.items()))
-    return f"match {state.match_id}: {state.stage.value} after round {state.round}: {board}"
+    u = state.usage
+    return (
+        f"match {state.match_id}: {state.stage.value} after round {state.round}: {board} "
+        f"[calls={u.calls} tokens={u.tokens} est_usd={u.usd:.4f}]"
+    )
 
 
 def _run(settings: Settings, match_id: str | None) -> int:
@@ -40,7 +45,9 @@ def _run(settings: Settings, match_id: str | None) -> int:
     mid = match_id or uuid.uuid4().hex[:12]
     try:
         state = store.load(mid)
-    except DuelError:
+        if state.stage is Stage.FAILED:
+            recover(state)
+    except MatchNotFoundError:
         state = MatchState(
             match_id=mid,
             secret=secrets.token_hex(32),

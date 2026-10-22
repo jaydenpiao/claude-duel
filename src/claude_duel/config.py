@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
+from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 
@@ -22,7 +23,9 @@ class Settings(BaseModel):
     sandbox: str = Field(default="auto", pattern="^(auto|docker|subprocess)$")
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-4.1-nano"
+    budget: BudgetLimits = BudgetLimits()
+    prices: dict[str, tuple[float, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     openai_api_key: SecretStr | None = None
@@ -42,6 +45,19 @@ _ENV_RULES = {
     "DUEL_TOKEN_BUDGET": "attack_token_budget",
 }
 
+_ENV_BUDGET = {
+    "DUEL_MATCH_MAX_USD": "match_max_usd",
+    "DUEL_RUN_MAX_USD": "run_max_usd",
+    "DUEL_MATCH_MAX_CALLS": "match_max_calls",
+    "DUEL_MATCH_MAX_TOKENS": "match_max_tokens",
+}
+
+
+def _overlay(target: dict[str, Any], mapping: dict[str, str], env: dict[str, str]) -> None:
+    for var, key in mapping.items():
+        if var in env:
+            target[key] = env[var]
+
 
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
@@ -51,18 +67,20 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
             data = tomllib.loads(path.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise ConfigError(f"cannot read config {path}: {exc}") from exc
-    for var, key in _ENV_SCALARS.items():
-        if var in env:
-            data[key] = env[var]
-    rules = dict(data.get("rules", {}))
-    for var, key in _ENV_RULES.items():
-        if var in env:
-            rules[key] = env[var]
-    if rules:
-        data["rules"] = rules
+    _overlay(data, _ENV_SCALARS, env)
+    for section, mapping in (("rules", _ENV_RULES), ("budget", _ENV_BUDGET)):
+        nested = dict(data.get(section, {}))
+        _overlay(nested, mapping, env)
+        if nested:
+            data[section] = nested
     if env.get("OPENAI_API_KEY"):
         data["openai_api_key"] = env["OPENAI_API_KEY"]
     try:
-        return Settings.model_validate(data)
+        settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
+    check_model_allowed(settings.openai_model, settings.prices)
+    for agent in settings.agents:
+        if agent.provider == "openai" and agent.model != "fake-1":
+            check_model_allowed(agent.model, settings.prices)
+    return settings

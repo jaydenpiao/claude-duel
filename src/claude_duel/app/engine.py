@@ -8,14 +8,15 @@ import time
 from collections.abc import Mapping
 
 from claude_duel.app import agents
+from claude_duel.app.budget import CostBudget
 from claude_duel.domain import policy
-from claude_duel.domain.errors import MalformedOutputError, ProviderError
+from claude_duel.domain.errors import ABORTING_ERRORS, MalformedOutputError, ProviderError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, Event, MatchState, Stage, Validation
 from claude_duel.domain.scoring import add_scores, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage, transition
 from claude_duel.observability import current_trace_id, log, trace
-from claude_duel.ports import CompletionRequest, LLMProvider, MatchStore, Metrics, Sandbox
+from claude_duel.ports import Completion, CompletionRequest, LLMProvider, MatchStore, Metrics, Sandbox
 
 _LOG = logging.getLogger(__name__)
 
@@ -27,8 +28,16 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
 
 class MatchEngine:
     def __init__(
-        self, providers: Mapping[str, LLMProvider], sandbox: Sandbox, store: MatchStore, metrics: Metrics
+        self,
+        providers: Mapping[str, LLMProvider],
+        sandbox: Sandbox,
+        store: MatchStore,
+        metrics: Metrics,
+        budget: CostBudget,
+        models: Mapping[str, str],
     ) -> None:
+        self._budget = budget
+        self._models = models
         self._providers = providers
         self._sandbox = sandbox
         self._store = store
@@ -36,6 +45,7 @@ class MatchEngine:
 
     # -- lifecycle -------------------------------------------------------
     def run(self, state: MatchState) -> MatchState:
+        self._budget.check_lifetime()
         with self._store.lock(state.match_id), trace():
             while state.stage not in TERMINAL:
                 started = time.monotonic()
@@ -80,6 +90,14 @@ class MatchEngine:
         self._store.save(state)
         self._metrics.incr(f"unit.{kind}")
 
+    def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
+        """Single choke point for paid calls: budget check, call, charge."""
+        self._budget.check(state)
+        completion = self._providers[agent].complete(request)
+        self._budget.charge(state, self._models[agent], completion)
+        self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
+        return completion
+
     # -- stage 1: build ---------------------------------------------------
     def _build(self, state: MatchState) -> None:
         for agent in state.agents:
@@ -105,13 +123,15 @@ class MatchEngine:
         for _ in range(state.rules.max_format_retries + 1):
             prompt = agents.build_prompt(agent, state.round, index, state.rules, error)
             try:
-                completion = self._providers[agent].complete(
-                    CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
+                completion = self._call(
+                    state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
                 )
                 return agents.parse_challenge(completion.text), None
             except MalformedOutputError as exc:
                 error = str(exc)
                 self._metrics.incr("model.malformed", purpose="build")
+            except ABORTING_ERRORS:
+                raise
             except ProviderError as exc:
                 return None, f"provider: {type(exc).__name__}"
         return None, f"malformed: {error}"
@@ -185,9 +205,11 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             try:
-                completion = self._providers[attacker].complete(
-                    CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
+                completion = self._call(
+                    state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
                 )
+            except ABORTING_ERRORS:
+                raise
             except ProviderError as exc:
                 return result(False, f"provider: {type(exc).__name__}")
             tokens += completion.total_tokens
