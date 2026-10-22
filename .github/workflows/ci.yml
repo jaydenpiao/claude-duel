@@ -27,4 +27,4 @@ jobs:
       - run: .venv/bin/vulture
       - run: .venv/bin/pylint src tests
       - run: docker pull -q python:3.12-slim
-      - run: .venv/bin/pytest
+      - run: .venv/bin/pytest -n auto

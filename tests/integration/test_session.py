@@ -34,7 +34,7 @@ def test_lock_is_held_before_load(tmp_path: Path) -> None:
 
 
 def test_stale_lock_from_dead_process_is_reclaimed(tmp_path: Path) -> None:
-    proc = multiprocessing.get_context("fork").Process(target=_hold_lock_and_die, args=(str(tmp_path),))
+    proc = multiprocessing.get_context("spawn").Process(target=_hold_lock_and_die, args=(str(tmp_path),))
     proc.start()
     proc.join()
     assert (tmp_path / "m1.lock").exists()

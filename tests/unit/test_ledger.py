@@ -31,7 +31,7 @@ def test_other_instances_see_new_spend(tmp_path: Path) -> None:
 
 def test_concurrent_processes_never_lose_or_tear_entries(tmp_path: Path) -> None:
     path = tmp_path / "l.jsonl"
-    ctx = multiprocessing.get_context("fork")
+    ctx = multiprocessing.get_context("spawn")
     procs = [ctx.Process(target=_spend, args=(str(path), 50)) for _ in range(4)]
     for p in procs:
         p.start()
