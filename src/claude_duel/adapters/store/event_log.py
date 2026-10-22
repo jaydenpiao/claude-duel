@@ -28,14 +28,14 @@ def _digest(prev: str, event: Event) -> str:
 
 
 class FileEventLog:
-    def __init__(self, root: Path) -> None:
-        self._root = root
+    def __init__(self, root: Path, suffix: str = ".events.jsonl") -> None:
+        self._root, self._suffix = root, suffix
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def _path(self, match_id: str) -> Path:
         if not match_id.replace("-", "").isalnum():
             raise MatchNotFoundError(f"invalid match id {match_id!r}")
-        return self._root / f"{match_id}.events.jsonl"
+        return self._root / f"{match_id}{self._suffix}"
 
     def append(self, match_id: str, event: Event) -> None:
         with jsonl.locked(self._path(match_id), exclusive=True) as fd:
