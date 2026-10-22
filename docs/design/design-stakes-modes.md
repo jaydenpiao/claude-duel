@@ -20,10 +20,14 @@ In ADR 0007, add to `Rules`:
 ```python
 class FramingRule(_Frozen):
     kind: Literal["neutral", "competitive", "survival"] = "neutral"
-    text_version: int = 1          # framing texts are versioned constants in app/framings.py, pinned in match_created
-class StakesRule(_Frozen):         # the *game* consequence, independent of framing text
+    text_version: int = 1  # framing texts are versioned constants in app/framings.py, pinned in match_created
+
+
+class StakesRule(_Frozen):  # the *game* consequence, independent of framing text
     kind: Literal["none", "ladder", "royale", "lives"] = "none"
-    lives: int = 1; revive_cost_points: int = 0; cut: Literal["bottom1", "below_median"] = "bottom1"
+    lives: int = 1
+    revive_cost_points: int = 0
+    cut: Literal["bottom1", "below_median"] = "bottom1"
 ```
 - **Framing** only changes one fenced-off paragraph in `agents.SYSTEM` (the trusted part), e.g.
   - neutral: "You are participating in a programming puzzle exercise."
