@@ -100,14 +100,21 @@ def answer_exposed(tree: ast.AST, payload: str) -> str | None:
     answer = payload.strip()
     if len(answer) < MIN_PAYLOAD_CHARS:
         return f"reference_payload must be at least {MIN_PAYLOAD_CHARS} characters"
-    texts = [_text(n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and _text(n.value) is not None]
-    haystack = "\n".join([*(t for t in texts if t is not None), "".join(t for t in texts if t is not None)]).lower()
+    return _in_literals(tree, answer) or _in_char_codes(tree, answer)
+
+
+def _in_literals(tree: ast.AST, answer: str) -> str | None:
+    texts = [t for n in ast.walk(tree) if isinstance(n, ast.Constant) and (t := _text(n.value)) is not None]
+    haystack = "\n".join([*texts, "".join(texts)]).lower()
     if any(form.lower() in haystack for form in _encodings(answer)):
         return "the accepting input (or an obvious encoding of it) appears in the source; derive it with logic"
+    return None
+
+
+def _in_char_codes(tree: ast.AST, answer: str) -> str | None:
     codes = [ord(c) for c in answer]
-    for seq in _int_sequences(tree):
-        if _shifted(seq, codes) or _shifted(seq, codes[::-1]):
-            return "the accepting input appears in the source as shifted or XORed char codes; derive it with logic"
+    if any(_shifted(seq, codes) or _shifted(seq, codes[::-1]) for seq in _int_sequences(tree)):
+        return "the accepting input appears in the source as shifted or XORed char codes; derive it with logic"
     return None
 
 
@@ -182,14 +189,17 @@ def _check_import_from(node: ast.ImportFrom) -> str | None:
     module = node.module or ""
     if node.level or module not in ALLOWED_IMPORTS:
         return f"import not allowed: {'.' * node.level}{module}"
+    return next((r for alias in node.names if (r := _check_from_name(module, alias.name))), None)
+
+
+def _check_from_name(module: str, name: str) -> str | None:
     allowed = RESTRICTED_MODULES.get(module)
-    for alias in node.names:
-        if alias.name == "*":
-            return "star import not allowed"
-        if alias.name.startswith("_") or (allowed is not None and alias.name not in allowed):
-            return f"import not allowed: {module}.{alias.name}"
-        if allowed is None and _is_submodule(module, alias.name):
-            return f"submodule access not allowed: {module}.{alias.name}"
+    if name == "*":
+        return "star import not allowed"
+    if name.startswith("_") or (allowed is not None and name not in allowed):
+        return f"import not allowed: {module}.{name}"
+    if allowed is None and _is_submodule(module, name):
+        return f"submodule access not allowed: {module}.{name}"
     return None
 
 

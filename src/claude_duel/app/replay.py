@@ -28,17 +28,21 @@ def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
     events = [e for e in events if e.seq <= snapshot.last_seq]
     folded = ev.fold(snapshot.match_id, events)
     mismatches = [f"snapshot.{name}" for name in _COMPARED if getattr(folded, name) != getattr(snapshot, name)]
+    recomputed = _rescore(folded, events, mismatches)
+    if recomputed != folded.scores:
+        mismatches.append("total score")
+    transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in events]
+    return ReplayReport(not mismatches, recomputed, folded.scores, mismatches, transcript)
+
+
+def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> dict[str, int]:
+    """Rescore every scored round from folded facts, noting rounds whose recorded delta differs."""
     names = [a.name for a in folded.agents]
     recomputed: dict[str, int] = {}
-    for event in events:
-        if event.type != ev.ROUND_SCORED:
-            continue
+    for event in (e for e in events if e.type == ev.ROUND_SCORED):
         r = int(str(event.data["round"]))
         delta = score_round(r, names, folded.challenges.values(), folded.validations, folded.attacks, folded.rules)
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")
         recomputed = add_scores(recomputed, delta)
-    if recomputed != folded.scores:
-        mismatches.append("total score")
-    transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in events]
-    return ReplayReport(not mismatches, recomputed, folded.scores, mismatches, transcript)
+    return recomputed
