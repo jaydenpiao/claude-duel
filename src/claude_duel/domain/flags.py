@@ -60,15 +60,45 @@ def _variant_pattern(flag: str) -> re.Pattern[str]:
     return re.compile("|".join(alts))
 
 
+_SHIFTS = 5  # Caesar-style +-1..5 per character
+_DEC = re.compile(r"\d{2,3}")
+
+
+@lru_cache(maxsize=256)
+def _needles(flag: str) -> frozenset[str]:
+    """R3-5: every MIN_PART-char window of the digest under transforms a regex can't enumerate."""
+    inner = _inner(flag)
+    forms = [inner, inner[::-1], flag.encode().hex(), inner.encode().hex()]
+    forms += ["".join(chr(ord(c) + k) for c in inner).lower() for k in range(-_SHIFTS, _SHIFTS + 1) if k]
+    forms += [bytes(b ^ key for b in raw).hex() for raw in (flag.encode(), inner.encode()) for key in range(1, 256)]
+    return frozenset(f[i : i + MIN_PART] for f in forms for i in range(len(f) - MIN_PART + 1))
+
+
+def _canonical(text: str) -> list[str]:
+    """Order-preserving reductions of ``text``: separators, filler every other char and decimal codes removed."""
+    low = text.lower()
+    hexes = re.sub(r"[^0-9a-f]", "", low)
+    codes = "".join(chr(int(n)) for n in _DEC.findall(text) if 32 <= int(n) < 127)
+    return [hexes, hexes[::2], hexes[1::2], re.sub(r"\s", "", low), re.sub(r"[^0-9a-f]", "", codes.lower())]
+
+
+def _canonical_leak(text: str, flag: str) -> bool:
+    needles = _needles(flag)
+    return any(f[i : i + MIN_PART] in needles for f in _canonical(text) for i in range(len(f) - MIN_PART + 1))
+
+
 def assert_no_flag(text: str, flag: str, where: str) -> None:
-    """Raise if ``flag`` or a derived form (reversed, hex, base64/32, case-changed, spaced or split) is in text."""
-    if flag in text or _variant_pattern(flag).search(text):
+    """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, case-changed, spaced, split
+    (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes (R3-5)."""
+    if flag in text or _variant_pattern(flag).search(text) or _canonical_leak(text, flag):
         raise FlagLeakError(f"flag would leak via {where}")
 
 
 def redact(text: str, flags: tuple[str, ...] = ()) -> str:
     for f in flags:
         text = _variant_pattern(f).sub(REDACTED, text.replace(f, REDACTED))
+        if _canonical_leak(text, f):
+            return REDACTED  # R3-5: an encoding with no clean span to cut out; withhold the whole text
     return FLAG_PATTERN.sub(REDACTED, text)
 
 

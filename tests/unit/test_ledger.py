@@ -79,3 +79,13 @@ def test_zero_cost_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # typ
     assert entry["usd"] == 0.0
     assert entry["model"] == FAKE_MODEL
     assert entry["tokens"] == 15
+
+
+def test_spent_usd_counts_a_settled_reservation_once(tmp_path: Path) -> None:
+    ledger = FileSpendLedger(tmp_path / "ledger.jsonl")
+    rid = ledger.reserve("s1-g1", "gpt-4.1-nano", 0.05)
+    assert ledger.spent_usd("s1-") == pytest.approx(0.05)
+    ledger.record("s1-g1", "gpt-4.1-nano", 100, 0.01, settles=rid)
+    ledger.record("other", "gpt-4.1-nano", 100, 0.02)
+    assert ledger.spent_usd("s1-") == pytest.approx(0.01)
+    assert ledger.total_usd() == pytest.approx(0.03)
