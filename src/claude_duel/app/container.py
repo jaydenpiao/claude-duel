@@ -9,7 +9,7 @@ from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
 from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
+from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
@@ -41,6 +41,15 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     raise ConfigError(f"unknown provider {agent.provider!r}")
 
 
+def docker_runtime(settings: Settings) -> str | None:
+    """The requested runtime if the daemon has it; otherwise warn and fall back to the default (ADR 0011)."""
+    wanted = settings.docker_runtime
+    if wanted is None or wanted in docker_runtimes(settings.docker_command):
+        return wanted
+    log(_LOG, logging.WARNING, "docker runtime not registered; using the daemon default", runtime=wanted)
+    return None
+
+
 def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
     """Real-model matches only ever run in Docker; fail closed when it isn't usable (ADR 0003)."""
     untrusted = any(a.provider != "fake" for a in agents)
@@ -48,7 +57,7 @@ def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
         if untrusted:
             raise ConfigError("real-model matches require the docker sandbox; subprocess is for the fake provider")
         return SubprocessSandbox(is_template)
-    docker = DockerSandbox(settings.docker_command, settings.docker_image)
+    docker = DockerSandbox(settings.docker_command, settings.docker_image, runtime=docker_runtime(settings))
     problem = docker.health()
     if problem is None:
         return docker
@@ -76,6 +85,11 @@ def build_metrics(settings: Settings, match_id: str, summary: Metrics) -> Metric
     if settings.metrics == "log":
         return summary
     return TeeMetrics((summary, JsonlMetrics(settings.store_dir / "metrics.jsonl", match_id)))
+
+
+def build_tournament_log(settings: Settings) -> FileEventLog:
+    """Tournament logs (#39), ``<tournament_id>.tournament.jsonl``, same hash chain."""
+    return FileEventLog(settings.store_dir, suffix=".tournament.jsonl")
 
 
 def build_ledger(settings: Settings) -> FileSpendLedger:
