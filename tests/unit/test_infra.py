@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from pathlib import Path
 
@@ -59,6 +60,33 @@ class TestStore:
             pass
         with store.lock("m1"):
             pass
+
+    def test_secret_lives_only_in_its_own_0600_file(self, tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]  # M2
+        s = new_state()
+        FileMatchStore(tmp_path).save(s)
+        assert s.secret not in (tmp_path / "m1.json").read_text()
+        secret = tmp_path / "m1.secret"
+        assert secret.read_text() == s.secret
+        assert secret.stat().st_mode & 0o777 == 0o600
+        assert s.secret not in repr(s)
+
+    def test_pre_m2_inline_secret_is_moved_out(self, tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
+        s = new_state()
+        legacy = json.loads(s.model_dump_json()) | {"secret": s.secret}
+        (tmp_path / "m1.json").write_text(json.dumps(legacy))
+        store = FileMatchStore(tmp_path)
+        loaded = store.load("m1")
+        assert loaded.secret == s.secret
+        store.save(loaded)
+        assert s.secret not in (tmp_path / "m1.json").read_text()
+        assert store.load("m1").secret == s.secret
+
+    def test_lost_secret_fails_closed(self, tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
+        store = FileMatchStore(tmp_path)
+        store.save(new_state())
+        (tmp_path / "m1.secret").unlink()
+        with pytest.raises(MatchNotFoundError, match="secret missing"):
+            store.load("m1")
 
     def test_missing_and_bad_id(self, tmp_path: Path) -> None:
         store = FileMatchStore(tmp_path)

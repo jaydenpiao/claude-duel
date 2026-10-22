@@ -40,6 +40,16 @@ class FileLock:
             self._fd = None
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
 class FileMatchStore:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -51,20 +61,24 @@ class FileMatchStore:
         return self._root / f"{match_id}.json"
 
     def save(self, state: MatchState) -> None:
+        """State goes to ``<id>.json``; the HMAC secret only ever to ``<id>.secret`` (0600, written once)."""
         path = self._path(state.match_id)
-        tmp = path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(state.model_dump_json(indent=1))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        secret = path.with_suffix(".secret")
+        if state.secret and not secret.exists():
+            _write_atomic(secret, state.secret)
+        _write_atomic(path, state.model_dump_json(indent=1))  # MatchState.secret is excluded from dumps
 
     def load(self, match_id: str) -> MatchState:
         path = self._path(match_id)
         if not path.exists():
             raise MatchNotFoundError(match_id)
-        return MatchState.model_validate_json(path.read_text(encoding="utf-8"))
+        state = MatchState.model_validate_json(path.read_text(encoding="utf-8"))
+        secret = path.with_suffix(".secret")
+        if secret.exists():
+            state.secret = secret.read_text(encoding="utf-8")
+        if not state.secret:  # a pre-M2 file carries it inline (moved out on next save); otherwise it is lost
+            raise MatchNotFoundError(f"{match_id}: match secret missing ({secret.name})")
+        return state
 
     def lock(self, match_id: str) -> FileLock:
         return FileLock(self._path(match_id).with_suffix(".lock"))
