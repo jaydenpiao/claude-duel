@@ -96,6 +96,11 @@ def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 
 
+def build_budget(settings: Settings) -> CostBudget:
+    """One per process invocation: its run counters are what ``run_max_calls``/``run_max_usd`` cap."""
+    return CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES)
+
+
 def gate_agent(settings: Settings, agents: tuple[AgentSpec, AgentSpec]) -> AgentSpec:
     """The difficulty-gate probe: the cheap gate model when the match uses real models, else a weak fake."""
     if all(a.provider == "fake" for a in agents):
@@ -115,8 +120,12 @@ def build_engine(
     store: FileMatchStore,
     agents: tuple[AgentSpec, AgentSpec],
     observer: EventObserver | None = None,
+    budget: CostBudget | None = None,
 ) -> MatchEngine:
-    """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps."""
+    """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps.
+
+    ``budget`` is the invocation's shared ``CostBudget`` (R3-1): a series or tournament passes one so
+    ``run_max_*`` spans every game it plays; omitted, the engine gets a fresh one (a single match)."""
     for agent in agents:
         check_model_allowed(settings.model_for(agent))
     providers = {a.name: make_provider(a, settings, metrics) for a in agents}
@@ -131,7 +140,7 @@ def build_engine(
         store,
         build_event_log(settings),
         metrics,
-        CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES),
+        budget or build_budget(settings),
         models,
         observer,
     )
