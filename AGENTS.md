@@ -8,7 +8,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 - `src/claude_duel/adapters/`: `providers/` (fake, openai, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
 - `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `session.py`, `observers.py`, `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
 - `presentation/commentary.py`: `Commentary`, the default `duel run`/`resume` output. An `EventObserver` that folds events with `domain/events.apply` and prints header, round banners, plain-sentence lines, scoreboard, redacted snippets (`flags.scrub`), winner and the `$X of $50 burned` line. Presentation only: never mutates the match. Snapshot: `tests/snapshots/`.
-- `presentation/arena.py`: `ArenaView`, the live animated view (rich `Live`, 4 fps): HP-style score meters, a tug-of-war lead bar, per-round sparklines, a spinner on the current action, ✓ capture / 🛡 defense flashes, a 5-line ticker, the burn line and a winner banner. `frame(model, width)` is pure and snapshot-tested; it never wraps, so any width renders. Default for `duel run`/`resume` when stdout is a TTY; `--view arena|commentary` forces one, `--pace S` slows it for demos. Both renderers subclass `presentation/common.py:MatchFold` and share its helpers (`board`, `spend`, `result`, `attempt_view`, ...); put new shared text there, never copy it. NO_COLOR is honoured by rich.
+- `presentation/arena.py`: `ArenaView`, the live animated view (rich `Live`, 4 fps): HP-style score meters, a tug-of-war lead bar, per-round sparklines, a spinner on the current action (`attack_started` shows `bob attacking ...'s 'X'... try 2/4` while the attempt is in flight), ✓ capture / 🛡 defense flashes, a 5-line ticker, the burn line and a winner banner. `frame(model, width)` is pure and snapshot-tested; it never wraps, so any width renders. Default for `duel run`/`resume` when stdout is a TTY; `--view arena|commentary` forces one, `--pace S` slows it for demos. Both renderers subclass `presentation/common.py:MatchFold` and share its helpers (`board`, `spend`, `result`, `attempt_view`, ...); put new shared text there, never copy it. NO_COLOR is honoured by rich.
 - `config.py` (TOML then `DUEL_*` env; every variable and the allowed models are listed in README), `observability.py` (logging, metrics), `cli.py` (`--format text|json`, `--view auto|arena|commentary`, `--pace`; text ends with `replay verified ✓`).
 
 ## Match lifecycle (`domain/state_machine.py`)
@@ -17,7 +17,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 ## Directory map
 ```
 configs/{dev,staging,prod}.toml   per-env model + budget
-docs/requirements.md docs/design.md docs/adr/NNNN-*.md
+docs/requirements.md docs/design.md docs/demo.tape (README GIF) docs/adr/NNNN-*.md
 docs/design/                      design specs (see its README)
 docs/runs/                        live-run reports
 src/claude_duel/                  code (see above)
