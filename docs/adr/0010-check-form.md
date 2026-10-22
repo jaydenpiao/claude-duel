@@ -43,3 +43,10 @@ With variety, captures fell to 2 in 42 challenges. `checked` now also sets `earl
 gets +2 tries, round 2 +1; see `MatchState.max_attempts`) and `retry_hint` (after a failed try, the attacker is
 asked to trace `check()` on its last payload and fix the first failing condition; `agents.RETRY_HINT`). Live
 configs can add `difficulty_gate = true` with `gate_mode = "score"` (#78).
+
+## Addendum: retry feedback (#100)
+In the #95 batch, every capture came on the first try: a failed try printed nothing, so a retry was a blind
+guess. `checked` now also sets `retry_feedback`. At attack time only, the arena swaps `WRAPPER` for
+`contract.FEEDBACK_WRAPPER`, which prints `check returned False` or `check returned a non-bool` (the runner
+already reports exceptions as type and line). Validation, the gate and the solver still use the plain
+wrapper. The feedback never includes a value that `check()` computed.

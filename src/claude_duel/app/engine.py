@@ -45,6 +45,7 @@ from claude_duel.ports import (
 
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
+TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
@@ -183,12 +184,17 @@ class MatchEngine:
             raise DeadlineExceededError(
                 f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
             )
+        model = self._models[agent]
+        reservation = self._budget.reserve(state.match_id, model, request)  # R3-6: a crash keeps it counted
         started = time.monotonic()
-        completion = self._providers[agent].complete(request)
+        try:
+            completion = self._providers[agent].complete(request)
+        except Exception:
+            self._budget.release(state.match_id, model, reservation)
+            raise
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
-        model = self._models[agent]
-        usd = self._budget.charge(state.match_id, model, completion)
+        usd = self._budget.charge(state.match_id, model, completion, reservation)
         self._checkpoint(
             state,
             ev.CALL_CHARGED,
@@ -199,6 +205,8 @@ class MatchEngine:
             elapsed_ms=round(elapsed * 1000),
             input_tokens=completion.input_tokens,
             output_tokens=completion.output_tokens,
+            reasoning_tokens=completion.reasoning_tokens,
+            truncated=completion.truncated,
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
@@ -221,23 +229,33 @@ class MatchEngine:
                 if cid in state.challenges:
                     continue  # idempotent resume
                 try:
-                    spec, reason = self._author(state, cid, agent.name, index)
+                    spec, reason, probed = self._author(state, cid, agent.name, index)
                 except WalletEmptyError as exc:
-                    spec, reason = None, str(exc)
+                    spec, reason, probed = None, str(exc), False
                 epoch = len(state.build_errors.get(cid, []))
                 ch = Challenge(
-                    id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason, flag_epoch=epoch
+                    id=cid,
+                    round=state.round,
+                    author=agent.name,
+                    spec=spec,
+                    forfeit_reason=reason,
+                    flag_epoch=epoch,
+                    probe_solved=probed,
                 )
                 self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
-    def _author(self, state: MatchState, cid: str, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
+    def _author(
+        self, state: MatchState, cid: str, agent: str, index: int
+    ) -> tuple[ChallengeSpec | None, str | None, bool]:
         """Repair loop: a malformed or invalid answer is fed back (with the reason) for up to
         ``rules.max_format_retries`` more paid, budgeted calls. Provider errors propagate and fail the
         stage (resumable). Each rejection is checkpointed, so a resumed build continues from the last retry.
-        The last invalid answer is kept, so validation records why it failed.
+        The last invalid answer is kept, so validation records why it failed. The bool is the gate's
+        ``probe_solved`` verdict for the returned spec.
         """
         errors = state.build_errors.get(cid, [])
         last: ChallengeSpec | None = None
+        probed = False
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
@@ -251,25 +269,27 @@ class MatchEngine:
                 self._scratch(state),
                 tuple(variety.prompt_lines(state, agent, index)) if state.rules.variety else (),
             )
-            completion = self._call(state, agent, self._request(state, prompt, "build"))
+            completion = self._complete(state, agent, prompt, "build")
             self._note(state, agent, completion.text)
             try:
+                if completion.truncated:
+                    raise MalformedOutputError(TRUNCATED)
                 last = agents.parse_challenge(completion.text)
                 last, problem = self._shape(state, last)
                 if problem is None and state.rules.variety:
                     problem = variety.repeat_reason(state, agent, last)
                 if problem is None:
-                    last, problem = self._assess(state, cid, agent, last)
+                    last, problem, probed = self._assess(state, cid, agent, last)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
             if problem is None:
-                return last, None
+                return last, None, probed
             if not problem.startswith("malformed"):
                 self._metrics.incr("model.invalid", purpose="build")
             self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
             errors = state.build_errors[cid]
-        return (last, None) if last is not None else (None, errors[-1])
+        return (last, None, False) if last is not None else (None, errors[-1], False)
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
@@ -294,16 +314,19 @@ class MatchEngine:
         source, problem = contract.compose(spec.source)
         return spec.model_copy(update={"source": source}), problem
 
-    def _assess(self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+    def _assess(
+        self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec
+    ) -> tuple[ChallengeSpec, str | None, bool]:
         """Solver, policy and runs, difficulty gate; then the tamper detector on the answer (logged only)."""
         spec, problem = self._solve_reference(state, cid, spec)
         problem = problem or self._problem(state, cid, state.round, spec)
+        probed = False
         if problem is None:
-            spec, problem = self._gate(state, cid, spec)
+            problem, probed = self._gate(state, cid, spec)
         policy_reason = problem if problem and policy.reason_code(problem) != "other" else None
         hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
         self._flag(state, hits, self._flag_for(state, cid))
-        return spec, problem
+        return spec, problem, probed
 
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
@@ -354,24 +377,40 @@ class MatchEngine:
             assert_no_flag(note, f, "note")
         self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
+    def _complete(self, state: MatchState, agent: str, prompt: str, purpose: Purpose) -> Completion:
+        """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
+        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``."""
+        completion = self._call(state, agent, self._request(state, prompt, purpose))
+        if completion.truncated:
+            self._metrics.incr("model.truncated", purpose=purpose)
+            completion = self._call(state, agent, self._request(state, f"{prompt}\n\n{agents.TRUNCATED_HINT}", purpose))
+        return completion
+
     def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
         cap = state.rules.wallet.max_output_tokens
-        request = CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
-        return request if cap is None else request.model_copy(update={"max_tokens": min(request.max_tokens, cap)})
+        tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+        return CompletionRequest(
+            system=agents.system_prompt(state.framing_text),
+            prompt=prompt,
+            purpose=purpose,
+            max_tokens=tokens,
+            reasoning_effort=state.rules.reasoning_effort,
+            json_schema=agents.ANSWER_SCHEMAS[purpose],
+        )
 
-    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[str | None, bool]:
         """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe. A capture means too easy: in
-        gate_mode "reject" the build goes back to repair; in "score" it stays valid with a halved defense award."""
-        spec = spec.model_copy(update={"probe_solved": False})  # only the arena may set it
+        gate_mode "reject" the build goes back to repair; in "score" it stays valid with a halved defense award
+        (returned as the ``probe_solved`` verdict, which only the arena sets)."""
         if not state.rules.difficulty_gate:
-            return spec, None
+            return None, False
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
         completion = self._call(state, GATE, self._request(state, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
-            return spec.model_copy(update={"probe_solved": True}), None
-        return spec, GATE_REJECTION if solved else None
+            return None, True
+        return (GATE_REJECTION if solved else None), False
 
     def _solve_reference(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
@@ -466,7 +505,7 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
-            completion = self._call(state, attacker, self._request(state, prompt, "attack"))
+            completion = self._complete(state, attacker, prompt, "attack")
             self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
@@ -476,12 +515,15 @@ class MatchEngine:
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         try:
+            if completion.truncated:
+                raise MalformedOutputError(TRUNCATED)
             payload = agents.parse_attack(completion.text).payload
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
-        run = self._run_challenge(spec.source, payload, flag, state, "attack")
+        source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
+        run = self._run_challenge(source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 

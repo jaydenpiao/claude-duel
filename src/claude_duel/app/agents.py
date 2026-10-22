@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -253,7 +253,8 @@ def repair_hint(error: str) -> str:
 
 RETRY_HINT = (
     "Your earlier tries failed. Before guessing again, trace check() on your last payload line by line, name the "
-    "first condition that returns False, and change only what fixes it."
+    "first condition that returns False, and change only what fixes it. If stdout says why check() said no "
+    "(it returned False, or raised an error), use that."
 )
 
 
@@ -338,6 +339,39 @@ def parse(text: str, model: type[M]) -> M:
 
 def parse_challenge(text: str) -> ChallengeSpec:
     return ChallengeSpec.model_validate(parse(text, _BuildAnswer).model_dump(include=set(ChallengeSpec.model_fields)))
+
+
+def _strict(fields: dict[str, str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {k: {"type": t} for k, t in fields.items()},
+        "required": list(fields),
+        "additionalProperties": False,
+    }
+
+
+_TEXT = "string"
+ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
+    "build": _strict(
+        {
+            "title": _TEXT,
+            "description": _TEXT,
+            "source": _TEXT,
+            "reference_payload": _TEXT,
+            "solver": _TEXT,
+            "difficulty": "integer",
+            "notes": _TEXT,
+        }
+    ),
+    "attack": _strict({"payload": _TEXT, "notes": _TEXT}),
+}
+"""Strict structured-output schemas (all keys required, no extras), identical for every vendor; the parsers
+above still validate lengths and ranges, which vendor schema modes do not enforce."""
+
+TRUNCATED_HINT = (
+    "Your last reply was cut off at the output-token limit, so it was not a complete JSON object. "
+    "Answer again, much more briefly: keep reasoning short and the code compact."
+)
 
 
 def parse_attack(text: str) -> AttackMove:

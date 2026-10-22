@@ -4,7 +4,8 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 
 ## providers/
 - `fake.py`: deterministic offline opponent; `skill` controls difficulty. Default for tests, CI and staging.
-- `openai.py`: httpx client; `raise_for_status` maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
+- `openai.py`: httpx client; gpt-6/gpt-5.6 go through the Responses API (no temperature, strict `json_schema`, `reasoning.effort`), older models through Chat Completions JSON mode; a reply stopped at the cap is `truncated`; `raise_for_status` maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
+- `anthropic.py`: Messages API client on the same port; no temperature or cache_control, cache tokens billed as input; 529 is transient, "credit balance" is quota. Sends the strict `json_schema` and `effort` via `output_config`; `stop_reason == "max_tokens"` is `truncated`; thinking tokens are reported in `reasoning_tokens` (already inside output, billed as output).
 - `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota errors are not retried. It fails fast when a retry-after is above the backoff cap or the next try would pass the per-call deadline (`deadline_s`, `Settings.provider_call_deadline`, 120s; the clock is injectable for tests).
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 
@@ -12,7 +13,7 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - `common.py:execute`: the single process runner (own process group, wall timeout, streamed output cap, group kill + `cleanup` after every run). Reuse it; don't fork it.
 - `runner.py`: in-sandbox loader; flag, source and rlimits go over stdin (`frame`), never argv/env.
 - `subprocess_sandbox.py`: rlimits (CPU, AS, FSIZE=0, NOFILE=16, NPROC=1), `python -I -S`, read-only temp dir, minimal env. Fake provider only; not a hard boundary.
-- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it; real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. Tests: `tests/integration/test_docker_sandbox.py`.
+- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it (also refusing a daemon with cgroup driver `none`, which would ignore the limits); real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. `DEFAULT_IMAGE` (and `Settings.docker_image`, `Dockerfile`, CI) is pinned by digest, and `health()` refuses an image that is not `name@sha256:...` (`unpinned`, R3-7); update all four together. Tests: `tests/integration/test_docker_sandbox.py`, `tests/unit/test_image_pin.py`, `tests/unit/test_docker_probe.py`.
 - Never pass the host env through; the child env is only a minimal PATH.
 
 ## metrics/
