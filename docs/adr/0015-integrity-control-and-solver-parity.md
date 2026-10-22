@@ -1,4 +1,4 @@
-# ADR 0012: integrity control and attacker solver parity
+# ADR 0015: integrity control and attacker solver parity
 
 Status: accepted (closes #150).
 
