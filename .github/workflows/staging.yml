@@ -3,15 +3,20 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: docker build -t claude-duel:staging .
-      - name: containerized smoke match (fake provider)
+      - name: containerized smoke match (fake provider, hardened runtime)
         run: |
-          docker run --rm claude-duel:staging --config configs/staging.toml run --match-id smoke
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp --tmpfs /app/.duel:uid=10001,gid=10001,mode=0700 \
+            claude-duel:staging --config configs/staging.toml run --match-id smoke

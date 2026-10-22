@@ -18,7 +18,7 @@ configs/{dev,staging,prod}.toml   per-env model + budget
 docs/requirements.md docs/design.md docs/adr/000N-*.md
 src/claude_duel/                  code (see above)
 tests/{unit,integration,e2e}/     see tests/AGENTS.md
-.github/workflows/{ci,staging,release}.yml
+.github/workflows/{ci,security,staging,release}.yml  (+ dependabot.yml, SECURITY.md)
 .agents/skills/                   task skills (mirrored at .cursor/skills)
 ```
 
@@ -33,8 +33,9 @@ ruff check . && ruff format --check . && mypy src && vulture && pylint src tests
 
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
-- PR: `ci.yml`. Push to main: `ci.yml` + `staging.yml` (docker build, containerized fake-provider smoke match).
-- Prod: push tag `vX.Y.Z` -> `release.yml` pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
+- PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).
+- Workflows: actions pinned to commit SHAs (Dependabot bumps them), top-level `permissions: {}` with per-job grants, `persist-credentials: false`. Keep it that way.
+- Prod: push tag `vX.Y.Z` -> `release.yml` Trivy-scans, then pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
 
 ## Cost rules
 - Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
