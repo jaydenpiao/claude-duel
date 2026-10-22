@@ -28,10 +28,16 @@ def technique(source: str) -> str:
         tree = ast.parse(source)
     except SyntaxError:
         return "other"
-    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-    names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    names = {_name(n) for n in ast.walk(tree)}
     return next((tag for tag, keys in _TAGS if names & keys), "other")
+
+
+def _name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.alias):  # import targets
+        return node.name
+    return node.attr if isinstance(node, ast.Attribute) else ""
 
 
 def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) -> str:
@@ -86,8 +92,11 @@ def _outcome(state: MatchState, ch: Challenge, atk: Attack | None, *, yours: boo
 
 
 def _tendencies(state: MatchState, opponent: str, upto: int, attacks: dict[str, Attack]) -> str:
-    theirs = [c for c in state.challenges.values() if c.author == opponent and c.round <= upto and c.spec]
-    tags = Counter(technique(c.spec.source) for c in theirs if c.spec is not None)
+    tags = Counter(
+        technique(c.spec.source)
+        for c in state.challenges.values()
+        if c.spec is not None and c.author == opponent and c.round <= upto
+    )
     solves = [a.attempts for a in attacks.values() if a.attacker == opponent and a.solved]
     pace = f"{sum(solves) / len(solves):.1f} tries per capture" if solves else "no captures yet"
     return f"Opponent builds: {dict(sorted(tags.items())) or 'none'}; opponent attacks: {pace}"
