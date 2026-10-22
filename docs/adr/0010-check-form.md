@@ -31,3 +31,9 @@ Most of these are I/O plumbing errors (FLAG, stdin, solver scope), not puzzle de
 ## Consequences
 In a live smoke test (nano vs mini, 3 rounds, checked) validity rose from about 10-33% to 83% (5/6 in 4 of 6
 matches), and defenses still happen. The attacker sees the composed source, wrapper included.
+
+## Addendum: variety (#79)
+Live check-form matches reused one design for every challenge. With `rules.variety` (on in `checked`), each
+build prompt gets a seeded theme from `variety.THEMES` (different for each of an agent's challenges until the
+8 themes wrap) and a list of the author's past titles with technique tags. A repeated title, or a source
+identical up to whitespace, is rejected through the normal repair loop.

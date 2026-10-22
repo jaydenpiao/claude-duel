@@ -154,6 +154,7 @@ def build_prompt(
     previous: ChallengeSpec | None = None,
     memory: str = "",
     scratchpad: bool = False,
+    variety: tuple[str, ...] = (),
 ) -> str:
     lines = [
         "TASK: BUILD",
@@ -163,6 +164,7 @@ def build_prompt(
         "Write a Python 3 CTF challenge. Your opponent sees the source and description and must find the input.",
         *(_program_rules(rules, round_no) if rules.challenge_form == "program" else _check_rules(rules, round_no)),
     ]
+    lines += variety
     lines += memory_lines(memory, scratchpad)
     if previous is not None:
         lines.append(
