@@ -160,6 +160,10 @@ def _charged(state: MatchState, p: CallCharged) -> None:
     mine.calls += 1
     mine.tokens += p.tokens
     mine.usd += p.usd
+    for u in (state.usage, mine):
+        u.input_tokens += p.input_tokens
+        u.output_tokens += p.output_tokens
+        u.reasoning_tokens += p.reasoning_tokens
     clock = state.rules.clock
     split = p.output_tokens + p.input_tokens // clock.input_divisor
     mine.clock_tokens += split if (p.input_tokens or p.output_tokens) else p.tokens
