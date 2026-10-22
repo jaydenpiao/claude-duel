@@ -12,7 +12,7 @@ import hashlib
 import math
 from collections.abc import Iterable
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
@@ -113,6 +113,8 @@ class TournamentState(BaseModel):
     limits: SandboxLimits | None = None
     pairings: list[Pairing] = Field(default_factory=list)
     pool_points: dict[str, int] | None = None  # set by pool_scored once the shared pool is attacked
+    # round -> (pairings before it, its pairs); pairings are append-only, so a stale entry has a smaller count.
+    _round_cache: dict[int, tuple[int, list[Pair]]] = PrivateAttr(default_factory=dict)
 
     def names(self) -> list[str]:
         return [e.name for e in self.rule.entrants]
@@ -141,13 +143,14 @@ class TournamentState(BaseModel):
         """The pairs of ``round_no``: fixed up front for round robin; from the standings before it for Swiss."""
         if self.rule.kind() == "round_robin":
             return round_robin(self.names())[round_no - 1]
-        before = TournamentState(
-            tournament_id=self.tournament_id,
-            seed=self.seed,
-            rule=self.rule,
-            pairings=[p for p in self.pairings if p.round < round_no],
-        )
-        return swiss_round(before.table(), before.played(), {p.a for p in before.pairings if p.b == BYE})
+        prior = [p for p in self.pairings if p.round < round_no]
+        hit = self._round_cache.get(round_no)
+        if hit is not None and hit[0] == len(prior):
+            return hit[1]
+        before = TournamentState(tournament_id=self.tournament_id, seed=self.seed, rule=self.rule, pairings=prior)
+        pairs = swiss_round(before.table(), before.played(), {p.a for p in prior if p.b == BYE})
+        self._round_cache[round_no] = (len(prior), pairs)
+        return pairs
 
     def next_pair(self) -> tuple[int, Pair] | None:
         done = {(p.round, p.a, p.b) for p in self.pairings}
@@ -190,16 +193,23 @@ def swiss_round(table: list[tuple[str, float]], played: set[frozenset[str]], had
     return pairs + bye
 
 
-def _pair(order: list[str], played: set[frozenset[str]]) -> list[Pair] | None:
+def _pair(order: list[str], played: set[frozenset[str]], dead: set[frozenset[str]] | None = None) -> list[Pair] | None:
+    """Backtracking pairer; ``dead`` memoises remainders that cannot be paired (the remainder's order is fixed by
+    its members, so the set is a sound key), which keeps the worst case polynomial in practice."""
+    dead = set() if dead is None else dead
     if not order:
         return []
+    key = frozenset(order)
+    if key in dead:
+        return None
     first, rest = order[0], order[1:]
     for i, other in enumerate(rest):
         if frozenset((first, other)) in played:
             continue
-        tail = _pair(rest[:i] + rest[i + 1 :], played)
+        tail = _pair(rest[:i] + rest[i + 1 :], played, dead)
         if tail is not None:
             return [(first, other), *tail]
+    dead.add(key)
     return None
 
 

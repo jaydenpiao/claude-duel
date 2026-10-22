@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from itertools import combinations
 from pathlib import Path
 
@@ -112,3 +113,29 @@ def test_cli_tournament(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys:
     assert len(out["pairings"]) == 6  # 3 games + 3 byes
     assert main(["--config", str(cfg), "tournament", "--tournament-id", "c1"]) == 0
     assert "1. " in capsys.readouterr().out
+
+
+def test_swiss_32_entrants_20_rounds_plays_and_folds_fast() -> None:  # issue #135
+    rule = tr.TournamentRule(entrants=_entrants(32), format="swiss", swiss_rounds=20)
+    state = tr.TournamentState(tournament_id="t", seed="s", rule=rule)
+    start = time.perf_counter()
+    events = [
+        Event(seq=0, type=tr.TOURNAMENT_CREATED, trace_id="t", data={"seed": "s", "rule": rule.model_dump(mode="json")})
+    ]
+    while (nxt := state.next_pair()) is not None:
+        r, (a, b) = nxt
+        p = tr.Pairing(round=r, a=a, b=b, winner=None if b == tr.BYE else min(a, b))
+        state.pairings.append(p)
+        events.append(Event(seq=len(events), type=tr.PAIRING_FINISHED, trace_id="t", data=p.model_dump()))
+    assert len(state.pairings) == 32 * 20 // 2
+    assert tr.fold("t", events).pairings == state.pairings
+    assert time.perf_counter() - start < 10
+
+
+def test_unpairable_remainder_is_memoised() -> None:  # an odd clique that may only meet itself: no pairing exists
+    order = [f"p{i}" for i in range(32)]
+    clique, others = order[:15], order[15:]
+    played = {frozenset((a, b)) for a in clique for b in others}
+    start = time.perf_counter()
+    assert tr._pair(order, played) is None
+    assert time.perf_counter() - start < 2
