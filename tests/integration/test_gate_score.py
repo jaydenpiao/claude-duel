@@ -24,16 +24,13 @@ def test_probe_solve_is_kept_and_marked(make_engine, new_state) -> None:  # type
     mine = _mine(state, "alice")
     assert len(alice.prompts) == 1  # no repair round-trip
     assert state.validations[mine.id].valid
-    assert mine.spec is not None
-    assert mine.spec.probe_solved
+    assert mine.probe_solved
 
 
 def test_author_cannot_mark_itself(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
     alice = Scripted(json.dumps({**agents.EXAMPLE_CHALLENGE, "probe_solved": True}))
     state = make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
-    spec = _mine(state, "alice").spec
-    assert spec is not None
-    assert not spec.probe_solved
+    assert not _mine(state, "alice").probe_solved
 
 
 def test_reject_mode_is_unchanged(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
@@ -48,8 +45,16 @@ def test_probe_solved_defense_pays_half() -> None:
     spec = ChallengeSpec.model_validate(agents.EXAMPLE_CHALLENGE)
     full = defense_award(spec, 1, rules.scoring)
     for marked, expected in ((False, full), (True, full // 2)):
-        ch = Challenge(id="c", round=1, author="a", spec=spec.model_copy(update={"probe_solved": marked}))
+        ch = Challenge(id="c", round=1, author="a", spec=spec, probe_solved=marked)
         delta = score_round(
             1, ["a", "b"], [ch], {"c": Validation(challenge_id="c", valid=True, reason="ok")}, {}, rules
         )
         assert delta["a"] == expected
+
+
+def test_older_logs_lift_probe_solved_off_the_spec() -> None:
+    """#142: the verdict moved from ChallengeSpec to Challenge; older logs still fold."""
+    old = {"id": "c", "round": 1, "author": "a", "spec": {**agents.EXAMPLE_CHALLENGE, "probe_solved": True}}
+    ch = Challenge.model_validate(old)
+    assert ch.probe_solved
+    assert "probe_solved" not in ChallengeSpec.model_fields

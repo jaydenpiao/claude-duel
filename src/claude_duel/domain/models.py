@@ -178,7 +178,14 @@ class ChallengeSpec(_Frozen):
         description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
     )
     difficulty: int = Field(ge=1, le=3)
-    probe_solved: bool = False  # set by the arena's difficulty gate in gate_mode "score"; halves the defense award
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_arena_fields(cls, data: Any) -> Any:
+        """#142: ``probe_solved`` is the arena's verdict (now on ``Challenge``); a reply that sends it is ignored."""
+        if isinstance(data, dict) and "probe_solved" in data:
+            data = {k: v for k, v in data.items() if k != "probe_solved"}
+        return data
 
 
 class Challenge(_Frozen):
@@ -188,6 +195,17 @@ class Challenge(_Frozen):
     spec: ChallengeSpec | None
     forfeit_reason: str | None = None
     flag_epoch: int = 0  # R3-2: the repair try that built it; each try runs under its own flag (0 in older logs)
+    probe_solved: bool = False  # set only by the arena's difficulty gate in gate_mode "score"; halves the defense award
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_probe_solved(cls, data: Any) -> Any:
+        """Older logs kept ``probe_solved`` inside ``spec``; lift it onto the challenge (#142)."""
+        if isinstance(data, dict) and isinstance(spec := data.get("spec"), dict) and "probe_solved" in spec:
+            data = dict(data)
+            data["spec"] = {k: v for k, v in spec.items() if k != "probe_solved"}
+            data.setdefault("probe_solved", spec["probe_solved"])
+        return data
 
 
 class Validation(_Frozen):
