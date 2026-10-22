@@ -17,10 +17,11 @@ _PROTECTED = frozenset({"print", "check"})  # may not be rebound (check only by 
 
 # Attack-time wrapper (#100): a failed try says whether check() returned False or a non-bool. An exception
 # is already reported by the sandbox runner as type and line. Never a value check() computed, so the answer
-# doesn't leak.
+# doesn't leak. Like WRAPPER, it writes through sys.stdout, never a rebindable print.
 FEEDBACK_WRAPPER = (
     "\n\nimport sys\n_ok = check(sys.stdin.read().strip())\n"
-    "print(FLAG if _ok is True else 'check returned False' if _ok is False else 'check returned a non-bool')\n"
+    "_msg = FLAG if _ok is True else 'check returned False' if _ok is False else 'check returned a non-bool'\n"
+    "sys.stdout.write(_msg + '\\n')\n"
 )
 
 
