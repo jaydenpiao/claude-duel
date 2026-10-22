@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from claude_duel.app.container import build_budget, build_tournament_log
+import secrets
+
+from claude_duel.app.budget import CostBudget
+from claude_duel.app.container import (
+    build_budget,
+    build_engine,
+    build_series_log,
+    build_store,
+    build_tournament_log,
+    pin_agents,
+)
 from claude_duel.app.series import play_series
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
+from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
-from claude_duel.domain.errors import BudgetExceededError
-from claude_duel.domain.models import Event
+from claude_duel.domain.errors import BudgetExceededError, MatchNotFoundError
+from claude_duel.domain.models import AgentSpec, Challenge, Event, MatchState
 from claude_duel.domain.series import game_seed
 from claude_duel.ports import Metrics
 
@@ -58,4 +69,58 @@ def play_tournament(
             ),
         )
         state.pairings.append(pairing)
+    if state.rule.pool and state.pool_points is None:
+        state.pool_points = tr.pool_points(
+            state.rule.decay, _attack_pool(settings, state, metrics, budget), state.names()
+        )
+        data = {"points": state.pool_points}
+        seq = len(state.pairings) + 1
+        log.append(
+            tournament_id, Event(v=ev.SCHEMA_VERSION, seq=seq, type=tr.POOL_SCORED, trace_id=tournament_id, data=data)
+        )
     return state
+
+
+def pool_challenges(settings: Settings, state: tr.TournamentState) -> list[Challenge]:
+    """Every valid challenge built in the tournament's matches, in a stable order."""
+    store, series_log = build_store(settings), build_series_log(settings)
+    out: list[Challenge] = []
+    for p in state.pairings:
+        if not p.series_id:
+            continue
+        for game in sr.fold(p.series_id, series_log.read(p.series_id)).games:
+            match = store.load(game.match_id)
+            out += [c for c in match.challenges.values() if c.spec is not None and match.validations[c.id].valid]
+    return sorted(out, key=lambda c: c.id)
+
+
+def _attack_pool(
+    settings: Settings, state: tr.TournamentState, metrics: Metrics, budget: CostBudget
+) -> dict[str, list[str]]:
+    """Each entrant attacks every pool challenge it did not write, in its own resumable pool match."""
+    pool = pool_challenges(settings, state)
+    solvers: dict[str, list[str]] = {c.id: [] for c in pool}
+    store = build_store(settings)
+    for spec in state.rule.entrants:
+        mid = f"{state.tournament_id}-pool-{spec.name}".replace("_", "-")
+        agents = pin_agents(settings.model_copy(update={"agents": (spec, AgentSpec(name=tr.POOL))}))
+        with store.lock(mid):
+            try:
+                match = store.load(mid)
+            except MatchNotFoundError:
+                match = MatchState(
+                    match_id=mid,
+                    secret=secrets.token_hex(32),
+                    seed=tr.tiebreak(state.seed, spec.name)[:16],
+                    agents=agents,
+                    rules=settings.rules,
+                    limits=settings.limits,
+                )
+                store.save(match)
+            engine = build_engine(settings, metrics, store, match.agents, budget=budget)
+            mine = [c for c in pool if c.author != spec.name]
+            match = engine.attack_pool(match, mine)
+        for c in mine:
+            if match.attacks[f"{c.id}:{spec.name}"].solved:
+                solvers[c.id].append(spec.name)
+    return solvers
