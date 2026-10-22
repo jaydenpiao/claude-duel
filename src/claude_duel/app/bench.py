@@ -1,8 +1,8 @@
 """Benchmark slice harness (#45, docs/design/benchmark.md): solve rate on fixed stdin-only tasks.
 
 Tasks are read from a local JSON-lines manifest and never vendored into the repo. Each task is an
-arena-style program that prints ``FLAG`` for the right stdin. Fake agents only for now; live runs
-wait on budget wiring (see the design doc).
+arena-style program that prints ``FLAG`` for the right stdin. Every call goes through the match
+``CostBudget`` and the shared spend ledger (#104), with the whole bench run counted as one match.
 """
 
 from __future__ import annotations
@@ -14,14 +14,31 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.app import agents
-from claude_duel.app.container import make_provider, make_sandbox
+from claude_duel.app.budget import DEFAULT_PRICES, CostBudget
+from claude_duel.app.container import build_ledger, make_provider, make_sandbox
 from claude_duel.app.engine import MALFORMED
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError, MalformedOutputError
 from claude_duel.domain.flags import derive_flag
-from claude_duel.domain.models import AgentSpec, SandboxLimits
+from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits, Usage
 from claude_duel.observability import NullMetrics
-from claude_duel.ports import CompletionRequest, LLMProvider, Sandbox
+from claude_duel.ports import Completion, CompletionRequest, LLMProvider, Sandbox
+
+
+class MeteredProvider:
+    """Checks the budget caps before each call and charges the ledger after it, exactly as a match does."""
+
+    def __init__(self, inner: LLMProvider, model: str, budget: CostBudget, state: MatchState) -> None:
+        self._inner, self._model, self._budget, self._state = inner, model, budget, state
+        self.name = inner.name
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        self._budget.check(self._state)
+        completion = self._inner.complete(request)
+        usd = self._budget.charge(self._state.match_id, self._model, completion)
+        usage = self._state.usage
+        usage.calls, usage.tokens, usage.usd = usage.calls + 1, usage.tokens + completion.total_tokens, usage.usd + usd
+        return completion
 
 
 class BenchTask(BaseModel):
@@ -104,14 +121,20 @@ def solve_rate(results: list[BenchResult]) -> dict[str, float]:
     return {a: round(sum(v) / len(v), 3) for a, v in sorted(by_agent.items())}
 
 
-def run_bench(settings: Settings, manifest: Path, tries: int) -> list[BenchResult]:
-    """Both configured agents on every task. Refuses real models until the bench is budget-capped (#45 doc)."""
-    if any(a.provider != "fake" for a in settings.agents):
-        raise ConfigError("bench runs fake agents only for now; live runs need budget caps (docs/design/benchmark.md)")
+def run_bench(settings: Settings, manifest: Path, tries: int, bench_id: str) -> tuple[list[BenchResult], Usage]:
+    """Both configured agents on every task, under the budget caps (match caps apply to the whole run).
+
+    Real models only run in the Docker sandbox (``make_sandbox`` fails closed). A cap stops the run with
+    ``BudgetExceededError``; spend so far is already in the ledger under ``bench_id``.
+    """
     tasks = load_tasks(manifest)
     sandbox = make_sandbox(settings, settings.agents)
+    budget = CostBudget(settings.budget, build_ledger(settings), DEFAULT_PRICES)
+    budget.check_lifetime()
+    state = MatchState(match_id=bench_id, agents=settings.agents, rules=Rules(), limits=settings.limits)
     results = []
     for agent in settings.agents:
-        provider = make_provider(agent, settings, NullMetrics())
+        inner = make_provider(agent, settings, NullMetrics())
+        provider = MeteredProvider(inner, settings.model_for(agent), budget, state)
         results += [solve(t, agent, provider, sandbox, settings.limits, tries) for t in tasks]
-    return results
+    return results, state.usage
