@@ -44,7 +44,15 @@ def play_series(
         match = play(game_settings, state.game_id(n), metrics, observer)
         if match.stage is not Stage.COMPLETE:
             return state  # failed game: `duel series` again resumes it
-        game = sr.game_of(n, match)
+        decider = None
+        if state.rule.sudden_death and sr.game_winner(match) is None:
+            decider_settings = game_settings.model_copy(
+                update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
+            )
+            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer)
+            if decider.stage is not Stage.COMPLETE:
+                return state
+        game = sr.game_of(n, match, decider)
         log.append(
             series_id,
             Event(v=ev.SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
@@ -68,6 +76,9 @@ def verify_series(settings: Settings, series_id: str) -> SeriesReport:
         match = store.load(g.match_id)
         if not replay(match, events.read(g.match_id)).consistent:
             bad.append(f"game {g.game_no}: replay")
-        if sr.game_of(g.game_no, match) != g:
+        decider = store.load(g.sudden_death) if g.sudden_death else None
+        if decider is not None and not replay(decider, events.read(g.sudden_death)).consistent:
+            bad.append(f"game {g.game_no}: sudden-death replay")
+        if sr.game_of(g.game_no, match, decider) != g:
             bad.append(f"game {g.game_no}: result")
     return SeriesReport(not bad, bad)

@@ -19,7 +19,7 @@ A **match** stays exactly what it is today: N rounds, one event log, one `MatchS
 
 ## Built (#38, first PR)
 - Handicaps: `Handicap` on `AgentSpec`, recorded in `match_created`, shown in commentary (`handicap alice: tries -1, ...`); `score_offset` applies to the result via `MatchState.final_scores()`, not to replayed round scores.
-- Series: `domain/series.py` + `app/series.py`, `duel series --games N`; logs as `<id>.series.jsonl`. Not yet: the sudden-death 1-round tiebreak (a game tied on score and attack tokens is drawn), tournaments and ratings (#39).
+- Series: `domain/series.py` + `app/series.py`, `duel series --games N`; logs as `<id>.series.jsonl`. Sudden death: a game tied on score and attack tokens is decided by one extra 1-round match (`<id>-g<n>-sd`); drawn only if that ties too.
 
 ## Built (#39, first PR)
 - Ratings: `domain/ratings.py`, `duel ratings [--boot N] [--format json]`. Elo order is `match_id` order. Tournaments: `domain/tournament.py` + `app/tournament.py`, `duel tournament` (second PR). Not yet: the `decay` scorer; it needs one challenge attacked by several entrants, which no format produces yet (every match has its own challenges).
