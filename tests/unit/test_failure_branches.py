@@ -95,7 +95,7 @@ class TestPolicy:
         assert policy.answer_exposed(ast.parse("x = [1, 2, 3, 4, 5]"), "abcd") is None
 
     def test_format_field_attribute_access(self) -> None:
-        assert policy.check_source("print('{0.x}'.format(1))\n", 4096) == "format field with attribute or index access"
+        assert policy.check_source("t = '{0.x}'\n", 4096) == "format field with attribute or index access"
 
     def test_star_import(self) -> None:
         assert policy.check_source("from math import *\n", 4096) == "star import not allowed"

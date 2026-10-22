@@ -18,6 +18,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.presentation.common import (
     MatchFold,
@@ -26,7 +27,6 @@ from claude_duel.presentation.common import (
     defense,
     leader,
     result,
-    scrub,
     spend,
     verdict,
     verdict_text,
