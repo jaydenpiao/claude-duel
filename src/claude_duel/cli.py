@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament."""
+"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament, bench."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
 from claude_duel.app.estimate import estimate, render
@@ -73,6 +74,10 @@ def _parser() -> argparse.ArgumentParser:
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
+    bench = sub.add_parser("bench", help="solve rate on a local stdin-only task manifest (fake agents only)")
+    bench.add_argument("manifest", type=Path, help="JSON-lines tasks (docs/design/benchmark.md)")
+    bench.add_argument("--tries", type=int, default=3, help="attempts per task (1-10)")
+    bench.add_argument("--format", choices=("text", "json"), default="text")
     tour = sub.add_parser("tournament", help="play or resume the config's [tournament] (round robin or Swiss)")
     tour.add_argument("--tournament-id", help="explicit id (re-running an existing id resumes it)")
     tour.add_argument("--format", choices=("text", "json"), default="text")
@@ -150,6 +155,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
+        "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
@@ -161,6 +167,20 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
+    if not 1 <= tries <= 10:
+        raise ConfigError("--tries must be 1-10")
+    results = run_bench(settings, manifest, tries)
+    rates = solve_rate(results)
+    if fmt == "json":
+        print(json.dumps({"solve_rate": rates, "results": [r.model_dump() for r in results]}))
+        return 0
+    for r in results:
+        print(f"{r.agent:<10} {r.task_id:<24} {'solved' if r.solved else 'failed'} in {r.attempts} ({r.tokens} tok)")
+    print("solve rate: " + ", ".join(f"{a} {v:.0%}" for a, v in rates.items()))
+    return 0
 
 
 def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
