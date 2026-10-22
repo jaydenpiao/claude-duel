@@ -118,6 +118,9 @@ class Rules(_Frozen):
         default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
     )
     retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
+    retry_feedback: bool = Field(
+        default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
+    )
     attack_token_budget: int = Field(default=20_000, ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
