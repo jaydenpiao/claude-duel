@@ -1,0 +1,64 @@
+"""Truncated replies (#145): own failure reason, exactly one brevity repair call, symmetric output cap."""
+
+from __future__ import annotations
+
+from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.app import agents
+from claude_duel.app.engine import TRUNCATED
+from claude_duel.ports import Completion, CompletionRequest
+
+
+class Cut:
+    """Cuts the first ``cuts`` build replies off at the cap, then defers to the fake provider."""
+
+    name = "cut"
+
+    def __init__(self, cuts: int) -> None:
+        self.cuts, self.fake, self.requests = cuts, FakeProvider(), list[CompletionRequest]()
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        self.requests.append(request)
+        if request.purpose == "build" and self.cuts > 0:
+            self.cuts -= 1
+            return Completion(text='{"title": "half', input_tokens=10, output_tokens=request.max_tokens, truncated=True)
+        return self.fake.complete(request)
+
+
+def test_one_truncation_is_repaired_by_one_brief_retry(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = Cut(1)
+    state = make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    builds = [r for r in alice.requests if r.purpose == "build"]
+    assert len(builds) == 2
+    assert agents.TRUNCATED_HINT in builds[1].prompt
+    mine = next(c for c in state.challenges.values() if c.author == "alice")
+    assert state.validations[mine.id].valid
+    assert mine.id not in state.build_errors  # the repair call fixed it; no rejection recorded
+
+
+def test_two_truncations_are_their_own_failure_reason(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = Cut(2)
+    state = make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    mine = next(c for c in state.challenges.values() if c.author == "alice")
+    assert state.build_errors[mine.id][0] == f"malformed: {TRUNCATED}"
+    assert state.validations[mine.id].valid  # the next format retry succeeded
+
+
+def test_output_cap_and_schema_are_the_same_for_every_agent(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice, bob = Cut(0), Cut(0)
+    make_engine({"alice": alice, "bob": bob}).run(new_state(rounds=1, challenges_per_round=1, max_output_tokens=6000))
+    reqs = alice.requests + bob.requests
+    assert {r.max_tokens for r in reqs} == {6000}
+    assert {r.purpose: r.json_schema for r in reqs} == agents.ANSWER_SCHEMAS
+
+
+def test_wallet_cap_still_lowers_the_output_cap(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = Cut(0)
+    rules = {"rounds": 1, "challenges_per_round": 1, "wallet": {"max_output_tokens": 300}}
+    make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(**rules))
+    assert {r.max_tokens for r in alice.requests} == {300}
+
+
+def test_answer_schemas_are_strict() -> None:
+    for schema in agents.ANSWER_SCHEMAS.values():
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(schema["properties"])
