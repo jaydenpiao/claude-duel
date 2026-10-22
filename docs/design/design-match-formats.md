@@ -17,6 +17,10 @@ A **match** stays exactly what it is today: N rounds, one event log, one `MatchS
 - **Ratings:** `duel ratings` folds **all completed match logs** offline: Elo (K=32) for display, plus Bradley-Terry MLE with bootstrap 95% CIs as the reported number (Arena-style; order-independent, unlike Elo). Glicko-2 is optional. A pure function in `domain/ratings.py`, no extra API cost.
 - **Dynamic challenge value (CTFd-style), optional scorer `decay`:** in tournaments, a challenge's capture value decays with how many entrants captured it (CTFd's `linear`/`logarithmic` formulas), applied at series level since a single match has only one attacker.
 
+## Built (#38, first PR)
+- Handicaps: `Handicap` on `AgentSpec`, recorded in `match_created`, shown in commentary (`handicap alice: tries -1, ...`); `score_offset` applies to the result via `MatchState.final_scores()`, not to replayed round scores.
+- Not yet: `Series` (best-of-N) aggregate.
+
 ## Cost
 A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.45; double round robin ~$0.90. A Swiss of 8 entrants x 5 rounds is 20 matches, ~$0.60. Add `series_max_usd` (default $2) checked before each game against the ledger.
 
@@ -25,7 +29,7 @@ A Bo3 is <= 3 matches, <= $0.09. A 6-entrant round robin Bo1 is 15 matches, ~$0.
 - [ ] Bo3 stops after 2-0.
 - [ ] Sides alternate; seeds derive deterministically.
 - [ ] Ratings are identical regardless of log file order (BT), with Elo order documented.
-- [ ] Handicaps are recorded and show in commentary.
+- [x] Handicaps are recorded and show in commentary.
 
 ## Test ideas
 - Fake-provider round robin of 3 skills (1, 2, 3): BT ranking must be monotone in skill with n=30 (free).

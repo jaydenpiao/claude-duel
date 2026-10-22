@@ -25,7 +25,8 @@ def clock_left(state: MatchState, agent: str) -> int | None:
     if clock.bank_tokens is None:
         return None
     used = state.usage_by_agent.get(agent, Usage())
-    return clock.bank_tokens + clock.increment_tokens * used.calls - used.clock_tokens
+    bank = int(clock.bank_tokens * state.handicap(agent).bank_mult)
+    return bank + clock.increment_tokens * used.calls - used.clock_tokens
 
 
 def clock_fallen(state: MatchState, agent: str) -> str | None:

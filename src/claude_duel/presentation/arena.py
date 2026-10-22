@@ -221,12 +221,14 @@ class ArenaView(MatchFold):
         title = scrub(ch.spec.title) if ch.spec else "forfeit"
         self.model.busy = True
         self.model.now = (
-            f"{attacker} attacking {ch.author}'s {title!r}... try {e.data['try_no']}/{s.rules.max_attempts}"
+            f"{attacker} attacking {ch.author}'s {title!r}... try {e.data['try_no']}/{s.max_attempts(attacker)}"
         )
 
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)
-        self.model.now = f"{a.attacker} attacking {a.author}'s {a.title!r} (try {a.try_no}/{s.rules.max_attempts})"
+        self.model.now = (
+            f"{a.attacker} attacking {a.author}'s {a.title!r} (try {a.try_no}/{s.max_attempts(a.attacker)})"
+        )
         if a.captured:
             self.model.flash = f"⚔ {a.attacker} captured {a.author}'s flag ✓ +{a.award}"
             self.model.log(self.model.flash)

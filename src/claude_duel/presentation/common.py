@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
-from claude_duel.domain.models import Attack, Challenge, Event, MatchState, Validation
+from claude_duel.domain.models import Attack, Challenge, Event, Handicap, MatchState, Validation
 from claude_duel.domain.scoring import defense_award, solve_award
 
 SNIPPET_LINES = 3
@@ -108,7 +108,18 @@ def verdict_text(s: MatchState, e: Event) -> str:
 
 
 def board(s: MatchState) -> str:
-    return "  ".join(f"{a.name} {s.scores.get(a.name, 0)}" for a in s.agents)
+    final = s.final_scores()
+    return "  ".join(f"{a.name} {final[a.name]}" for a in s.agents)
+
+
+def handicap_text(h: Handicap) -> str:
+    parts = [
+        f"tries {h.attempts_delta:+d}" if h.attempts_delta else "",
+        f"attack tokens x{h.token_budget_mult:g}" if h.token_budget_mult != 1 else "",
+        f"clock x{h.bank_mult:g}" if h.bank_mult != 1 else "",
+        f"score {h.score_offset:+d}" if h.score_offset else "",
+    ]
+    return ", ".join(x for x in parts if x)
 
 
 def spend(s: MatchState, lifetime_usd: float, key_limit_usd: float) -> str:
@@ -117,7 +128,7 @@ def spend(s: MatchState, lifetime_usd: float, key_limit_usd: float) -> str:
 
 def leader(s: MatchState) -> str | None:
     """Name of the agent ahead, or None on a tie."""
-    ranked = sorted(s.scores.items(), key=lambda kv: -kv[1])
+    ranked = sorted(s.final_scores().items(), key=lambda kv: -kv[1])
     if len(ranked) < 2 or ranked[0][1] == ranked[1][1]:
         return None
     return ranked[0][0]

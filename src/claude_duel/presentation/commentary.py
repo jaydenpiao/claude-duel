@@ -16,6 +16,7 @@ from claude_duel.presentation.common import (
     attempt_view,
     board,
     defense,
+    handicap_text,
     result,
     snippet,
     spend,
@@ -49,6 +50,9 @@ class Commentary(MatchFold):
         a, b = s.agents
         self._say(f"claude duel · match {s.match_id}")
         self._say(f"{a.name} ({a.model}) vs {b.name} ({b.model})")
+        for agent in s.agents:
+            if agent.handicap.is_set():
+                self._say(f"handicap {agent.name}: {handicap_text(agent.handicap)}")
         r = s.rules
         self._say(
             f"{r.rounds} rounds · {r.challenges_per_round} challenges each per round · up to {r.max_attempts} tries"
@@ -78,7 +82,7 @@ class Commentary(MatchFold):
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)
         res = f"captured the flag ✓ +{a.award}" if a.captured else "no flag"
-        self._say(f"{a.attacker} attacks {a.title!r} (try {a.try_no}/{s.rules.max_attempts})… {res}")
+        self._say(f"{a.attacker} attacks {a.title!r} (try {a.try_no}/{s.max_attempts(a.attacker)})… {res}")
 
     def _attacked(self, s: MatchState, e: Event) -> None:
         held = defense(s, e)
