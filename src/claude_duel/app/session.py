@@ -6,6 +6,7 @@ import hashlib
 import logging
 import secrets
 
+from claude_duel.app import allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import build_engine, build_store, pin_agents
 from claude_duel.app.framings import framing_text
@@ -45,6 +46,10 @@ def play(
                 limits=settings.limits,
             )
             store.save(state)
+            if (
+                why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)
+            ) is not None:
+                log(_LOG, logging.WARNING, why, match_id=match_id)
         else:
             _warn_on_drift(settings, state)
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
