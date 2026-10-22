@@ -9,6 +9,7 @@ from collections.abc import Mapping
 
 from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
+from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import events as ev
 from claude_duel.domain import policy
 from claude_duel.domain.errors import MalformedOutputError
@@ -31,6 +32,7 @@ from claude_duel.ports import (
     Completion,
     CompletionRequest,
     EventLog,
+    EventObserver,
     LLMProvider,
     MatchStore,
     Metrics,
@@ -58,6 +60,7 @@ class MatchEngine:
         metrics: Metrics,
         budget: CostBudget,
         models: Mapping[str, str],
+        observer: EventObserver | None = None,
     ) -> None:
         self._budget = budget
         self._models = models
@@ -66,6 +69,7 @@ class MatchEngine:
         self._store = store
         self._log = event_log
         self._metrics = metrics
+        self._observer = IsolatedObserver(observer, metrics) if observer is not None else None
 
     # -- lifecycle -------------------------------------------------------
     def run(self, state: MatchState) -> MatchState:
@@ -94,6 +98,14 @@ class MatchEngine:
             )
         return state
 
+    def replay_to_observer(self, state: MatchState) -> None:
+        """Show the observer the history it missed (on resume), through the same isolation."""
+        if self._observer is None:
+            return
+        for event in self._log.read(state.match_id):
+            if event.seq <= state.last_seq:
+                self._observer(event)
+
     def _sync(self, state: MatchState) -> None:
         """Apply events a crash left out of the snapshot; create the log only if it is empty.
 
@@ -119,7 +131,7 @@ class MatchEngine:
         }[state.stage]
         handler(state)
 
-    def _record(self, state: MatchState, kind: str, **data: object) -> None:
+    def _record(self, state: MatchState, kind: str, **data: object) -> Event:
         """Validate by applying to a copy, then append durably, then apply for real (round-2 N3).
 
         An event that can't be applied never reaches the log, so it can't poison resume or replay.
@@ -128,10 +140,13 @@ class MatchEngine:
         ev.apply(state.model_copy(deep=True), event)
         self._log.append(state.match_id, event)
         ev.apply(state, event)
+        return event
 
     def _checkpoint(self, state: MatchState, kind: str, **data: object) -> None:
-        self._record(state, kind, **data)
+        event = self._record(state, kind, **data)
         self._store.save(state)
+        if self._observer is not None:  # only after the event is durable, applied and saved
+            self._observer(event)
         self._metrics.incr(f"unit.{kind}")
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:

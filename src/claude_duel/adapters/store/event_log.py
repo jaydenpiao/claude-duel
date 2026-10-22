@@ -13,7 +13,6 @@ from pathlib import Path
 from claude_duel.adapters.store import jsonl
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.models import Event
-from claude_duel.ports import EventLog, EventObserver
 
 GENESIS = "0" * 64
 
@@ -67,18 +66,3 @@ def _verify(lines: list[bytes]) -> tuple[list[Event], str]:
         events.append(event)
         prev = record["hash"]
     return events, prev
-
-
-class ObservedEventLog:
-    """EventLog decorator: notifies an observer after each successful append. Observers never affect the match."""
-
-    def __init__(self, inner: EventLog, observer: EventObserver) -> None:
-        self._inner = inner
-        self._observer = observer
-
-    def append(self, match_id: str, event: Event) -> None:
-        self._inner.append(match_id, event)
-        self._observer(event)
-
-    def read(self, match_id: str) -> list[Event]:
-        return self._inner.read(match_id)
