@@ -1,43 +1,41 @@
-"""Subprocess sandbox with POSIX rlimits. Defence in depth, not a hard boundary (see ADR 0003)."""
+"""Subprocess sandbox with POSIX rlimits. Defence in depth for the fake provider only (ADR 0003)."""
 
 from __future__ import annotations
 
 import os
-import resource
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
 
 from claude_duel.adapters.sandbox.common import execute
+from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
 
-def _limiter(limits: SandboxLimits) -> Callable[[], None]:
+def rlimits(limits: SandboxLimits) -> dict[str, int]:
     mem = limits.memory_mb * 1024 * 1024
-
-    def apply() -> None:  # pragma: no cover - runs in the child process
-        os.setsid()
-        resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds))
-        resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-        resource.setrlimit(resource.RLIMIT_NOFILE, (16, 16))
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-
-    return apply
+    return {
+        "RLIMIT_CPU": limits.cpu_seconds,
+        "RLIMIT_AS": mem,
+        "RLIMIT_FSIZE": 0,
+        "RLIMIT_NOFILE": 16,
+        "RLIMIT_CORE": 0,
+        # Per-UID limit: the arena user already runs more processes than this, so any fork fails.
+        "RLIMIT_NPROC": 1,
+    }
 
 
 class SubprocessSandbox:
     def __init__(self, python: str = sys.executable) -> None:
         self._python = python
 
-    def run(self, source: str, stdin: str, env: Mapping[str, str], limits: SandboxLimits) -> RunResult:
+    def run(self, source: str, stdin: str, flag: str, limits: SandboxLimits) -> RunResult:
         with tempfile.TemporaryDirectory(prefix="duel-") as tmp:
-            path = os.path.join(tmp, "challenge.py")
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(source)
-            os.chmod(tmp, 0o500)
-            child_env = {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", **env}
+            os.chmod(tmp, 0o500)  # read-only, empty working directory
             return execute(
-                [self._python, "-I", "-S", path], stdin, child_env, limits, cwd=tmp, preexec=_limiter(limits)
+                [self._python, *PYTHON_FLAGS],
+                frame(source, flag, stdin, rlimits(limits)),
+                limits,
+                env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+                cwd=tmp,
             )

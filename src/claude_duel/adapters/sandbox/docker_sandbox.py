@@ -1,53 +1,94 @@
-"""Docker sandbox: no network, read-only rootfs, memory/pids/cpu limits."""
+"""Docker sandbox: the security boundary for real-model matches (ADR 0003)."""
 
 from __future__ import annotations
 
-import shutil
-from collections.abc import Mapping
+import subprocess
+import uuid
+from collections.abc import Sequence
 
 from claude_duel.adapters.sandbox.common import execute
+from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
+DEFAULT_IMAGE = "python:3.12-slim"
+# Host-side deadline on top of the in-container wall limit, to absorb container start-up.
+STARTUP_GRACE_SECONDS = 5.0
+TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires
+SIGNAL_EXIT_BASE = 128  # container exit status 128+N means killed by signal N
+_PROBE_SECONDS = 10.0
 
-def docker_available() -> bool:
-    return shutil.which("docker") is not None
+
+def docker_probe(docker: Sequence[str]) -> str | None:
+    """Return why the Docker sandbox can't be used, or None if the daemon is reachable with seccomp."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed arena argv
+            [*docker, "info", "--format", "{{.ServerVersion}}|{{json .SecurityOptions}}"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"docker not runnable: {type(exc).__name__}"
+    version, _, options = proc.stdout.strip().partition("|")
+    if proc.returncode != 0 or not version:
+        return "docker daemon unreachable"
+    if "name=seccomp" not in options:
+        return "docker seccomp profile not active"
+    return None
 
 
 class DockerSandbox:
-    def __init__(self, image: str = "python:3.12-slim", docker: str = "docker") -> None:
+    def __init__(self, docker: Sequence[str] = ("docker",), image: str = DEFAULT_IMAGE) -> None:
+        self._docker = tuple(docker)
         self._image = image
-        self._docker = docker
 
-    def argv(self, source: str, env: Mapping[str, str], limits: SandboxLimits) -> list[str]:
-        argv = [
-            self._docker,
-            "run",
-            "--rm",
-            "-i",
-            "--network",
-            "none",
+    def argv(self, name: str, limits: SandboxLimits) -> list[str]:
+        """Container argv. Carries neither the flag nor the source: both go over stdin."""
+        mem = f"{limits.memory_mb}m"
+        return [
+            *self._docker, "run", "--rm", "-i", "--name", name,
+            "--network", "none",
             "--read-only",
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--pids-limit",
-            "32",
-            "--memory",
-            f"{limits.memory_mb}m",
-            "--cpus",
-            "0.5",
-            "--user",
-            "65534:65534",
-            "--tmpfs",
-            "/tmp:size=1m",  # noqa: S108 - container-private tmpfs
-        ]
-        for k, v in env.items():
-            argv += ["-e", f"{k}={v}"]
-        return [*argv, self._image, "python", "-I", "-S", "-c", source]
+            "--tmpfs", "/tmp:size=1m,noexec,nosuid,nodev",  # noqa: S108 - container-private tmpfs
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--ipc", "none",
+            "--user", "65534:65534",
+            "--pids-limit", str(limits.pids_limit),
+            "--memory", mem, "--memory-swap", mem,
+            "--cpus", str(limits.cpus),
+            "--ulimit", f"cpu={limits.cpu_seconds}:{limits.cpu_seconds}",
+            "--ulimit", "core=0:0",
+            "--log-driver", "none",
+            "--stop-timeout", "1",
+            self._image,
+            "timeout", "--kill-after=1", str(limits.wall_seconds), "python", *PYTHON_FLAGS,
+        ]  # fmt: skip
 
-    def run(self, source: str, stdin: str, env: Mapping[str, str], limits: SandboxLimits) -> RunResult:
-        # Container start-up dominates; allow headroom over the configured wall time.
-        padded = limits.model_copy(update={"wall_seconds": limits.wall_seconds + 10})
-        return execute(self.argv(source, env, limits), stdin, {"PATH": "/usr/bin:/bin:/usr/local/bin"}, padded)
+    def run(self, source: str, stdin: str, flag: str, limits: SandboxLimits) -> RunResult:
+        name = f"duel-{uuid.uuid4().hex[:16]}"
+        result = execute(
+            self.argv(name, limits),
+            frame(source, flag, stdin),
+            limits,
+            env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+            wall_seconds=limits.wall_seconds + STARTUP_GRACE_SECONDS,
+            cleanup=lambda: self._remove(name),
+        )
+        if result.killed_reason:
+            return result
+        if result.exit_code == TIMEOUT_EXIT:
+            return result.model_copy(update={"timed_out": True, "killed_reason": "wall"})
+        if result.exit_code > SIGNAL_EXIT_BASE:
+            return result.model_copy(update={"killed_reason": "signal"})
+        return result
+
+    def _remove(self, name: str) -> None:
+        subprocess.run(  # noqa: S603 - fixed arena argv
+            [*self._docker, "rm", "-f", name],
+            capture_output=True,
+            timeout=_PROBE_SECONDS,
+            check=False,
+        )

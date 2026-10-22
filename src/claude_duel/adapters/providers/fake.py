@@ -24,19 +24,17 @@ class Template:
     difficulty: int
 
 
-_HEAD = "import os\nimport sys\n\ndata = sys.stdin.read().strip()\n"
+_HEAD = "import sys\n\ndata = sys.stdin.read().strip()\n"
 _SHA_DUEL = hashlib.sha256(b"duel").hexdigest()
 TEMPLATES: tuple[Template, ...] = (
-    Template(
-        "password", "Front door", _HEAD + 'if data == "open-sesame":\n    print(os.environ["FLAG"])\n', "open-sesame", 1
-    ),
-    Template("reverse", "Mirror", _HEAD + 'if data == "elddir"[::-1]:\n    print(os.environ["FLAG"])\n', "riddle", 1),
+    Template("password", "Front door", _HEAD + 'if data == "open-sesame":\n    print(FLAG)\n', "open-sesame", 1),
+    Template("reverse", "Mirror", _HEAD + 'if data == "elddir"[::-1]:\n    print(FLAG)\n', "riddle", 1),
     Template(
         "sum",
         "Arithmetic gate",
         _HEAD + "parts = data.split()\nif len(parts) == 2 and all(p.isdigit() for p in parts):\n"
         "    a, b = int(parts[0]), int(parts[1])\n    if a + b == 1337 and a > b > 0:\n"
-        '        print(os.environ["FLAG"])\n',
+        "        print(FLAG)\n",
         "1000 337",
         2,
     ),
@@ -44,7 +42,7 @@ TEMPLATES: tuple[Template, ...] = (
         "hash",
         "Preimage",
         "import hashlib\n" + _HEAD + f'if hashlib.sha256(data.encode()).hexdigest() == "{_SHA_DUEL}":\n'
-        '    print(os.environ["FLAG"])\n',
+        "    print(FLAG)\n",
         "duel",
         3,
     ),
@@ -52,7 +50,7 @@ TEMPLATES: tuple[Template, ...] = (
         "b64",
         "Knock",
         "import base64\nimport binascii\n" + _HEAD + "try:\n    ok = base64.b64decode(data) == b'knock knock'\n"
-        'except binascii.Error:\n    ok = False\nif ok:\n    print(os.environ["FLAG"])\n',
+        "except binascii.Error:\n    ok = False\nif ok:\n    print(FLAG)\n",
         base64.b64encode(b"knock knock").decode(),
         2,
     ),
