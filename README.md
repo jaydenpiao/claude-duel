@@ -55,7 +55,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Trivial or unsolvable challenges | Reference payload must succeed and empty input must fail |
 | Prompt injection inside challenge text | The attacker only produces stdin. Model output is never executed by the arena, only parsed as JSON |
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
-| Score tampering | `duel replay` recomputes from facts and flags mismatches |
+| Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
 
 **Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.

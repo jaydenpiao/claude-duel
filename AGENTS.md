@@ -5,7 +5,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 ## Architecture (hexagonal, ADR 0001)
 - `src/claude_duel/domain/`: pure models, state machine, scoring, flag derivation, static policy. No I/O. See [domain/AGENTS.md](src/claude_duel/domain/AGENTS.md).
 - `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `Metrics`.
-- `src/claude_duel/adapters/`: `providers/` (fake, openai, retry), `sandbox/` (subprocess, docker), `store/` (file store, spend ledger). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
+- `src/claude_duel/adapters/`: `providers/` (fake, openai, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
 - `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
 - `config.py` (TOML then `DUEL_*` env), `observability.py` (logging, metrics), `cli.py`.
 

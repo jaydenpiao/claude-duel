@@ -13,15 +13,22 @@ _ALLOWED: dict[Stage, frozenset[Stage]] = {
     Stage.FAILED: frozenset(),
 }
 TERMINAL = frozenset({Stage.COMPLETE, Stage.FAILED})
+# The single successor of each linear stage; SCORE branches on the round.
+_NEXT: dict[Stage, Stage] = {
+    Stage.PENDING: Stage.BUILD,
+    Stage.BUILD: Stage.VALIDATE,
+    Stage.VALIDATE: Stage.ATTACK,
+    Stage.ATTACK: Stage.SCORE,
+}
 
 
 def next_stage(state: MatchState) -> Stage:
     """The successor of the current stage under the rules."""
     if state.stage is Stage.SCORE:
         return Stage.COMPLETE if state.round >= state.rules.rounds else Stage.BUILD
-    for target in _ALLOWED[state.stage]:
-        return target
-    raise InvalidTransitionError(f"{state.stage} is terminal")
+    if state.stage not in _NEXT:
+        raise InvalidTransitionError(f"{state.stage} is terminal")
+    return _NEXT[state.stage]
 
 
 def transition(state: MatchState, target: Stage) -> None:

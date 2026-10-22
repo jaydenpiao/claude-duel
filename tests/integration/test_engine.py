@@ -7,6 +7,7 @@ import pytest
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
+from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
@@ -20,7 +21,6 @@ from claude_duel.domain.errors import (
 )
 from claude_duel.domain.flags import derive_flag
 from claude_duel.domain.models import Stage
-from claude_duel.domain.state_machine import recover
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -44,7 +44,7 @@ class Wrapped:
         return self.inner.complete(request)
 
 
-def test_full_match_is_complete_and_replayable(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
+def test_full_match_is_complete_and_replayable(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
     metrics = InMemoryMetrics()
     state = make_engine(metrics=metrics).run(new_state())
     assert state.stage is Stage.COMPLETE
@@ -52,14 +52,14 @@ def test_full_match_is_complete_and_replayable(make_engine, new_state, store) ->
     assert len(state.challenges) == 8
     assert all(v.valid for v in state.validations.values())
     assert sum(a.solved for a in state.attacks.values()) > 0
-    assert replay(state).consistent
+    assert replay(state, event_log.read(state.match_id)).consistent
     assert store.load("m1").scores == state.scores
     assert metrics.counters["unit.challenge_built"] == 8
 
 
 def test_deterministic_across_runs(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
     a = make_engine().run(new_state("a1"))
-    b = make_engine().run(new_state("a1x"[:2]))
+    b = make_engine().run(new_state("a2"))
     assert a.scores.keys() == b.scores.keys()
 
 
@@ -88,11 +88,10 @@ def test_provider_error_fails_stage_and_resumes(make_engine, new_state, store) -
     failed = store.load("m1")
     assert failed.stage is Stage.FAILED
     assert not failed.challenges  # no forfeit penalty for an arena-side fault
-    recover(failed)
     assert make_engine().run(failed).stage is Stage.COMPLETE
 
 
-def test_quota_exceeded_aborts_and_resumes(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
+def test_quota_exceeded_aborts_and_resumes(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
     quota = Wrapped(FakeProvider(), fail_at=3, exc=QuotaExceededError("out of funds"))
     with pytest.raises(QuotaExceededError):
         make_engine({"alice": quota, "bob": FakeProvider()}).run(new_state())
@@ -100,25 +99,23 @@ def test_quota_exceeded_aborts_and_resumes(make_engine, new_state, store) -> Non
     assert failed.stage is Stage.FAILED
     assert "out of funds" in (failed.failure or "")
     built_before = set(failed.challenges)
-    recover(failed)
     done = make_engine().run(failed)
     assert done.stage is Stage.COMPLETE
     assert built_before <= set(done.challenges)
-    assert replay(done).consistent
+    assert replay(done, event_log.read(done.match_id)).consistent
 
 
-def test_crash_recovery_is_idempotent(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
+def test_crash_recovery_is_idempotent(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
     crash = Wrapped(FakeProvider(), fail_at=6, exc=RuntimeError("power cut"))
     with pytest.raises(RuntimeError):
         make_engine({"alice": FakeProvider(), "bob": crash}).run(new_state())
     saved = store.load("m1")
     calls_before = saved.usage.calls
-    recover(saved)
     counter = Wrapped(FakeProvider(skill=5))
     done = make_engine({"alice": FakeProvider(), "bob": counter}).run(saved)
     assert done.stage is Stage.COMPLETE
     assert done.usage.calls > calls_before
-    assert len([e for e in done.events if e.type == "challenge_built"]) == 8
+    assert len([e for e in event_log.read("m1") if e.type == "challenge_built"]) == 8
 
 
 def test_budget_breaker_trips(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
@@ -138,6 +135,7 @@ def test_lifetime_ledger_refuses_new_matches(tmp_path: Path, new_state) -> None:
         {"alice": FakeProvider(), "bob": FakeProvider()},
         SubprocessSandbox(),
         FileMatchStore(tmp_path / "s"),
+        FileEventLog(tmp_path / "s"),
         InMemoryMetrics(),
         CostBudget(BudgetLimits(), ledger, DEFAULT_PRICES),
         {"alice": "fake-1", "bob": "fake-1"},
@@ -150,11 +148,11 @@ def test_paid_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # type: ig
     ledger = FileSpendLedger(tmp_path / "l.jsonl")
     budget = CostBudget(BudgetLimits(), ledger, DEFAULT_PRICES)
     state = new_state()
-    budget.charge(state, "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
-    assert state.usage.usd == pytest.approx(0.10)
+    usd = budget.charge(state.match_id, "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
+    assert usd == pytest.approx(0.10)
     assert json.loads((tmp_path / "l.jsonl").read_text())["model"] == "gpt-4.1-nano"
     run_budget = CostBudget(BudgetLimits(run_max_usd=0.05), ledger, DEFAULT_PRICES)
-    run_budget.charge(new_state("x"), "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
+    run_budget.charge("x", "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
     with pytest.raises(BudgetExceededError, match="run cost"):
         run_budget.check(new_state("y"))
 
@@ -192,3 +190,23 @@ def test_invalid_challenges_rejected(make_engine, new_state) -> None:  # type: i
         reasons = {v.reason for k, v in state.validations.items() if state.challenges[k].author == "alice"}
         assert all(not state.validations[k].valid for k in state.challenges if state.challenges[k].author == "alice")
         assert reasons, name
+
+
+def test_resume_applies_events_missing_from_snapshot(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
+    real_save, saves = store.save, []
+
+    def lagging_save(state):  # type: ignore[no-untyped-def]
+        saves.append(state.last_seq)
+        if len(saves) <= 3:
+            real_save(state)  # later saves are "lost" in the crash
+
+    store.save = lagging_save
+    crash = Wrapped(FakeProvider(), fail_at=6, exc=RuntimeError("power cut"))
+    with pytest.raises(RuntimeError):
+        make_engine({"alice": FakeProvider(), "bob": crash}).run(new_state())
+    store.save = real_save
+    stale = store.load("m1")
+    assert stale.last_seq < event_log.read("m1")[-1].seq
+    done = make_engine().run(stale)
+    assert done.stage is Stage.COMPLETE
+    assert replay(done, event_log.read("m1")).consistent

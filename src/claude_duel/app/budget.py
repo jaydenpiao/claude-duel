@@ -76,12 +76,11 @@ class CostBudget:
                 raise BudgetExceededError(f"budget exceeded: {what}")
         self.check_lifetime()
 
-    def charge(self, state: MatchState, model: str, completion: Completion) -> None:
+    def charge(self, match_id: str, model: str, completion: Completion) -> float:
+        """Count the call against the run caps and the shared ledger; return its cost in USD."""
         usd = self.cost(model, completion)
-        state.usage.calls += 1
-        state.usage.tokens += completion.total_tokens
-        state.usage.usd += usd
         self.run_calls += 1
         self.run_usd += usd
         # Every call is ledgered, $0 included, so mispriced or free models stay visible.
-        self._ledger.record(state.match_id, model, completion.total_tokens, usd)
+        self._ledger.record(match_id, model, completion.total_tokens, usd)
+        return usd

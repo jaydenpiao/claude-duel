@@ -77,6 +77,14 @@ class Validation(_Frozen):
     reason: str
 
 
+class AttackAttempt(_Frozen):
+    """One paid attack attempt, checkpointed so resume never re-pays it."""
+
+    payload: str
+    output: str
+    tokens: int
+
+
 class Attack(_Frozen):
     challenge_id: str
     attacker: str
@@ -84,6 +92,17 @@ class Attack(_Frozen):
     attempts: int
     tokens_used: int
     reason: str
+
+    @classmethod
+    def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
+        return cls(
+            challenge_id=challenge_id,
+            attacker=attacker,
+            solved=solved,
+            attempts=len(history),
+            tokens_used=sum(a.tokens for a in history),
+            reason=reason,
+        )
 
 
 class Usage(BaseModel):
@@ -117,7 +136,10 @@ class MatchState(BaseModel):
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)
-    events: list[Event] = Field(default_factory=list)
+    scored_rounds: list[int] = Field(default_factory=list)
+    attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
+    build_errors: dict[str, list[str]] = Field(default_factory=dict)
+    last_seq: int = -1
     failure: str | None = None
     failed_stage: Stage | None = None
     usage: Usage = Field(default_factory=Usage)
