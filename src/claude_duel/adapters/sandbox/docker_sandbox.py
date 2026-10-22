@@ -11,7 +11,8 @@ from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
-DEFAULT_IMAGE = "python:3.12-slim"
+# R3-7: pinned by digest; with --pull never a mutable tag would run whatever image is local under that name.
+DEFAULT_IMAGE = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
 # Host-side deadline on top of the in-container wall limit, to absorb container start-up.
 STARTUP_GRACE_SECONDS = 5.0
 TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires
@@ -58,6 +59,14 @@ def docker_runtimes(docker: Sequence[str]) -> frozenset[str]:
     return frozenset(proc.stdout.split()) if proc.returncode == 0 else frozenset()
 
 
+def unpinned(image: str) -> str | None:
+    """R3-7: refuse an image reference that is not pinned by digest (name@sha256:<64 hex>)."""
+    _, _, digest = image.partition("@sha256:")
+    if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
+        return None
+    return f"docker image {image!r} is not pinned by digest (use name@sha256:...)"
+
+
 class DockerSandbox:
     def __init__(
         self,
@@ -79,7 +88,7 @@ class DockerSandbox:
         result = self.run("print(FLAG)", "", _SELF_TEST_FLAG, SandboxLimits())
         if result.stdout.strip() != _SELF_TEST_FLAG:
             return f"self-test container failed (exit {result.exit_code}, killed={result.killed_reason})"
-        return None
+        return unpinned(self._image)
 
     def argv(self, name: str, limits: SandboxLimits) -> list[str]:
         """Container argv. Carries neither the flag nor the source: both go over stdin."""
