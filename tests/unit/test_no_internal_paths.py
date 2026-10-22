@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-_HOST = re.compile("/" + "(?:workspace|home/box)\\b|/tmp/cd-")
+_HOST = re.compile("/" + "(?:workspace|home/box)\\b|/" + "tmp/cd-")
 
 
 def test_no_host_paths_in_tracked_files() -> None:
