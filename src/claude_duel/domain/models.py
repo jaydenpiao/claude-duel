@@ -122,6 +122,12 @@ class Rules(_Frozen):
         default=False, description="check form: a failed try shows why check() said no, never its values (#100)"
     )
     attack_token_budget: int = Field(default=20_000, ge=1)
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
+    )
+    max_output_tokens: int = Field(
+        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; same for every agent"
+    )
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"

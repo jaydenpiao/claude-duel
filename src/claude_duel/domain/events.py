@@ -79,6 +79,8 @@ class CallCharged(_Payload):
     elapsed_ms: int = 0  # provider latency, measured once (absent before ADR 0007)
     input_tokens: int = 0  # split of ``tokens`` for the token clock (#36); absent in older logs
     output_tokens: int = 0
+    reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
+    truncated: bool = False
 
 
 class BuildRejected(_Payload):
