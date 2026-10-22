@@ -25,6 +25,7 @@ class Settings(BaseModel):
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
     openai_model: str = "gpt-4.1-nano"
+    gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
     prices: dict[str, tuple[float, float]] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
     provider_timeout: float = 60.0
@@ -45,6 +46,7 @@ _ENV_SCALARS = {
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_OPENAI_MODEL": "openai_model",
+    "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
 }
 _ENV_RULES = {

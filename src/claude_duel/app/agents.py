@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.models import ChallengeSpec, Rules
-from claude_duel.domain.policy import BANNED_NAMES, PURE_MODULES, RESTRICTED_MODULES
+from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
 SYSTEM = (
     "You are a contestant in Claude Duel, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
@@ -28,10 +28,10 @@ class AttackMove(BaseModel):
 
 
 EXAMPLE_CHALLENGE = {
-    "title": "Front door",
-    "description": "Say the password.",
-    "source": 'import sys\ndata = sys.stdin.read().strip()\nif data == "open-sesame":\n    print(FLAG)\n',
-    "reference_payload": "open-sesame",
+    "title": "Maze",
+    "description": "Walk from S to G with U/D/L/R moves; # is a wall.",
+    "source": MAZE_SOURCE,
+    "reference_payload": "DDRR",
     "difficulty": 1,
 }
 
@@ -48,26 +48,34 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty input must NOT "
         "print it.",
         f"3. Allowed imports: {', '.join(sorted(PURE_MODULES))}; {restricted}. Nothing else.",
-        "4. No name or attribute may start with _ (so no __name__ / if __name__ == '__main__' guard, no dunders). "
+        "4. No name (except a bare _) or attribute may start with _ (so no __name__ / if __name__ == '__main__' "
+        "guard, no dunders). "
         "Write top-level code.",
-        f"5. Banned names: {', '.join(sorted(BANNED_NAMES))}.",
+        f"5. Banned names, not even as variable names: {', '.join(sorted(BANNED_NAMES))}.",
         "6. No files, network, processes, or format strings with attribute/index access ('{x.y}', '{x[0]}').",
         f"7. Source at most {rules.max_source_bytes(round_no)} bytes; it must finish in under a second.",
-        "8. reference_payload is the exact stdin that makes your program print FLAG; the arena runs it to check.",
-        "TIPS: you cannot run code, so never paste a hash, XOR or hex value you computed in your head. Let the "
-        "program compute any target from a plain secret (e.g. target = hashlib.sha256(b'swordfish').hexdigest(), "
-        "then compare hashlib.sha256(data.encode()).hexdigest() == target; reference_payload is 'swordfish'). "
-        "Difficulty should come from the logic the attacker must reverse, not from arithmetic you can't verify. "
-        "The attacker reads your source, so never leave the answer as a plain literal: build it with code "
-        "(e.g. chars from a shuffled index list, numbers that must satisfy several constraints like sum, order "
-        "and modulo, or input that passes several transforms). Keep each step simple enough that you are sure "
-        "your reference_payload passes. The attacker is a model that reads your source: a hash of a plaintext "
-        "that appears in the source protects nothing, and a challenge solved on the first try earns you nothing. "
-        "Defenses score when the attacker fails every try.",
+        "8. reference_payload (or your solver's output) is the exact stdin that makes your program print FLAG; the "
+        "arena runs it to check.",
+        f"9. The accepting input must be at least {MIN_PAYLOAD_CHARS} characters and must NOT appear in the source in "
+        "any obvious form: not as a literal, reversed, hex, base64, split across concatenated strings, or as a "
+        "list of (shifted or XORed) char codes. The arena checks this.",
+        "SCORING: a defense (the attacker fails every try) is worth at least as much as a capture. A challenge "
+        "the attacker reads off the source on the first try earns you nothing.",
+        "DESIGN: make the attacker simulate several steps to find the input: derive it with a seeded loop, a "
+        "state machine or grid walk, a tiny stack VM, or a checksum with several constraints (length, sum, order, "
+        "modulo). It must stay solvable by careful reading within a few tries; no hash brute force.",
     ]
 
 
-def build_prompt(agent: str, round_no: int, index: int, rules: Rules, error: str | None) -> str:
+class _BuildAnswer(ChallengeSpec):
+    """What the model returns: a ChallengeSpec; stray extra keys (models add notes) are ignored."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+
+def build_prompt(
+    agent: str, round_no: int, index: int, rules: Rules, error: str | None, previous: ChallengeSpec | None = None
+) -> str:
     lines = [
         "TASK: BUILD",
         f"AGENT: {agent}",
@@ -76,8 +84,18 @@ def build_prompt(agent: str, round_no: int, index: int, rules: Rules, error: str
         "Write a Python 3 CTF challenge. Your opponent sees the source and description and must find the input.",
         *build_rules(rules, round_no),
         f"Minimal valid example (make yours harder; later rounds score more): {json.dumps(EXAMPLE_CHALLENGE)}",
-        'Return JSON: {"title", "description", "source", "reference_payload", "difficulty" (1-3)}.',
+        'SOLVER (recommended): you cannot run code, so do not work the answer out in your head. Give "solver": '
+        "a short program under the same rules that prints the accepting input (it gets no stdin and is never shown "
+        "to the attacker); the arena runs it and uses its output as reference_payload (then leave reference_payload "
+        '""). Example: if the challenge derives a 6-letter key from a seed with a loop and compares the input to '
+        "it, the solver is that same loop ending in print(key).",
+        'Return JSON with keys in this order: {"title", "description", "source", "solver", "reference_payload", '
+        '"difficulty" (1-3)}.',
     ]
+    if previous is not None:
+        lines.append(
+            f"Your previous answer: reference_payload={previous.reference_payload!r}\nsource:\n{previous.source}"
+        )
     if error:
         lines.append(f"Your previous answer was rejected: {error}. Fix exactly that and keep every rule.")
     return "\n".join(lines)
@@ -125,12 +143,13 @@ def parse(text: str, model: type[M]) -> M:
         except json.JSONDecodeError:
             continue
         except ValidationError as exc:
-            error = str(exc).splitlines()[0][:200]
+            first = exc.errors()[0]
+            error = f"{'.'.join(map(str, first['loc'])) or 'answer'}: {first['msg']}"[:200]
     raise MalformedOutputError(error)
 
 
 def parse_challenge(text: str) -> ChallengeSpec:
-    return parse(text, ChallengeSpec)
+    return ChallengeSpec.model_validate(parse(text, _BuildAnswer).model_dump(include=set(ChallengeSpec.model_fields)))
 
 
 def parse_attack(text: str) -> AttackMove:

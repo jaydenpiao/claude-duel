@@ -17,8 +17,13 @@ from claude_duel.domain.models import Event
 GENESIS = "0" * 64
 
 
+def _wire(event: Event) -> dict[str, object]:
+    """JSON form of an event; pre-versioning events (v=0) keep their original shape so old hashes verify."""
+    return event.model_dump(mode="json", exclude={"v"} if event.v == 0 else None)
+
+
 def _digest(prev: str, event: Event) -> str:
-    body = json.dumps(event.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    body = json.dumps(_wire(event), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256((prev + body).encode()).hexdigest()
 
 
@@ -40,7 +45,7 @@ class FileEventLog:
             expected = events[-1].seq + 1 if events else 0
             if event.seq != expected:
                 raise EventLogCorruptError(f"event seq {event.seq} != expected {expected}")
-            record = {"prev": prev, "hash": _digest(prev, event), "event": event.model_dump(mode="json")}
+            record = {"prev": prev, "hash": _digest(prev, event), "event": _wire(event)}
             jsonl.append(fd, (json.dumps(record, sort_keys=True) + "\n").encode())
 
     def read(self, match_id: str) -> list[Event]:

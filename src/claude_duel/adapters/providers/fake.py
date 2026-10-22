@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from claude_duel.domain.policy import MAZE_SOURCE
 from claude_duel.ports import Completion, CompletionRequest
 
 
@@ -27,8 +28,16 @@ class Template:
 _HEAD = "import sys\n\ndata = sys.stdin.read().strip()\n"
 _SHA_DUEL = hashlib.sha256(b"duel").hexdigest()
 TEMPLATES: tuple[Template, ...] = (
-    Template("password", "Front door", _HEAD + 'if data == "open-sesame":\n    print(FLAG)\n', "open-sesame", 1),
-    Template("reverse", "Mirror", _HEAD + 'if data == "elddir"[::-1]:\n    print(FLAG)\n', "riddle", 1),
+    Template("password", "Maze", MAZE_SOURCE, "DDRR", 1),
+    Template(
+        "reverse",
+        "Mirror",
+        _HEAD + "codes = [ord(c) for c in data]\n"
+        "if len(data) == 5 and data == data[::-1] and data.islower() and data[2] == 'd'\\\n"
+        "        and sum(codes) == 522 and codes[0] > codes[1]:\n    print(FLAG)\n",
+        "radar",
+        1,
+    ),
     Template(
         "sum",
         "Arithmetic gate",
@@ -49,9 +58,12 @@ TEMPLATES: tuple[Template, ...] = (
     Template(
         "b64",
         "Knock",
-        "import base64\nimport binascii\n" + _HEAD + "try:\n    ok = base64.b64decode(data) == b'knock knock'\n"
-        "except binascii.Error:\n    ok = False\nif ok:\n    print(FLAG)\n",
-        base64.b64encode(b"knock knock").decode(),
+        "import base64\nimport binascii\nimport json\n"
+        + _HEAD
+        + "try:\n    knock = json.loads(base64.b64decode(data))\n"
+        "except (binascii.Error, ValueError):\n    knock = {}\n"
+        "if isinstance(knock, dict) and knock.get('x', 0) * 3 == knock.get('y', 0) + 1 > 1:\n    print(FLAG)\n",
+        base64.b64encode(b'{"x": 5, "y": 14}').decode(),
         2,
     ),
 )
