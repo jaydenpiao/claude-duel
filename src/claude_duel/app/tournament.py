@@ -13,7 +13,7 @@ from claude_duel.app.container import (
     build_tournament_log,
     pin_agents,
 )
-from claude_duel.app.series import play_series
+from claude_duel.app.series import pinned, play_series
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
@@ -34,10 +34,13 @@ def play_tournament(
         data: dict[str, object] = {
             "seed": settings.seed or game_seed(tournament_id, 0),
             "rule": rule.model_dump(mode="json"),
+            "rules": settings.rules.model_dump(mode="json"),
+            "limits": settings.limits.model_dump(mode="json"),
         }
         events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=tr.TOURNAMENT_CREATED, trace_id=tournament_id, data=data)]
         log.append(tournament_id, events[0])
     state = tr.fold(tournament_id, events)
+    settings = pinned(settings, state.rules, state.limits, tournament_id)
     budget = build_budget(settings)  # R3-1: run caps span the whole tournament
     specs = {e.name: e for e in state.rule.entrants}
     while (nxt := state.next_pair()) is not None:

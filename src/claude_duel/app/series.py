@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from claude_duel.app.budget import CostBudget
@@ -12,8 +13,11 @@ from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
 from claude_duel.domain.errors import BudgetExceededError
-from claude_duel.domain.models import Event, Stage
+from claude_duel.domain.models import Event, Rules, SandboxLimits, Stage
+from claude_duel.observability import log
 from claude_duel.ports import EventObserver, Metrics
+
+_LOG = logging.getLogger(__name__)
 
 
 def play_series(
@@ -32,10 +36,13 @@ def play_series(
             "seed": settings.seed or sr.game_seed(series_id, 0),
             "rule": rule.model_dump(mode="json"),
             "agents": [a.model_dump(mode="json") for a in pin_agents(settings)],
+            "rules": settings.rules.model_dump(mode="json"),
+            "limits": settings.limits.model_dump(mode="json"),
         }
         events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
+    settings = pinned(settings, state.rules, state.limits, series_id)
     budget = budget or build_budget(settings)  # R3-1: one run budget across every game of this invocation
     while not state.done():
         if state.spent_usd() >= state.rule.series_max_usd:
@@ -64,6 +71,14 @@ def play_series(
     return state
 
 
+def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None, log_id: str) -> Settings:
+    """Settings with the rules and limits pinned when the series/tournament was created; warns on config drift."""
+    rules, limits = rules or settings.rules, limits or settings.limits
+    if (rules, limits) != (settings.rules, settings.limits):
+        log(_LOG, logging.WARNING, "config differs from the saved series; resuming with the saved rules", id=log_id)
+    return settings.model_copy(update={"rules": rules, "limits": limits})
+
+
 @dataclass(frozen=True)
 class SeriesReport:
     consistent: bool
@@ -79,6 +94,8 @@ def verify_series(settings: Settings, series_id: str) -> SeriesReport:
         match = store.load(g.match_id)
         if not replay(match, events.read(g.match_id)).consistent:
             bad.append(f"game {g.game_no}: replay")
+        if state.rules is not None and (match.rules, match.limits) != (state.rules, state.limits):
+            bad.append(f"game {g.game_no}: rules differ from the pinned series rules")
         decider = store.load(g.sudden_death) if g.sudden_death else None
         if decider is not None and not replay(decider, events.read(g.sudden_death)).consistent:
             bad.append(f"game {g.game_no}: sudden-death replay")

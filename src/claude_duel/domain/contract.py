@@ -7,8 +7,12 @@ so authors never touch FLAG or stdin. A solver runs after the author's definitio
 
 import ast
 
-WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    print(FLAG)\n"
+# R3-3: the flag goes out through the real ``sys.stdout`` (authors may not name ``sys``), never through ``print``,
+# which author code could rebind to transform its own flag.
+WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    sys.stdout.write(FLAG + '\\n')\n"
+_LEGACY_WRAPPERS = ("\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    print(FLAG)\n",)
 _IO_NAMES = frozenset({"FLAG", "sys"})
+_PROTECTED = frozenset({"print", "check"})  # may not be rebound (check only by its one top-level def)
 
 
 # Attack-time wrapper (#100): a failed try says whether check() returned False or a non-bool. An exception
@@ -27,7 +31,29 @@ def with_feedback(source: str) -> str:
 
 def definitions(source: str) -> str:
     """The author's part of a composed source (idempotent: a repaired answer may echo the wrapper back)."""
-    return source[: -len(WRAPPER)] if source.endswith(WRAPPER) else source
+    for wrapper in (WRAPPER, *_LEGACY_WRAPPERS):
+        if source.endswith(wrapper):
+            return source[: -len(wrapper)]
+    return source
+
+
+def _rebinds(tree: ast.Module, check_def: ast.FunctionDef) -> set[str]:
+    """Protected names the author binds: assignments, defs, classes, imports, args, globals, decorators on check."""
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            out.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node is not check_def:
+            out.add(node.name)
+        elif isinstance(node, ast.alias):
+            out.add(node.asname or node.name)
+        elif isinstance(node, ast.arg):
+            out.add(node.arg)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            out.update(node.names)
+    if check_def.decorator_list:
+        out.add("check")
+    return out & _PROTECTED
 
 
 def compose(source: str) -> tuple[str, str | None]:
@@ -43,6 +69,9 @@ def compose(source: str) -> tuple[str, str | None]:
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
         n.name for n in ast.walk(tree) if isinstance(n, ast.alias)
     }
+    rebound = _rebinds(tree, funcs[0])
+    if rebound:
+        return own, f"do not rebind {', '.join(sorted(rebound))}: the arena owns print and calls your one check(s)"
     used = names & _IO_NAMES
     if used:
         return own, (

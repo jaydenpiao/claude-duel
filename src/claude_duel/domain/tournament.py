@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
-from claude_duel.domain.models import AgentSpec, Event
+from claude_duel.domain.models import AgentSpec, Event, Rules, SandboxLimits
 from claude_duel.domain.series import SeriesRule
 
 TOURNAMENT_CREATED, PAIRING_FINISHED, POOL_SCORED = "tournament_created", "pairing_finished", "pool_scored"
@@ -102,6 +102,8 @@ class TournamentState(BaseModel):
     tournament_id: str
     seed: str
     rule: TournamentRule
+    rules: Rules | None = None  # pinned in tournament_created (None in older logs)
+    limits: SandboxLimits | None = None
     pairings: list[Pairing] = Field(default_factory=list)
     pool_points: dict[str, int] | None = None  # set by pool_scored once the shared pool is attacked
 

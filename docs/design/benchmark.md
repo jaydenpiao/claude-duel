@@ -29,11 +29,13 @@ One JSON object per line:
 - Each configured agent attacks every task, using the same `attack_prompt`, `parse_attack` and
   sandbox as a match, so bench and duel numbers measure the same skill. Each solve gets a fresh flag.
 - The output is the per-task result (solved, tries, tokens) and each agent's solve rate.
-- It runs **fake agents only** for now. Fake agents can only solve the template tasks the tests use,
-  which is enough to exercise the harness.
+- **Budget (#104):** every call goes through the match `CostBudget` via `MeteredProvider`, so the
+  match caps (calls, tokens, USD) apply to the whole bench run, alongside the run caps and the $40
+  lifetime ceiling. Every call is recorded in the shared `ledger.jsonl` under `bench-<id>`. Real
+  models only run in Docker, because `make_sandbox` fails closed for them. Set per-run caps in a
+  config, for example `[budget] match_max_usd = 0.10`. Fake agents solve only the template tasks the
+  tests use.
 
-## Before a live run (follow-up)
-- Route the calls through the budget layer (per-run USD cap, ledger, model allowlist), with a cap of
-  about $5 for the full slice as in proposal 3.
-- Run tasks under the Docker sandbox only, the same as for real-model matches.
-- Pick and port the tasks locally. Record the ids, the chosen models and the solve rates in `docs/runs`.
+## Before a full live run
+- Pick and port the tasks locally, with a cap of about $5 for the whole slice. Record the ids, the
+  models and the solve rates in `docs/runs`.
