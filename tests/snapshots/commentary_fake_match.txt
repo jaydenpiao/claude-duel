@@ -98,4 +98,4 @@ spend: $0.0000 this match · $0.0031 of $50 burned
 
 ────────────────────────────────────────────────
 winner: alice · alice 96  bob 46
-30 model calls · 7764 tokens · $0.0000 this match · $0.0031 of $50 burned
+30 model calls · 9696 tokens · $0.0000 this match · $0.0031 of $50 burned
