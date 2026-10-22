@@ -37,3 +37,10 @@ def test_health_refuses_an_unpinned_image(monkeypatch: pytest.MonkeyPatch) -> No
     assert DockerSandbox(image=DEFAULT_IMAGE).health() is None
     assert "not pinned" in (DockerSandbox(image="python:3.12-slim").health() or "")
     assert PIN.fullmatch(DEFAULT_IMAGE)
+
+
+def test_release_build_pulls_fresh_and_skips_cache() -> None:
+    """S4-3: the published image never reuses a base or layer cache a branch job could have seeded."""
+    builds = [ln for ln in (ROOT / ".github/workflows/release.yml").read_text().splitlines() if "docker build" in ln]
+    assert builds
+    assert all("--pull" in ln and "--no-cache" in ln for ln in builds)
