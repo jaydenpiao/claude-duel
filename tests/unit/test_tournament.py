@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from itertools import combinations
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from claude_duel.app.container import build_tournament_log
+from claude_duel.app.container import build_ledger, build_tournament_log
 from claude_duel.app.tournament import play_tournament
 from claude_duel.cli import main
 from claude_duel.config import Settings
@@ -91,16 +92,10 @@ def test_swiss_tournament_plays_and_resumes(tmp_path: Path) -> None:
 
 
 def test_tournament_cap(tmp_path: Path) -> None:
-    rule = tr.TournamentRule(entrants=_entrants(3), tournament_max_usd=1e-12)
-    state = play_tournament(_settings(tmp_path), "t2", rule, InMemoryMetrics())  # fake games are free
-    assert state.next_pair() is None
-    paid = state.pairings[0].model_copy(update={"usd": 1.0})  # replay a log whose first pairing cost $1
-    log = build_tournament_log(_settings(tmp_path / "x"))
-    created = build_tournament_log(_settings(tmp_path)).read("t2")[0]
-    log.append("t3", created)
-    log.append("t3", Event(seq=1, type=tr.PAIRING_FINISHED, trace_id="t3", data=paid.model_dump()))
+    rule = tr.TournamentRule(entrants=_entrants(3), tournament_max_usd=0.5)
+    build_ledger(_settings(tmp_path)).record("t2-r1-e0-e1-g1", "fake-1", 1, 1.0)  # earlier spend under t2-*
     with pytest.raises(BudgetExceededError, match="tournament cost"):
-        play_tournament(_settings(tmp_path / "x"), "t3", rule, InMemoryMetrics())
+        play_tournament(_settings(tmp_path), "t2", rule, InMemoryMetrics())
 
 
 def test_cli_tournament(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -118,3 +113,29 @@ def test_cli_tournament(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys:
     assert len(out["pairings"]) == 6  # 3 games + 3 byes
     assert main(["--config", str(cfg), "tournament", "--tournament-id", "c1"]) == 0
     assert "1. " in capsys.readouterr().out
+
+
+def test_swiss_32_entrants_20_rounds_plays_and_folds_fast() -> None:  # issue #135
+    rule = tr.TournamentRule(entrants=_entrants(32), format="swiss", swiss_rounds=20)
+    state = tr.TournamentState(tournament_id="t", seed="s", rule=rule)
+    start = time.perf_counter()
+    events = [
+        Event(seq=0, type=tr.TOURNAMENT_CREATED, trace_id="t", data={"seed": "s", "rule": rule.model_dump(mode="json")})
+    ]
+    while (nxt := state.next_pair()) is not None:
+        r, (a, b) = nxt
+        p = tr.Pairing(round=r, a=a, b=b, winner=None if b == tr.BYE else min(a, b))
+        state.pairings.append(p)
+        events.append(Event(seq=len(events), type=tr.PAIRING_FINISHED, trace_id="t", data=p.model_dump()))
+    assert len(state.pairings) == 32 * 20 // 2
+    assert tr.fold("t", events).pairings == state.pairings
+    assert time.perf_counter() - start < 10
+
+
+def test_unpairable_remainder_is_memoised() -> None:  # an odd clique that may only meet itself: no pairing exists
+    order = [f"p{i}" for i in range(32)]
+    clique, others = order[:15], order[15:]
+    played = {frozenset((a, b)) for a in clique for b in others}
+    start = time.perf_counter()
+    assert tr._pair(order, played) is None
+    assert time.perf_counter() - start < 2

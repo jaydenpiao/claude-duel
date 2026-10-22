@@ -7,7 +7,7 @@ The engine records an event and applies it; replay folds the same events from sc
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -44,7 +44,27 @@ ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
 
-SCHEMA_VERSION = 1  # Event.v of new events; 0 = written before versioning (same payload shapes)
+# Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
+# 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
+# Rules/Usage/AttackAttempt fields (a v1 build would reject them under extra="forbid").
+SCHEMA_VERSION = 2
+
+
+_M = TypeVar("_M", bound=BaseModel)
+
+
+def typed(model: type[_M], data: object) -> _M:
+    """Validate a series/tournament payload; a wrong shape means the log is corrupt (#139)."""
+    try:
+        return model.model_validate(data)
+    except ValidationError as exc:
+        raise EventLogCorruptError(f"bad {model.__name__} payload ({exc.error_count()} errors)") from exc
+
+
+def check_version(event: Event, newest: int, what: str = "event") -> None:
+    """Refuse an event written for a newer reader than this build."""
+    if event.v > newest:
+        raise EventLogCorruptError(f"{what} {event.seq} uses schema v{event.v}; this build reads up to v{newest}")
 
 
 class _Payload(BaseModel):
@@ -54,6 +74,7 @@ class _Payload(BaseModel):
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
     framing_text: str = ""  # absent before framings
+    created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
@@ -160,6 +181,10 @@ def _charged(state: MatchState, p: CallCharged) -> None:
     mine.calls += 1
     mine.tokens += p.tokens
     mine.usd += p.usd
+    for u in (state.usage, mine):
+        u.input_tokens += p.input_tokens
+        u.output_tokens += p.output_tokens
+        u.reasoning_tokens += p.reasoning_tokens
     clock = state.rules.clock
     split = p.output_tokens + p.input_tokens // clock.input_divisor
     mine.clock_tokens += split if (p.input_tokens or p.output_tokens) else p.tokens
@@ -218,10 +243,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
 
 def payload(event: Event) -> _Payload:
     """The event's typed payload; a wrong shape, unknown type or newer schema means the log is corrupt."""
-    if event.v > SCHEMA_VERSION:
-        raise EventLogCorruptError(
-            f"event {event.seq} uses schema v{event.v}; this build reads up to v{SCHEMA_VERSION}"
-        )
+    check_version(event, SCHEMA_VERSION)
     entry = _HANDLERS.get(event.type)
     if entry is None:
         raise EventLogCorruptError(f"unknown event type {event.type!r}")
@@ -258,7 +280,13 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         raise EventLogCorruptError("event log does not start with match_created")
     p = cast(MatchCreated, payload(created))
     return MatchState(
-        match_id=match_id, seed=p.seed, framing_text=p.framing_text, agents=p.agents, rules=p.rules, limits=p.limits
+        match_id=match_id,
+        seed=p.seed,
+        framing_text=p.framing_text,
+        created_seq=p.created_seq,
+        agents=p.agents,
+        rules=p.rules,
+        limits=p.limits,
     )
 
 

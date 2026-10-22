@@ -6,11 +6,17 @@ import logging
 from dataclasses import dataclass
 
 from claude_duel.app.budget import CostBudget
-from claude_duel.app.container import build_budget, build_event_log, build_series_log, build_store, pin_agents
+from claude_duel.app.container import (
+    build_budget,
+    build_event_log,
+    build_ledger,
+    build_series_log,
+    build_store,
+    pin_agents,
+)
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings
-from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
 from claude_duel.domain.errors import BudgetExceededError
 from claude_duel.domain.models import Event, Rules, SandboxLimits, Stage
@@ -27,6 +33,7 @@ def play_series(
     metrics: Metrics,
     observer: EventObserver | None = None,
     budget: CostBudget | None = None,
+    caps: tuple[SpendCap, ...] = (),
 ) -> sr.SeriesState:
     """Play games until the series is decided. Resuming keeps the saved agents, seed and rule."""
     log = build_series_log(settings)
@@ -39,14 +46,13 @@ def play_series(
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
         }
-        events = [Event(v=ev.SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
+        events = [Event(v=sr.SERIES_SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
         log.append(series_id, events[0])
     state = sr.fold(series_id, events)
     settings = pinned(settings, state.rules, state.limits, series_id)
     budget = budget or build_budget(settings)  # R3-1: one run budget across every game of this invocation
     while not state.done():
-        if state.spent_usd() >= state.rule.series_max_usd:
-            raise BudgetExceededError(f"series cost ${state.spent_usd():.4f}/${state.rule.series_max_usd}")
+        check_caps(settings, (SpendCap("series", f"{series_id}-", state.rule.series_max_usd), *caps))
         n = state.next_game()
         game_settings = settings.model_copy(
             update={"agents": sr.game_agents(state.agents, n), "seed": sr.game_seed(state.seed, n)}
@@ -65,7 +71,7 @@ def play_series(
         game = sr.game_of(n, match, decider)
         log.append(
             series_id,
-            Event(v=ev.SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
+            Event(v=sr.SERIES_SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
         )
         state.games.append(game)
     return state
@@ -77,6 +83,23 @@ def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None
     if (rules, limits) != (settings.rules, settings.limits):
         log(_LOG, logging.WARNING, "config differs from the saved series; resuming with the saved rules", id=log_id)
     return settings.model_copy(update={"rules": rules, "limits": limits})
+
+
+@dataclass(frozen=True)
+class SpendCap:
+    """R3-4: a spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
+
+    label: str
+    prefix: str
+    max_usd: float
+
+
+def check_caps(settings: Settings, caps: tuple[SpendCap, ...]) -> None:
+    ledger = build_ledger(settings)
+    for cap in caps:
+        spent = ledger.spent_usd(cap.prefix)
+        if spent >= cap.max_usd:
+            raise BudgetExceededError(f"{cap.label} cost ${spent:.4f}/${cap.max_usd}")
 
 
 @dataclass(frozen=True)
