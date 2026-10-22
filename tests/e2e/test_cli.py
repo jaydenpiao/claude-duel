@@ -10,10 +10,11 @@ import pytest
 from pydantic import SecretStr
 
 from claude_duel.adapters.providers.retry import RetryingProvider
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
+from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.app.container import make_provider, make_sandbox
 from claude_duel.cli import main
 from claude_duel.config import Settings
+from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
 from claude_duel.observability import NullMetrics
 
@@ -70,11 +71,42 @@ def test_budget_abort_then_resume(
     assert main(["resume", "cap"]) == 0
 
 
-def test_container_wiring(env: Path) -> None:
+OPENAI = (AgentSpec(name="a", provider="openai"), AgentSpec(name="b"))
+FAKE = (AgentSpec(name="a"), AgentSpec(name="b"))
 
+
+def test_container_wiring(env: Path) -> None:
     s = Settings(openai_api_key=SecretStr("sk-x"))
-    assert isinstance(make_provider(AgentSpec(name="a", provider="openai"), s, NullMetrics()), RetryingProvider)
-    assert isinstance(make_sandbox("docker"), DockerSandbox)
+    assert isinstance(make_provider(OPENAI[0], s, NullMetrics()), RetryingProvider)
+
+
+def test_real_models_never_use_subprocess(env: Path) -> None:
+    with pytest.raises(ConfigError, match="require the docker sandbox"):
+        make_sandbox(Settings(sandbox="subprocess"), OPENAI)
+    assert isinstance(make_sandbox(Settings(sandbox="subprocess"), FAKE), SubprocessSandbox)
+
+
+@pytest.mark.parametrize("kind", ["auto", "docker"])
+def test_docker_unavailable_fails_closed(env: Path, kind: str) -> None:
+    broken = Settings(sandbox=kind, docker_command=("/nonexistent/docker",))
+    with pytest.raises(ConfigError, match="docker sandbox required but unavailable"):
+        make_sandbox(broken, OPENAI)
+
+
+def test_auto_falls_back_only_for_fake(env: Path) -> None:
+    broken = Settings(sandbox="auto", docker_command=("/nonexistent/docker",))
+    assert isinstance(make_sandbox(broken, FAKE), SubprocessSandbox)
+    with pytest.raises(ConfigError):
+        make_sandbox(broken.model_copy(update={"sandbox": "docker"}), FAKE)
+
+
+def test_cli_refuses_openai_without_docker(env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("DUEL_SANDBOX", "auto")
+    monkeypatch.setenv("DUEL_DOCKER", "/nonexistent/docker")
+    cfg = tmp_path / "o.toml"
+    cfg.write_text('[[agents]]\nname = "a"\nprovider = "openai"\n[[agents]]\nname = "b"\n')
+    assert main(["--config", str(cfg), "run"]) == 2
 
 
 @pytest.mark.live
@@ -84,7 +116,7 @@ def test_live_openai_tiny_match(
 ) -> None:
     """One tiny real match; capped at $0.05. Run explicitly: pytest -m live."""
     monkeypatch.setenv("DUEL_STORE_DIR", str(tmp_path / "store"))
-    monkeypatch.setenv("DUEL_SANDBOX", "subprocess")
+    monkeypatch.setenv("DUEL_SANDBOX", "docker")  # real models only run in Docker
     cfg = tmp_path / "live.toml"
     cfg.write_text(
         'openai_model = "gpt-4.1-nano"\n'

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -47,7 +46,9 @@ class RunResult(BaseModel):
 
 
 class Sandbox(Protocol):
-    def run(self, source: str, stdin: str, env: Mapping[str, str], limits: SandboxLimits) -> RunResult: ...
+    def run(self, source: str, stdin: str, flag: str, limits: SandboxLimits) -> RunResult:
+        """Run challenge source with the flag exposed only as its global ``FLAG``."""
+        ...
 
 
 class MatchStore(Protocol):

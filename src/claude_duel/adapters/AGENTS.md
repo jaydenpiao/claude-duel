@@ -9,10 +9,11 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 
 ## sandbox/
-- `common.py:execute`: the single subprocess runner (wall timeout, output cap). Reuse it; don't fork it.
-- `subprocess_sandbox.py`: rlimits (CPU, AS, FSIZE=0, NOFILE=16), `python -I -S`, read-only temp dir, minimal env. Not a hard boundary.
-- `docker_sandbox.py`: `docker run` with no network, read-only, cap-drop ALL, no-new-privileges, pids 32, user 65534, `python:3.12-slim`. Excluded from coverage. `sandbox="auto"` uses it when `docker_available()`.
-- Never pass the host env through; only `{"FLAG": ...}` plus a minimal PATH.
+- `common.py:execute`: the single process runner (own process group, wall timeout, streamed output cap, group kill + `cleanup` after every run). Reuse it; don't fork it.
+- `runner.py`: in-sandbox loader; flag, source and rlimits go over stdin (`frame`), never argv/env.
+- `subprocess_sandbox.py`: rlimits (CPU, AS, FSIZE=0, NOFILE=16, NPROC=1), `python -I -S`, read-only temp dir, minimal env. Fake provider only; not a hard boundary.
+- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it; real-model matches fail closed without it. Tests: `tests/integration/test_docker_sandbox.py`.
+- Never pass the host env through; the child env is only a minimal PATH.
 
 ## store/
 - `file_store.py`: atomic JSON save (tmp + fsync + rename, mode 0600), `O_EXCL` lock files (`MatchLockedError`). Match ids must be alphanumeric/hyphen.

@@ -17,4 +17,5 @@ jobs:
       - run: uv venv --python ${{ matrix.python }} && uv pip install -e '.[dev]'
       - run: .venv/bin/ruff check . && .venv/bin/ruff format --check .
       - run: .venv/bin/mypy src
+      - run: docker pull -q python:3.12-slim
       - run: .venv/bin/pytest

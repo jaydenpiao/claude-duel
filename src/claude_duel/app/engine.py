@@ -10,13 +10,13 @@ from collections.abc import Mapping
 from claude_duel.app import agents
 from claude_duel.app.budget import CostBudget
 from claude_duel.domain import policy
-from claude_duel.domain.errors import ABORTING_ERRORS, MalformedOutputError, ProviderError
+from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, Event, MatchState, Stage, Validation
 from claude_duel.domain.scoring import add_scores, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage, transition
 from claude_duel.observability import current_trace_id, log, trace
-from claude_duel.ports import Completion, CompletionRequest, LLMProvider, MatchStore, Metrics, Sandbox
+from claude_duel.ports import Completion, CompletionRequest, LLMProvider, MatchStore, Metrics, RunResult, Sandbox
 
 _LOG = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class MatchEngine:
         self._budget.check_lifetime()
         with self._store.lock(state.match_id), trace():
             while state.stage not in TERMINAL:
-                started = time.monotonic()
+                started, stage = time.monotonic(), state.stage.value
                 try:
                     self._execute_stage(state)
                 except Exception as exc:
@@ -61,7 +61,7 @@ class MatchEngine:
                 self._emit(state, "stage_completed", stage=state.stage.value, next=target.value)
                 transition(state, target)
                 self._store.save(state)
-                self._metrics.timing("stage.seconds", time.monotonic() - started, stage=state.stage.value)
+                self._metrics.timing("stage.seconds", time.monotonic() - started, stage=stage)
             log(
                 _LOG,
                 logging.INFO,
@@ -93,10 +93,20 @@ class MatchEngine:
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: budget check, call, charge."""
         self._budget.check(state)
+        started = time.monotonic()
         completion = self._providers[agent].complete(request)
+        self._metrics.timing("provider.seconds", time.monotonic() - started, agent=agent, purpose=request.purpose)
         self._budget.charge(state, self._models[agent], completion)
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
+
+    def _run_challenge(self, spec: ChallengeSpec, stdin: str, flag: str, state: MatchState, purpose: str) -> RunResult:
+        started = time.monotonic()
+        result = self._sandbox.run(spec.source, stdin, flag, state.limits)
+        self._metrics.timing("sandbox.seconds", time.monotonic() - started, purpose=purpose)
+        if result.killed_reason:
+            self._metrics.incr("sandbox.killed", reason=result.killed_reason)
+        return result
 
     # -- stage 1: build ---------------------------------------------------
     def _build(self, state: MatchState) -> None:
@@ -119,21 +129,18 @@ class MatchEngine:
                 )
 
     def _author(self, state: MatchState, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
+        """Provider errors propagate and fail the stage (resumable); only model faults forfeit."""
         error: str | None = None
         for _ in range(state.rules.max_format_retries + 1):
             prompt = agents.build_prompt(agent, state.round, index, state.rules, error)
+            completion = self._call(
+                state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
+            )
             try:
-                completion = self._call(
-                    state, agent, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="build")
-                )
                 return agents.parse_challenge(completion.text), None
             except MalformedOutputError as exc:
                 error = str(exc)
                 self._metrics.incr("model.malformed", purpose="build")
-            except ABORTING_ERRORS:
-                raise
-            except ProviderError as exc:
-                return None, f"provider: {type(exc).__name__}"
         return None, f"malformed: {error}"
 
     # -- stage 2: validate ------------------------------------------------
@@ -152,10 +159,10 @@ class MatchEngine:
         if rejected:
             return False, rejected
         flag = derive_flag(state.secret, ch.id)
-        ref = self._sandbox.run(ch.spec.source, ch.spec.reference_payload, {"FLAG": flag}, state.limits)
+        ref = self._run_challenge(ch.spec, ch.spec.reference_payload, flag, state, "validate")
         if flag not in ref.stdout:
             return False, "reference payload does not reveal flag" + (" (timeout)" if ref.timed_out else "")
-        empty = self._sandbox.run(ch.spec.source, "", {"FLAG": flag}, state.limits)
+        empty = self._run_challenge(ch.spec, "", flag, state, "validate")
         if flag in empty.stdout:
             return False, "trivial: empty input reveals flag"
         return True, "ok"
@@ -169,8 +176,8 @@ class MatchEngine:
             key = f"{ch.id}:{attacker}"
             if key in state.attacks:
                 continue
-            state.attacks[key] = self._solve(state, ch, ch.spec, attacker)
-            a = state.attacks[key]
+            a = self._solve(state, ch, attacker)
+            state.attacks[key] = a
             self._checkpoint(
                 state,
                 "challenge_attacked",
@@ -182,7 +189,9 @@ class MatchEngine:
                 reason=a.reason,
             )
 
-    def _solve(self, state: MatchState, ch: Challenge, spec: ChallengeSpec, attacker: str) -> Attack:
+    def _solve(self, state: MatchState, ch: Challenge, attacker: str) -> Attack:
+        spec = ch.spec
+        assert spec is not None, "only valid challenges are attacked"
         flag = derive_flag(state.secret, ch.id)
         history: list[tuple[str, str]] = []
         tokens = 0
@@ -204,14 +213,9 @@ class MatchEngine:
                 attacker, ch.id, spec.title, spec.description, spec.source, len(history) + 1, history
             )
             assert_no_flag(prompt, flag, "attack prompt")
-            try:
-                completion = self._call(
-                    state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
-                )
-            except ABORTING_ERRORS:
-                raise
-            except ProviderError as exc:
-                return result(False, f"provider: {type(exc).__name__}")
+            completion = self._call(
+                state, attacker, CompletionRequest(system=agents.SYSTEM, prompt=prompt, purpose="attack")
+            )
             tokens += completion.total_tokens
             try:
                 payload = agents.parse_attack(completion.text).payload
@@ -219,7 +223,7 @@ class MatchEngine:
                 self._metrics.incr("model.malformed", purpose="attack")
                 history.append(("<malformed>", str(exc)))
                 continue
-            run = self._sandbox.run(spec.source, payload, {"FLAG": flag}, state.limits)
+            run = self._run_challenge(spec, payload, flag, state, "attack")
             if flag in run.stdout:
                 history.append((payload, "<flag captured>"))
                 return result(True, "flag captured")

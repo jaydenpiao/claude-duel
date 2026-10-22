@@ -81,11 +81,15 @@ def test_persistently_malformed_forfeits_and_wastes_attempts(make_engine, new_st
     assert all(not a.solved and a.attempts == 4 for a in state.attacks.values() if a.attacker == "alice")
 
 
-def test_permanent_provider_error_forfeits_unit_only(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+def test_provider_error_fails_stage_and_resumes(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
     broken = Wrapped(FakeProvider(), fail_at=1, exc=PermanentProviderError("400"))
-    state = make_engine({"alice": broken, "bob": FakeProvider()}).run(new_state())
-    assert state.stage is Stage.COMPLETE
-    assert any("provider" in a.reason for a in state.attacks.values())
+    with pytest.raises(PermanentProviderError):
+        make_engine({"alice": broken, "bob": FakeProvider()}).run(new_state())
+    failed = store.load("m1")
+    assert failed.stage is Stage.FAILED
+    assert not failed.challenges  # no forfeit penalty for an arena-side fault
+    recover(failed)
+    assert make_engine().run(failed).stage is Stage.COMPLETE
 
 
 def test_quota_exceeded_aborts_and_resumes(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
@@ -175,7 +179,8 @@ def test_invalid_challenges_rejected(make_engine, new_state) -> None:  # type: i
         )
 
     cases = {
-        "trivial": build('import os\nprint(os.environ["FLAG"])\n'),
+        "trivial": build("print(FLAG)\n"),
+        "shell-out": build("from os import system\nsystem('id')\nprint(FLAG)\n"),
         "unsolvable": build('print("nope")\n'),
         "escape": build("import socket\n"),
         "hang": build("while True:\n    pass\n"),

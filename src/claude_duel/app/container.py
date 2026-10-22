@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
+
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.providers.openai import OpenAIProvider
 from claude_duel.adapters.providers.retry import RetryingProvider
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_available
+from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
@@ -14,7 +17,10 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
+from claude_duel.observability import log
 from claude_duel.ports import LLMProvider, Metrics, Sandbox
+
+_LOG = logging.getLogger(__name__)
 
 
 def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLMProvider:
@@ -23,34 +29,39 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     if agent.provider == "openai":
         if settings.openai_api_key is None:
             raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
-        model = model_for(agent, settings)
-        inner = OpenAIProvider(settings.openai_api_key, model, timeout=settings.provider_timeout)
+        inner = OpenAIProvider(settings.openai_api_key, settings.model_for(agent), timeout=settings.provider_timeout)
         return RetryingProvider(inner, metrics, max_retries=settings.provider_max_retries)
     raise ConfigError(f"unknown provider {agent.provider!r}")
 
 
-def model_for(agent: AgentSpec, settings: Settings) -> str:
-    if agent.provider == "openai" and agent.model == "fake-1":
-        return settings.openai_model
-    return agent.model
-
-
-def make_sandbox(kind: str) -> Sandbox:
-    if kind == "docker" or (kind == "auto" and docker_available()):
-        return DockerSandbox()
+def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
+    """Real-model matches only ever run in Docker; fail closed when it isn't usable (ADR 0003)."""
+    untrusted = any(a.provider != "fake" for a in agents)
+    if settings.sandbox == "subprocess":
+        if untrusted:
+            raise ConfigError("real-model matches require the docker sandbox; subprocess is for the fake provider")
+        return SubprocessSandbox()
+    docker = DockerSandbox(settings.docker_command, settings.docker_image)
+    problem = docker.health()
+    if problem is None:
+        return docker
+    if settings.sandbox == "docker" or untrusted:
+        raise ConfigError(f"docker sandbox required but unavailable: {problem}")
+    log(_LOG, logging.WARNING, "docker unavailable; using subprocess sandbox for a fake-only match", reason=problem)
     return SubprocessSandbox()
 
 
-def build_engine(settings: Settings, metrics: Metrics) -> tuple[MatchEngine, FileMatchStore]:
-    store = FileMatchStore(settings.store_dir)
-    providers = {a.name: make_provider(a, settings, metrics) for a in settings.agents}
-    models = {a.name: model_for(a, settings) for a in settings.agents}
-    engine = MatchEngine(
-        providers,
-        make_sandbox(settings.sandbox),
+def build_store(settings: Settings) -> FileMatchStore:
+    return FileMatchStore(settings.store_dir)
+
+
+def build_engine(settings: Settings, metrics: Metrics, store: FileMatchStore) -> MatchEngine:
+    agents = settings.agents
+    return MatchEngine(
+        {a.name: make_provider(a, settings, metrics) for a in agents},
+        make_sandbox(settings, agents),
         store,
         metrics,
         CostBudget(settings.budget, FileSpendLedger(settings.store_dir / "ledger.jsonl"), settings.prices),
-        models,
+        {a.name: settings.model_for(a) for a in agents},
     )
-    return engine, store

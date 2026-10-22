@@ -5,8 +5,8 @@ Two AI agents duel in stages. Each one builds CTF challenges for the other, the 
 (Named as a joke on Claude Duet. The idea came from "there should be a claude duel".)
 
 ## How a round works
-1. **Build**: each agent writes `challenges_per_round` Python programs that print `os.environ["FLAG"]` only for the right stdin, along with a reference payload.
-2. **Validate**: static policy (imports, builtins, size, flag literals), then a sandbox run: the reference payload must reveal the flag and empty input must not. Invalid challenges cost points.
+1. **Build**: each agent writes `challenges_per_round` Python programs that print the global `FLAG` only for the right stdin, along with a reference payload.
+2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag and empty input must not. Invalid challenges cost points.
 3. **Attack**: the opponent sees the source and description and gets `max_attempts` tries within a token budget, with feedback after each try.
 4. **Score**: a pure function. Points scale with difficulty × round, so stakes rise each round.
 
@@ -49,7 +49,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 ## Threat model
 | Threat | Mitigation |
 |---|---|
-| Challenge code escapes the sandbox (network, files, processes) | AST policy allowlist; `-I -S` interpreter; rlimits (CPU, address space, no file writes, 16 fds); clean env; Docker adapter with `--network none --read-only --cap-drop ALL`, pids and memory limits |
+| Challenge code escapes the sandbox (network, files, processes) | AST allowlist; flag and source sent over stdin (never argv or environ); real-model matches only run in Docker (`--network none`, read-only rootfs, cap-drop ALL, no-new-privileges, seccomp, non-root, pids/memory/CPU limits, container removed on timeout) and fail closed if the daemon is unreachable; subprocess sandbox (fake provider only) adds rlimits incl. no forks and kills the whole process group |
 | Infinite loops and memory bombs | CPU + wall-clock + memory limits; output truncated |
 | Flag leakage to the attacker | Flags are HMAC-derived by the arena and never shown to authors; prompts are guarded (`FlagLeakError`); feedback and logs are redacted; flags are never persisted |
 | Trivial or unsolvable challenges | Reference payload must succeed and empty input must fail |
@@ -58,7 +58,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Score tampering | `duel replay` recomputes from facts and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
 
-**Caveat:** the subprocess sandbox is defence in depth, not a security boundary. Use Docker for untrusted real-model matches.
+**Caveat:** the subprocess sandbox is defence in depth, not a security boundary, so the arena refuses to run real-model matches on it. Set `DUEL_DOCKER="sudo docker"` if your user cannot reach the Docker socket.
 
 ## Development
 `ruff check . && ruff format --check . && mypy src && pytest`. Live test: `pytest -m live` (needs `OPENAI_API_KEY`; costs well under $0.01).

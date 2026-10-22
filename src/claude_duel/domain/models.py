@@ -24,7 +24,7 @@ class _Frozen(BaseModel):
 class AgentSpec(_Frozen):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     provider: str = "fake"
-    model: str = "fake-1"
+    model: str | None = Field(default=None, description="None means the provider's configured default")
     skill: int = Field(default=2, ge=0, description="fake provider only")
 
 
@@ -33,6 +33,8 @@ class SandboxLimits(_Frozen):
     cpu_seconds: int = Field(default=1, gt=0)
     memory_mb: int = Field(default=128, gt=0)
     max_output_bytes: int = Field(default=4096, gt=0)
+    pids_limit: int = Field(default=32, gt=0)
+    cpus: float = Field(default=0.5, gt=0)
 
 
 class Rules(_Frozen):

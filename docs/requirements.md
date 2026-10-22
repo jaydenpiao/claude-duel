@@ -3,7 +3,7 @@
 ## Functional
 - FR1 A match pits two agents against each other over N rounds.
 - FR2 Each round has four stages: Build, Validate, Attack, Score.
-- FR3 Build: each agent authors `challenges_per_round` CTF challenges (description, Python source, reference payload, difficulty 1-3). The arena injects a per-challenge secret flag via `FLAG` env var at run time; authors never see it.
+- FR3 Build: each agent authors `challenges_per_round` CTF challenges (description, Python source, reference payload, difficulty 1-3). The arena injects a per-challenge secret flag as the global `FLAG` at run time (sent over stdin, never argv or env); authors never see it.
 - FR4 Validate: a challenge is valid only if it passes static policy (size, banned capabilities, no flag-shaped literals), the reference payload yields the flag, and an empty payload does not. Invalid challenges cost the author points.
 - FR5 Attack: each agent attacks every valid opponent challenge within step (attempt) and token budgets. Previous attempt outputs are fed back.
 - FR6 Score: deterministic, pure scoring; difficulty and round multipliers escalate stakes each round.
@@ -25,7 +25,7 @@
 | Rate limit (429) | Honour `retry-after`, else backoff |
 | Permanent provider error (4xx) | No retry; unit forfeited, match continues |
 | Malformed model output | Re-prompt with parse error up to `max_format_retries`; then forfeit (build) or wasted attempt (attack) |
-| Sandbox escape attempt | Static policy rejects banned imports/builtins; rlimits; Docker adapter with no network |
+| Sandbox escape attempt | AST allowlist; real-model matches require Docker (fail closed); no network, read-only, non-root; rlimits for the fake-only subprocess sandbox |
 | Infinite loop / memory bomb | CPU, address-space, file-size, wall-clock limits; output truncated |
 | Flag leakage | Flags derived via HMAC, never in prompts (guarded), redacted from logs and attack feedback |
 | Crash mid-match | Atomic checkpoint per unit; `duel resume` continues; completed units skipped |
