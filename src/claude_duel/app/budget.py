@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import MatchState
@@ -40,6 +40,13 @@ class BudgetLimits(BaseModel):
     run_max_calls: int = Field(default=200, ge=1)
     run_max_usd: float = Field(default=0.50, gt=0)
     lifetime_max_usd: float = Field(default=40.0, gt=0)
+    key_limit_usd: float = Field(default=50.0, gt=0, description="provider key's hard limit; shown in output")
+
+    @model_validator(mode="after")
+    def _ceiling_under_key_limit(self) -> BudgetLimits:
+        if self.lifetime_max_usd > self.key_limit_usd:
+            raise ValueError("lifetime_max_usd must not exceed key_limit_usd")
+        return self
 
 
 class CostBudget:

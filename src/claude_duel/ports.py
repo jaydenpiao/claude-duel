@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -83,3 +84,7 @@ class EventLog(Protocol):
     def append(self, match_id: str, event: Event) -> None: ...
 
     def read(self, match_id: str) -> list[Event]: ...
+
+
+EventObserver = Callable[[Event], None]
+"""Called with each event after it is durably appended (e.g. the CLI commentary)."""

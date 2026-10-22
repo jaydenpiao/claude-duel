@@ -7,7 +7,8 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 - `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `Metrics`.
 - `src/claude_duel/adapters/`: `providers/` (fake, openai, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
 - `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
-- `config.py` (TOML then `DUEL_*` env), `observability.py` (logging, metrics), `cli.py`.
+- `presentation/commentary.py`: `Commentary`, the default `duel run`/`resume` output. An `EventObserver` that folds events with `domain/events.apply` and prints header, round banners, plain-sentence lines, scoreboard, redacted snippets (`scrub`), winner and the `$X of $50 burned` line. Presentation only: never mutates the match. Snapshot: `tests/snapshots/`.
+- `config.py` (TOML then `DUEL_*` env), `observability.py` (logging, metrics), `cli.py` (`--format text|json`; text ends with `replay verified ✓`).
 
 ## Match lifecycle (`domain/state_machine.py`)
 `pending -> build -> validate -> attack -> score -> (build | complete)`; any non-terminal stage can go to `failed`. `build` increments `round`. `score` goes to `complete` when `round >= rules.rounds`. `recover()` reopens a failed match at `failed_stage`; stage work is idempotent (skips ids already in `challenges`/`validations`/`attacks`). State is saved after every unit of work.
@@ -25,7 +26,7 @@ tests/{unit,integration,e2e}/     see tests/AGENTS.md
 ## Setup, run, check
 ```bash
 uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
-duel --config configs/dev.toml run [--match-id ID]   # fake provider by default
+duel --config configs/dev.toml run [--match-id ID] [--format json]   # fake provider by default
 duel resume ID ; duel replay ID [--transcript]
 ruff check . && ruff format --check . && mypy src && vulture && pylint src tests && pytest
 ```
@@ -39,7 +40,7 @@ ruff check . && ruff format --check . && mypy src && vulture && pylint src tests
 
 ## Cost rules
 - Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
-- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`, user's key has a $50 hard limit), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
+- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
 - `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
 
 ## Security invariants

@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 
-from claude_duel.domain.models import Attack, Challenge, Rules, Validation
+from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, Rules, Validation
 
 
 def score_round(
@@ -22,13 +22,22 @@ def score_round(
         if ch.spec is None or v is None or not v.valid:
             scores[ch.author] -= rules.invalid_penalty * round_no
             continue
-        weight = ch.spec.difficulty * round_no
         atk = by_challenge.get(ch.id)
         if atk is not None and atk.solved:
-            scores[atk.attacker] += max(1, rules.solve_points * weight - (atk.attempts - 1))
+            scores[atk.attacker] += solve_award(ch.spec, round_no, atk.attempts, rules)
         else:
-            scores[ch.author] += rules.defense_points * weight
+            scores[ch.author] += defense_award(ch.spec, round_no, rules)
     return scores
+
+
+def solve_award(spec: ChallengeSpec, round_no: int, attempts: int, rules: Rules) -> int:
+    """Points for capturing a flag: weighted by difficulty and round, minus one per extra try."""
+    return max(1, rules.solve_points * spec.difficulty * round_no - (attempts - 1))
+
+
+def defense_award(spec: ChallengeSpec, round_no: int, rules: Rules) -> int:
+    """Points for an author whose valid challenge survived the attack."""
+    return rules.defense_points * spec.difficulty * round_no
 
 
 def add_scores(total: Mapping[str, int], delta: Mapping[str, int]) -> dict[str, int]:

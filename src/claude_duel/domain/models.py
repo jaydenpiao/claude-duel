@@ -77,12 +77,19 @@ class Validation(_Frozen):
     reason: str
 
 
+CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)
+
+
 class AttackAttempt(_Frozen):
     """One paid attack attempt, checkpointed so resume never re-pays it."""
 
     payload: str
     output: str
     tokens: int
+
+    @property
+    def captured(self) -> bool:
+        return self.output == CAPTURED
 
 
 class Attack(_Frozen):
