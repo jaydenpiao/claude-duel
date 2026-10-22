@@ -31,7 +31,7 @@ tests/{unit,integration,e2e}/     see tests/AGENTS.md
 uv venv && . .venv/bin/activate && uv pip install -e '.[dev]'
 duel --config configs/dev.toml run [--match-id ID] [--format json] [--view arena --pace 0.15]   # fake provider by default
 duel resume ID ; duel replay ID [--transcript]
-ruff check . && ruff format --check . && mypy src && vulture && pylint src tests && pytest
+ruff check . && ruff format --check . && mypy src && python scripts/check_docs.py && vulture && pylint src tests && pytest
 ```
 `pytest` excludes `live` tests and fails under 90% coverage (branch). `docker`-marked tests run against a real daemon and skip when none is reachable. CI runs Python 3.11, 3.12, 3.13.
 
