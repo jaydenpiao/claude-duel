@@ -1,0 +1,17 @@
+name: staging
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t claude-duel:staging .
+      - name: containerized smoke match (fake provider)
+        run: |
+          docker run --rm claude-duel:staging --config configs/staging.toml run --match-id smoke
