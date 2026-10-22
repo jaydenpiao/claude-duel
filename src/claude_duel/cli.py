@@ -22,6 +22,7 @@ from claude_duel.domain.models import MatchState
 from claude_duel.domain.scoring import match_stats
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
+from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
 
 _LOG = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
+    card = sub.add_parser("card", help="write a shareable SVG summary of a match")
+    card.add_argument("match_id")
+    card.add_argument("--out", type=Path, help="output path (default: <match-id>-card.svg)")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -119,6 +123,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _run(settings, args.match_id, args)
     if args.cmd == "resume":
         return _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2
+    if args.cmd == "card":
+        return _card(settings, args.match_id, args.out)
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
     if args.transcript:
         print("\n".join(report.transcript))
@@ -126,6 +132,15 @@ def _dispatch(args: argparse.Namespace) -> int:
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
+    return 0 if report.consistent else 1
+
+
+def _card(settings: Settings, match_id: str, out: Path | None) -> int:
+    state, events = build_store(settings).load(match_id), build_event_log(settings).read(match_id)
+    report = replay(state, events)
+    path = out or Path(f"{match_id}-card.svg")
+    path.write_text(card_svg(card_data(state, report, events)), encoding="utf-8")
+    print(f"card written: {path}")
     return 0 if report.consistent else 1
 
 
