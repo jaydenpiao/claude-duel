@@ -3,7 +3,7 @@ name: review-checklist
 description: Use before opening or approving a PR; the definition of done plus security invariants.
 ---
 Done
-- [ ] `ruff check . && ruff format --check . && mypy src && vulture && pylint src tests && pytest` green; coverage >= 90%; CI green on 3.11-3.13.
+- [ ] `ruff check . && ruff format --check . && mypy src && python scripts/check_docs.py && vulture && pylint src tests && pytest` green; coverage >= 90%; CI green on 3.11-3.13.
 - [ ] New behaviour and each new failure path have tests.
 - [ ] No dead code, duplication, commented-out code or unlinked TODOs (gates enforce; never loosen them); domain has no I/O; adapters wired only in `app/container.py`.
 - [ ] Docs updated? AGENTS.md, README, skills and ADRs touched by this change are updated in the same PR.
