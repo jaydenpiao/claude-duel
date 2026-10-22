@@ -35,9 +35,10 @@ def past_designs(state: MatchState, agent: str) -> list[ChallengeSpec]:
 def prompt_lines(state: MatchState, agent: str, index: int) -> list[str]:
     seed = state.seed or state.match_id
     lines = [
-        f"THEME for this challenge: {theme(seed, agent, state.round, index, state.rules.challenges_per_round)}. "
-        "Build that kind of puzzle; do not reuse an earlier design. Define the answer by properties check() "
-        "tests, never by a target string or list in the source."
+        f"THEME for this challenge (suggested): "
+        f"{theme(seed, agent, state.round, index, state.rules.challenges_per_round)}. "
+        "Any other idea is fine if it is new for you and you can solve it reliably; never reuse an earlier "
+        "design. Define the answer by properties check() tests, never by a target string or list in the source."
     ]
     past = past_designs(state, agent)
     if past:

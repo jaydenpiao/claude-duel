@@ -25,7 +25,7 @@ def test_repeat_is_rejected_and_past_designs_are_shown(make_engine, new_state) -
     assert state.build_errors[round2.id][0].startswith("repeat design")
     assert round2.spec is not None
     assert round2.spec.title == B["title"]
-    assert all("THEME for this challenge:" in p for p in bob.prompts)
+    assert all("THEME for this challenge" in p for p in bob.prompts)
     assert "Your past designs" not in bob.prompts[0]
     assert f"{A['title']!r} [" in bob.prompts[1]
 
