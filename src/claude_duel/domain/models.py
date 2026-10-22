@@ -130,6 +130,9 @@ class Rules(_Frozen):
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
     )
+    gate_mode: Literal["reject", "score"] = Field(
+        default="reject", description="score: a probe-solved challenge stays valid but its defense pays half (#78)"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -162,6 +165,7 @@ class ChallengeSpec(_Frozen):
         description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
     )
     difficulty: int = Field(ge=1, le=3)
+    probe_solved: bool = False  # set by the arena's difficulty gate in gate_mode "score"; halves the defense award
 
 
 class Challenge(_Frozen):
