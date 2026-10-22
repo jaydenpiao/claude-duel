@@ -11,8 +11,9 @@ from claude_duel.domain.models import MatchState
 from claude_duel.ports import Completion, SpendLedger
 
 # Default USD per 1M tokens (input, output). Low/medium-tier models only; override via [prices] in config.
+FAKE_MODEL = "fake-1"
 DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "fake-1": (0.0, 0.0),
+    FAKE_MODEL: (0.0, 0.0),
     "gpt-5-nano": (0.05, 0.40),
     "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4o-mini": (0.15, 0.60),

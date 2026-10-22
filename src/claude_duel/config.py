@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tomllib
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, check_model_allowed
+from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 
@@ -29,6 +30,14 @@ class Settings(BaseModel):
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     openai_api_key: SecretStr | None = None
+    docker_command: tuple[str, ...] = ("docker",)
+    docker_image: str = "python:3.12-slim"
+
+    def model_for(self, agent: AgentSpec) -> str:
+        """The single place an agent's effective model is resolved."""
+        if agent.provider == "fake":
+            return FAKE_MODEL
+        return agent.model or self.openai_model
 
 
 _ENV_SCALARS = {
@@ -73,6 +82,8 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         _overlay(nested, mapping, env)
         if nested:
             data[section] = nested
+    if env.get("DUEL_DOCKER"):
+        data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
     if env.get("OPENAI_API_KEY"):
         data["openai_api_key"] = env["OPENAI_API_KEY"]
     try:
@@ -81,6 +92,5 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         raise ConfigError(str(exc)) from exc
     check_model_allowed(settings.openai_model, settings.prices)
     for agent in settings.agents:
-        if agent.provider == "openai" and agent.model != "fake-1":
-            check_model_allowed(agent.model, settings.prices)
+        check_model_allowed(settings.model_for(agent), settings.prices)
     return settings
