@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-import secrets
 import sys
 import uuid
 from pathlib import Path
 
-from claude_duel.app.container import build_engine, build_event_log, build_store
+from claude_duel.app.container import build_event_log, build_store
 from claude_duel.app.replay import replay
+from claude_duel.app.session import play
 from claude_duel.config import Settings, load_settings
-from claude_duel.domain.errors import DuelError, MatchNotFoundError
+from claude_duel.domain.errors import DuelError
 from claude_duel.domain.models import MatchState
 from claude_duel.observability import InMemoryMetrics, configure_logging, log
 
@@ -43,23 +43,10 @@ def _summary(state: MatchState) -> str:
 
 
 def _run(settings: Settings, match_id: str | None) -> int:
-    store = build_store(settings)
     metrics = InMemoryMetrics()
-    engine = build_engine(settings, metrics, store)
     mid = match_id or uuid.uuid4().hex[:12]
     try:
-        state = store.load(mid)  # a failed match is recovered by the engine
-    except MatchNotFoundError:
-        state = MatchState(
-            match_id=mid,
-            secret=secrets.token_hex(32),
-            agents=settings.agents,
-            rules=settings.rules,
-            limits=settings.limits,
-        )
-        store.save(state)
-    try:
-        print(_summary(engine.run(state)))
+        print(_summary(play(settings, mid, metrics)))
     finally:
         log(_LOG, logging.INFO, "metrics", match_id=mid, **metrics.summary())
     return 0

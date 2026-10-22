@@ -68,8 +68,9 @@ class MatchEngine:
 
     # -- lifecycle -------------------------------------------------------
     def run(self, state: MatchState) -> MatchState:
+        """Drive the match to a terminal stage. The caller must hold the match lock (see ``app/session.py``)."""
         self._budget.check_lifetime()
-        with self._store.lock(state.match_id), trace():
+        with trace():
             self._sync(state)
             if state.stage is Stage.FAILED:
                 self._checkpoint(state, ev.MATCH_RECOVERED)

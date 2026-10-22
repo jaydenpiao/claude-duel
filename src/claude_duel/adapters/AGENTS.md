@@ -16,7 +16,7 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - Never pass the host env through; the child env is only a minimal PATH.
 
 ## store/
-- `file_store.py`: atomic JSON save (tmp + fsync + rename, mode 0600), `O_EXCL` lock files (`MatchLockedError`). Match ids must be alphanumeric/hyphen.
+- `file_store.py`: atomic JSON save (tmp + fsync + rename, mode 0600), non-blocking `flock` on `<id>.lock` (`MatchLockedError`); the kernel releases it if the holder dies, so locks never go stale. Never unlink lock files. Match ids must be alphanumeric/hyphen.
 - `jsonl.py`: shared flock + fsync append-only JSON-lines helpers used by the ledger and event log.
 - `event_log.py`: per-match hash-chained `<id>.events.jsonl`; reads verify the chain (`EventLogCorruptError`).
 - `ledger.py`: append-only `ledger.jsonl`; every read and append holds `flock`, appends fsync, readers fold only new bytes, a torn last line is skipped and never glued to the next entry. Every call is recorded, $0 included. Totals feed the $40 lifetime cap across processes. Don't delete it to "reset" spend.
