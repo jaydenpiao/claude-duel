@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy
+from claude_duel.domain import contract, findings, memory, policy, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, derive_flag, redact
@@ -219,13 +219,23 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
-                agent, state.round, index, state.rules, error, last, self._memory(state, agent), self._scratch(state)
+                agent,
+                state.round,
+                index,
+                state.rules,
+                error,
+                last,
+                self._memory(state, agent),
+                self._scratch(state),
+                tuple(variety.prompt_lines(state, agent, index)) if state.rules.variety else (),
             )
             completion = self._call(state, agent, self._request(state, prompt, "build"))
             self._note(state, agent, completion.text)
             try:
                 last = agents.parse_challenge(completion.text)
                 last, problem = self._shape(state, last)
+                if problem is None and state.rules.variety:
+                    problem = variety.repeat_reason(state, agent, last)
                 if problem is None:
                     last, problem = self._assess(state, cid, agent, last)
             except MalformedOutputError as exc:
@@ -265,7 +275,9 @@ class MatchEngine:
     def _assess(self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """Solver, policy and runs, difficulty gate; then the tamper detector on the answer (logged only)."""
         spec, problem = self._solve_reference(state, cid, spec)
-        problem = problem or self._problem(state, cid, state.round, spec) or self._gate(state, cid, spec)
+        problem = problem or self._problem(state, cid, state.round, spec)
+        if problem is None:
+            spec, problem = self._gate(state, cid, spec)
         policy_reason = problem if problem and policy.reason_code(problem) != "other" else None
         hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
         self._flag(state, hits, derive_flag(state.secret, cid))
@@ -305,15 +317,19 @@ class MatchEngine:
         request = CompletionRequest(system=agents.system_prompt(state.framing_text), prompt=prompt, purpose=purpose)
         return request if cap is None else request.model_copy(update={"max_tokens": min(request.max_tokens, cap)})
 
-    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
-        """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe; a capture means too easy."""
+    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+        """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe. A capture means too easy: in
+        gate_mode "reject" the build goes back to repair; in "score" it stays valid with a halved defense award."""
+        spec = spec.model_copy(update={"probe_solved": False})  # only the arena may set it
         if not state.rules.difficulty_gate:
-            return None
+            return spec, None
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
         completion = self._call(state, GATE, self._request(state, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, derive_flag(state.secret, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
-        return GATE_REJECTION if solved else None
+        if solved and state.rules.gate_mode == "score":
+            return spec.model_copy(update={"probe_solved": True}), None
+        return spec, GATE_REJECTION if solved else None
 
     def _solve_reference(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
@@ -400,6 +416,7 @@ class MatchEngine:
                 pairs,
                 self._memory(state, attacker),
                 self._scratch(state),
+                state.rules.retry_hint,
             )
             assert_no_flag(prompt, flag, "attack prompt")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)

@@ -114,11 +114,16 @@ class Rules(_Frozen):
     rounds: int = Field(default=3, ge=1, le=20)
     challenges_per_round: int = Field(default=2, ge=1, le=10)
     max_attempts: int = Field(default=4, ge=1, le=50)
+    early_bonus_attempts: int = Field(
+        default=0, ge=0, le=10, description="extra tries in round 1, one fewer each round"
+    )
+    retry_hint: bool = Field(default=False, description="after a failed try, ask the attacker to trace check() (#95)")
     attack_token_budget: int = Field(default=20_000, ge=1)
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
     )
+    variety: bool = Field(default=False, description="themes, past designs and repeat check for authors (#79)")
     max_format_retries: int = Field(default=2, ge=0, le=5)
     max_source_bytes_base: int = Field(default=2048, ge=256)
     scoring: ScoringRule = ScoringRule()
@@ -128,6 +133,9 @@ class Rules(_Frozen):
     clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
         default=False, description="one cheap probe attack per build; a first-try solve is sent back to repair"
+    )
+    gate_mode: Literal["reject", "score"] = Field(
+        default="reject", description="score: a probe-solved challenge stays valid but its defense pays half (#78)"
     )
 
     @model_validator(mode="before")
@@ -161,6 +169,7 @@ class ChallengeSpec(_Frozen):
         description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
     )
     difficulty: int = Field(ge=1, le=3)
+    probe_solved: bool = False  # set by the arena's difficulty gate in gate_mode "score"; halves the defense award
 
 
 class Challenge(_Frozen):
@@ -277,7 +286,8 @@ class MatchState(BaseModel):
         return next((a.handicap for a in self.agents if a.name == name), Handicap())
 
     def max_attempts(self, name: str) -> int:
-        return max(1, self.rules.max_attempts + self.handicap(name).attempts_delta)
+        bonus = max(0, self.rules.early_bonus_attempts - (max(self.round, 1) - 1))
+        return max(1, self.rules.max_attempts + bonus + self.handicap(name).attempts_delta)
 
     def attack_token_budget(self, name: str) -> int:
         return max(1, int(self.rules.attack_token_budget * self.handicap(name).token_budget_mult))

@@ -31,3 +31,15 @@ Most of these are I/O plumbing errors (FLAG, stdin, solver scope), not puzzle de
 ## Consequences
 In a live smoke test (nano vs mini, 3 rounds, checked) validity rose from about 10-33% to 83% (5/6 in 4 of 6
 matches), and defenses still happen. The attacker sees the composed source, wrapper included.
+
+## Addendum: variety (#79)
+Live check-form matches reused one design for every challenge. With `rules.variety` (on in `checked`), each
+build prompt gets a seeded theme from `variety.THEMES` (different for each of an agent's challenges until the
+8 themes wrap) and a list of the author's past titles with technique tags. A repeated title, or a source
+identical up to whitespace, is rejected through the normal repair loop.
+
+## Addendum: attacker rebalancing (#95)
+With variety, captures fell to 2 in 42 challenges. `checked` now also sets `early_bonus_attempts = 2` (round 1
+gets +2 tries, round 2 +1; see `MatchState.max_attempts`) and `retry_hint` (after a failed try, the attacker is
+asked to trace `check()` on its last payload and fix the first failing condition; `agents.RETRY_HINT`). Live
+configs can add `difficulty_gate = true` with `gate_mode = "score"` (#78).
