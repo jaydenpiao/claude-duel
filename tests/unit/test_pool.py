@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 from claude_duel.app.container import build_event_log, build_store, build_tournament_log
+from claude_duel.app.framings import framing_text
 from claude_duel.app.replay import replay
 from claude_duel.app.tournament import play_tournament, pool_challenges
 from claude_duel.config import Settings
 from claude_duel.domain import tournament as tr
-from claude_duel.domain.models import AgentSpec, Rules
+from claude_duel.domain.models import AgentSpec, FramingRule, Rules
 from claude_duel.observability import InMemoryMetrics
 
 
@@ -66,3 +67,18 @@ def test_tie_on_points_falls_to_pool_points() -> None:
     st = tr.TournamentState(tournament_id="t", seed="s", rule=tr.TournamentRule(entrants=entrants))
     st.pool_points = {"e0": 0, "e1": 0, "e2": 50}
     assert st.table()[0][0] == "e2"
+
+
+def test_pool_matches_pin_framing(tmp_path: Path) -> None:
+    """Pool match creation goes through open_match, so framing_text is pinned (#L1)."""
+    rules = Rules(rounds=1, challenges_per_round=1, framing=FramingRule(kind="notice"))
+    settings = _settings(tmp_path).model_copy(update={"rules": rules})
+    entrants = (AgentSpec(name="a", skill=5), AgentSpec(name="b", skill=5), AgentSpec(name="c", skill=5))
+    state = play_tournament(settings, "pf", tr.TournamentRule(entrants=entrants, pool=True), InMemoryMetrics())
+    store = build_store(settings)
+    expected = framing_text(settings.rules.framing)
+    assert expected  # notice framing is non-empty
+    for e in entrants:
+        match = store.load(f"pf-pool-{e.name}")
+        assert match.framing_text == expected
+    assert state.pool_points is not None
