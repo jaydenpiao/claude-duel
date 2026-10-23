@@ -33,6 +33,9 @@ const ease = {
   inOutCubic: t => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2),
   outExpo: t => (t >= 1 ? 1 : 1 - 2 ** (-10 * t)),
   outCubic: t => 1 - (1 - t) ** 3,
+  outQuad: t => 1 - (1 - t) ** 2,
+  outQuart: t => 1 - (1 - t) ** 4,
+  inOutSine: t => -(Math.cos(Math.PI * t) - 1) / 2,
   inOutQuart: t => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2),
 };
 const clamp01 = t => Math.max(0, Math.min(1, t));
@@ -75,7 +78,8 @@ function fx(f) {  // per-frame effect state: shake, flash, camera, bloom/CA spik
   const { i, t, b } = beatAt(f);
   const r = rng(D.seed ^ i);
   const e = { i, t, b, r, shake: [0, 0, 0], flash: 0, flashColor: C.flash, zoom: 1, focus: [W / 2, H / 2],
-              bloom: 0.6, ca: 0.0008, off: [[0, 0], [0, 0]], scale: [1, 1], time: t };
+              bloom: 0.6, ca: 0.0008, off: [[0, 0], [0, 0]], scale: [1, 1], time: t,
+              tilt: 0, pan: 0, arm: [0, 0], rot: [0, 0], f };
   const hit = b.kind === "impact" ? STRIKE : b.kind === "defend" ? STRIKE : -1;
   if (b.kind === "intro") {
     const k = ease.outBack(clamp01(t / 30));
@@ -102,10 +106,7 @@ function fx(f) {  // per-frame effect state: shake, flash, camera, bloom/CA spik
       e.off[dIdx] = [dir * 60 * push, 0];
     }
   }
-  if (b.kind === "defend" && t >= STRIKE) {
-    e.time = t < STRIKE + STOP.defend ? STRIKE : t - STOP.defend;
-    e.bloom = 0.6 + 0.6 * Math.max(0, 1 - (t - STRIKE) / 10);
-  }
+  if (VARIANTS[b.variant]) missFx(e, VARIANTS[b.variant]);
   if (b.kind === "ko") {
     // hitstop: effects hold at the KO contact for STOP.ko frames, then run at 0.25x for `slow` frames, then 1x
     const l = loser(b), slow = 40, run = Math.max(0, t - STOP.ko);
@@ -117,7 +118,7 @@ function fx(f) {  // per-frame effect state: shake, flash, camera, bloom/CA spik
     e.bloom = 0.6 + 0.5 * Math.max(0, 1 - t / 10);
     e.ca = 0.008 * Math.max(0.15, 1 - t / 15);
   }
-  if (REDUCED) { e.shake = [0, 0, 0]; e.ca = 0; e.flash = Math.min(e.flash, 0.2); }
+  if (REDUCED) { e.shake = [0, 0, 0]; e.ca = 0; e.flash = Math.min(e.flash, 0.2); e.tilt = 0; e.pan = 0; e.zoom = 1; }
   return e;
 }
 
@@ -144,10 +145,10 @@ function embers(f) {  // 20 ambient embers, life 90f, pure in f
   sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over";
 }
 
-function fighter(n, e, f, hurt) {
+function fighter(n, e, f, hurt, alpha = 1) {
   const [hx, hy] = HOME[n], [ox, oy] = e.off[n], s = e.scale[n];
   const x = hx + ox, y = hy + oy + Math.sin(f * 0.12 + n * 2) * 4, dir = n === 0 ? 1 : -1;
-  sx.save(); sx.translate(x, y); sx.scale(s * dir, s);
+  sx.save(); sx.globalAlpha = alpha; sx.translate(x, y); sx.rotate(e.rot[n] * Math.PI / 180); sx.scale(s * dir, s);
   sx.shadowColor = C.glow[n]; sx.shadowBlur = 30;
   sx.fillStyle = hurt ? C.flash : C.side[n];
   sx.beginPath();  // crystalline body
@@ -156,12 +157,12 @@ function fighter(n, e, f, hurt) {
   sx.fillStyle = C.bg; sx.shadowBlur = 0;
   sx.fillRect(4, -70, 24, 8);  // visor
   sx.fillStyle = C.glow[n]; sx.shadowBlur = 20;
-  sx.beginPath(); sx.arc(70, -10, 12, 0, Math.PI * 2); sx.fill();  // casting hand
+  sx.beginPath(); sx.arc(70, -10 + e.arm[n], 12, 0, Math.PI * 2); sx.fill();  // casting hand
   sx.restore();
-  sx.globalAlpha = 0.35; sx.fillStyle = C.side[n];
+  sx.globalAlpha = 0.35 * alpha; sx.fillStyle = C.side[n];
   sx.beginPath(); sx.ellipse(hx + ox, 520, 70, 10, 0, 0, Math.PI * 2); sx.fill(); sx.globalAlpha = 1;
 }
-const hand = (n, e) => [HOME[n][0] + e.off[n][0] + (n === 0 ? 70 : -70), HOME[n][1] - 10];
+const hand = (n, e) => [HOME[n][0] + e.off[n][0] + (n === 0 ? 70 : -70), HOME[n][1] - 10 + (e.arm?.[n] || 0)];
 
 let particles = 0;  // drawn this frame, capped at MAX_PARTICLES
 const take = n => { const k = Math.max(0, Math.min(n, MAX_PARTICLES - particles)); particles += k; return k; };
@@ -178,16 +179,20 @@ function burst(r, n, origin, age, life, speed, colors, gravity) {
   sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over";
 }
 
-function projectile(n, from, to, t, color) {
-  for (let g = 11; g >= 0; g--) {  // 12 ghosts, 0.6 alpha decaying x0.8
-    const k = ease.inOutCubic(clamp01((t - WIND - g) / TRAVEL));
-    if (t - g < WIND) continue;
-    sx.globalAlpha = 0.6 * 0.8 ** g; sx.fillStyle = g ? C.glow[n] : color;
-    sx.shadowColor = C.glow[n]; sx.shadowBlur = 24;
-    sx.beginPath(); sx.arc(lerp(from[0], to[0], k), lerp(from[1], to[1], k) - Math.sin(Math.PI * k) * 60, 14 - g * 0.6, 0, Math.PI * 2);
-    sx.fill();
-  }
-  sx.globalAlpha = 1; sx.shadowBlur = 0;
+function ghosts(n, a0, decay, step, drawAt) {  // n fading copies, oldest first: trails and afterimages
+  for (let g = n - 1; g >= 0; g--) drawAt(g * step, g, a0 * decay ** g);
+  sx.globalAlpha = 1;
+}
+const arc = (from, to, k, h = 60) => [lerp(from[0], to[0], k), lerp(from[1], to[1], k) - Math.sin(Math.PI * clamp01(k)) * h];
+function projectile(n, pos, t, color, size = 14, fade = () => 1) {  // pos(t) -> [x, y] or null; 12-ghost trail
+  sx.shadowColor = C.glow[n]; sx.shadowBlur = 24;
+  ghosts(12, 0.6, 0.8, 1, (dt, g, alpha) => {
+    const p = pos(t - dt);
+    if (!p) return;
+    sx.globalAlpha = alpha * fade(t - dt); sx.fillStyle = g ? C.glow[n] : color;
+    sx.beginPath(); sx.arc(p[0], p[1], size * (1 - g * 0.043), 0, Math.PI * 2); sx.fill();
+  });
+  sx.shadowBlur = 0;
 }
 
 function charge(r, n, at, t) {  // windup particles pulled inward
@@ -202,18 +207,153 @@ function charge(r, n, at, t) {  // windup particles pulled inward
 function shield(n, t) {  // hex shield that cracks after the hit
   const [x, y] = [HOME[n][0] + (n === 0 ? 90 : -90), HOME[n][1] - 30];
   sx.save(); sx.strokeStyle = C.block; sx.lineWidth = 4; sx.shadowColor = C.block; sx.shadowBlur = 20;
-  sx.globalAlpha = t < STRIKE + 4 ? clamp01((t - WIND) / 10) : 0;
+  sx.globalAlpha = t < STRIKE + 4 ? clamp01((t - 24) / 6) : 0;
   sx.beginPath();
   for (let k = 0; k < 6; k++) { const a = Math.PI / 3 * k; sx.lineTo(x + Math.cos(a) * 70, y + Math.sin(a) * 90); }
   sx.closePath(); sx.stroke(); sx.restore();
   return [x, y];
 }
 
+// ---- miss variants (design "Miss variants"): fight.py picks b.variant; one table drives fx, drawing and sound ----
+// parts: [count, life, colors, speed, gravity, delay after STRIKE, scale count by k only]; "def" = defender's glow.
+// Numbers given as k => ... scale with drama k = 0.5 + 0.5 * pressure.
+const VARIANTS = {
+  graze: { path: "graze", slow: [24, 36, 0.4, 0.2], parts: [[10, 14, [C.tint], [2, 5], 0]], cam: { punch: 0.12, at: [24, 30, 42] },
+           bloom: 0.3, ca: 0.002, caption: ["GRAZE", C.tint, 64] },
+  parry: { path: "reflect", stop: 3, parts: [[24, 12, [C.flash, C.tint, "def"], [6, 12], 0.3]], shake: [k => 8 * k, 0.75, 6],
+           flash: [0.25, C.flash, 3], bloom: 0.5, caption: ["PARRY", "def", 72] },
+  dodge: { path: "dodge", parts: [], cam: { pan: 40, at: [12, 27, 42] }, bloom: 0.2, caption: ["DODGE", C.dim, 64] },
+  shatter: { path: "shield", stop: STOP.defend, parts: [[40, 24, [C.block, "def"], [3, 9], 0.4], [20, 18, [C.fizzle], [1, 3], 0.1, 0, true]],
+             shake: [k => 10 * k, 0.8, 8], flash: [0.3, C.block, 2], bloom: 0.6, caption: ["BLOCK", C.block, 72] },
+  stumble: { path: "drop", parts: [[12, 20, [C.fizzle], [1, 3], 0.2]], cam: { tilt: k => 4 * k, at: [24, 30, 42] },
+             shake: [6, 0.8, 8], caption: ["OVEREXTENDED", C.ko, 56] },
+  feint: { path: "feint", parts: [[16, 10, ["def"], [2, 6], 0, 8]], cam: { punch: 0.08, tilt: -3, at: [26, 30, 38] },
+           flash: [0.2, C.flash, 2], caption: ["COUNTER", "def", 64] },
+  timeout: { path: "dissolve", parts: [[30, 30, [C.fizzle, C.dim], [0.3, 1.2], -0.1]], cam: { punch: -0.04, at: [12, 54, 99] },
+             bloom: -0.2, pulse: 3, caption: ["OUT OF TOKENS", C.ko, 56] },
+  whiff: { path: "wide", parts: [[6, 12, [C.fizzle], [1, 3], 0]], caption: ["WIDE", C.dim, 56] },
+};
+const drama = b => 0.5 + 0.5 * (b.pressure || 0);
+const byK = (x, k) => (typeof x === "function" ? x(k) : x || 0);
+const tint = (c, m) => (c === "def" ? C.glow[m.def] : c);
+const beatLen = i => (i + 1 < D.beats.length ? D.beats[i + 1].start : TOTAL) - D.beats[i].start;
+const REST = { off: [[0, 0], [0, 0]] };
+function roles(b) {  // attacker and defender sides, whoever's beat it is
+  const atk = side(b.kind === "defend" ? b.target : b.actor), def = side(b.kind === "defend" ? b.actor : b.target);
+  return { atk, def, from: hand(atk, REST), body: [HOME[def][0], HOME[def][1] - 30], away: def === 0 ? -1 : 1 };
+}
+// camera envelope: eases in over [a, b], releases by c
+const env = (t, [a, b, c]) => (t < a ? 0 : t < b ? ease.outCubic((t - a) / (b - a)) : 1 - ease.inOutSine(clamp01((t - b) / (c - b))));
+function missTime(t, V, k, len) {  // slow-mo then catch-up to the beat's end, then hitstop; 1x under reduced motion
+  let x = t;
+  if (V.slow && !REDUCED && t > V.slow[0]) {
+    const [s0, s1, v0, dv] = V.slow, v1 = v0 - dv * k, run = u => s0 + v0 * u + (v1 - v0) * u * u / (2 * (s1 - s0));
+    x = t <= s1 ? run(t - s0) : run(s1 - s0) + (t - s1) * (len - run(s1 - s0)) / (len - s1);
+  }
+  return V.stop && x > STRIKE ? Math.max(STRIKE, x - V.stop) : x;
+}
+function missFx(e, V) {
+  const { b, t } = e, k = drama(b), m = roles(b), since = t - STRIKE;
+  e.time = missTime(t, V, k, beatLen(e.i));
+  const cam = V.cam || {}, w = cam.at ? env(t, cam.at) : 0;
+  e.zoom = 1 + (cam.punch || 0) * w; e.focus = HOME[m.def];
+  e.pan = (cam.pan || 0) * m.away * w; e.tilt = byK(cam.tilt, k) * w;
+  if (V.shake && since >= 0 && since < V.shake[2]) {
+    const amp = byK(V.shake[0], k) * V.shake[1] ** since, ang = e.r() * Math.PI * 2 + since * 2.4;
+    e.shake = [Math.cos(ang) * amp, Math.sin(ang) * amp, 0];
+  }
+  if (V.flash && since >= 0 && since < V.flash[2]) [e.flash, e.flashColor] = V.flash;
+  if (V.bloom && since >= 0) e.bloom = 0.6 + V.bloom * Math.max(0, 1 - since / 10);
+  if (V.ca) e.ca = V.ca;
+  PATHS[V.path].move?.(e, m, e.time);
+}
+// past its target a shot keeps going at constant speed: k > 1 extrapolates the lerp
+const flyBy = (u, f = ease.inOutCubic) => (u <= 1 ? f(clamp01(u)) : 1 + (u - 1) * 1.2);
+const shotU = t => (t - WIND) / TRAVEL;
+const live = (t, len, pos) => (t < WIND || t > len ? null : pos(shotU(t)));
+const dodgeOff = (m, t) => m.away * 70 * (t < 26 ? 0 : t < 34 ? ease.outExpo((t - 26) / 8) : 1 - ease.inOutCubic(clamp01((t - 34) / 8)));
+const PATHS = {  // move(e, m, time) poses fighters; draw(e, m) draws the shot and returns where the particles start
+  graze: { draw: (e, m) => {
+    const over = [HOME[m.def][0], HOME[m.def][1] - 138];  // 18px above the head
+    projectile(m.atk, t => live(t, 60, u => arc(m.from, over, flyBy(u), 40)), e.time, C.flash);
+    return over;
+  } },
+  reflect: {
+    move: (e, m, t) => { e.arm[m.def] = -40 * ease.outBack(clamp01((t - 26) / 4)); },
+    draw: (e, m) => {
+      const at = [HOME[m.def][0] - m.away * 70, HOME[m.def][1] - 50], dir = -m.away;
+      projectile(m.atk, t => (t < WIND ? null : t <= STRIKE ? arc(m.from, at, ease.inOutCubic(shotU(t)), 30)
+        : ((d) => [at[0] + dir * Math.cos(0.61) * d, at[1] - Math.sin(0.61) * d])(300 * ease.outQuad(clamp01((t - STRIKE) / 12)))), e.time, C.flash);
+      return at;
+    },
+  },
+  dodge: {
+    move: (e, m, t) => { e.off[m.def] = [dodgeOff(m, t), 0]; },
+    draw: (e, m, f) => {
+      const t = e.time, ghostAt = dt => ({ ...e, off: e.off.map((o, n) => (n === m.def ? [dodgeOff(m, t - dt), 0] : o)) });
+      if (t >= 26) {
+        if (REDUCED) fighter(m.def, { ...e, off: REST.off }, f, false, 0.3);
+        else ghosts(6, 0.5, 0.7, 2, (dt, g, alpha) => g && fighter(m.def, ghostAt(dt), f, false, alpha));
+      }
+      projectile(m.atk, u => live(u, 60, v => arc(m.from, m.body, flyBy(v), 30)), t, C.flash);
+      return m.body;
+    },
+  },
+  shield: { draw: (e, m) => {
+    const at = shield(m.def, e.time);
+    projectile(m.atk, t => (t > STRIKE ? null : live(t, 60, u => arc(m.from, at, ease.inOutCubic(u), 30))), e.time, C.flash);
+    return at;
+  } },
+  drop: {
+    move: (e, m, t) => {
+      const lunge = 90 * ease.inQuad(clamp01((t - 12) / 12)) * (1 - ease.inOutCubic(clamp01((t - 32) / 10)));
+      const s = clamp01((t - 24) / 18);
+      e.off[m.atk] = [-m.away * (lunge + 12 * Math.sin(Math.PI * clamp01((t - 24) / 6))), 0];
+      e.rot[m.atk] = t > 24 ? 6 * Math.sin(2 * Math.PI * 3 * s) * (1 - s) : 0;
+    },
+    draw: (e, m) => {
+      const floor = [lerp(m.from[0], HOME[m.def][0], 0.45), 520];
+      projectile(m.atk, t => live(t, STRIKE, u => [lerp(m.from[0], floor[0], u), lerp(m.from[1], floor[1], u * u) - 50 * Math.sin(Math.PI * u)]), e.time, C.flash);
+      return floor;
+    },
+  },
+  feint: {
+    move: (e, m, t) => { e.off[m.def] = [-m.away * 50 * ease.outCubic(clamp01((t - 20) / 6)) * (1 - ease.inOutCubic(clamp01((t - 34) / 8))), 0]; },
+    draw: (e, m) => {
+      const back = [HOME[m.atk][0], HOME[m.atk][1] - 30], tap = hand(m.def, e);
+      projectile(m.atk, t => live(t, 60, u => arc(m.from, m.body, flyBy(u), 50)), e.time, C.flash);
+      projectile(m.def, t => (t < STRIKE || t > 38 ? null : arc(tap, back, ease.inOutCubic((t - STRIKE) / 8), 20)), e.time, C.glow[m.def], 7);
+      return back;
+    },
+  },
+  dissolve: { draw: (e, m) => {
+    const mid = [W / 2, 330];
+    projectile(m.atk, t => live(t, STRIKE, u => arc(m.from, mid, ease.outQuart(clamp01(u)), 30)), e.time, C.flash, 14, t => 1 - clamp01((t - 24) / 6));
+    return mid;
+  } },
+  wide: { draw: (e, m) => {
+    const wide = [HOME[m.def][0], HOME[m.def][1] - 150], pos = u => arc(m.from, wide, 2.2 * ease.inQuad(clamp01(u * TRAVEL / 30)), 20);
+    projectile(m.atk, t => live(t, 60, pos), e.time, C.flash);
+    return pos(1);
+  } },
+};
+function missDraw(e, V, r) {
+  const { b, i, t } = e, k = drama(b), m = roles(b);
+  if (m.atk < 0 || m.def < 0) return;
+  if (t < WIND) charge(r, m.atk, m.from, t);
+  const at = PATHS[V.path].draw(e, m, e.f);
+  V.parts.forEach(([n, life, colors, speed, gravity, delay = 0, pure = false], j) => {
+    const count = Math.round(pure ? n * k : n * (0.6 + 0.4 * k)) / (REDUCED ? 2 : 1);
+    burst(rng(D.seed ^ i ^ (0xC3 + j)), Math.round(count), at, e.time - STRIKE - delay, life, speed, colors.map(c => tint(c, m)), gravity);
+  });
+}
+
 function drawScene(f, e) {
   const { i, b, t } = e, r = rng(D.seed ^ i);
   sx.save();
   sx.translate(e.focus[0], e.focus[1]); sx.scale(e.zoom, e.zoom); sx.translate(-e.focus[0], -e.focus[1]);
-  sx.translate(W / 2 + e.shake[0], H / 2 + e.shake[1]); sx.rotate(e.shake[2] * Math.PI / 180); sx.translate(-W / 2, -H / 2);
+  sx.translate(W / 2 + e.shake[0] + e.pan, H / 2 + e.shake[1]); sx.rotate((e.shake[2] + e.tilt) * Math.PI / 180);
+  sx.translate(-W / 2, -H / 2);
   particles = 0;
   grid(f); embers(f);
   const a = side(b.actor), tg = side(b.target);
@@ -230,21 +370,13 @@ function drawScene(f, e) {
     }
     sx.globalAlpha = 1;
   }
-  if (b.kind === "impact" || b.kind === "defend" || b.kind === "attack") {
-    const atk = b.kind === "defend" ? tg : a, def = b.kind === "defend" ? a : tg;
-    if (atk >= 0 && def >= 0) {
-      const from = hand(atk, e), to = b.kind === "attack" ? [HOME[def][0], 200] : [HOME[def][0], HOME[def][1] - 30];
-      if (t < WIND) charge(r, atk, from, t);
-      if (t < STRIKE + 1) projectile(atk, from, to, Math.min(t, STRIKE), C.flash);
-      const age = e.time - STRIKE - 1;
-      if (b.kind === "impact") burst(rng(D.seed ^ i ^ 0xA1), 60, to, age, 18, [6, 14], [C.capture, C.flash, C.glow[atk]], 0);
-      if (b.kind === "defend") {
-        const at = shield(def, t);
-        burst(rng(D.seed ^ i ^ 0xB2), 40, at, t - STRIKE - 4, 24, [3, 9], [C.block, C.glow[def]], 0.4);
-      }
-      if (b.kind === "attack") burst(rng(D.seed ^ i ^ 0xC3), 8, to, t - STRIKE, 12, [1, 3], [C.fizzle], 0);
-    }
+  if (b.kind === "impact" && a >= 0 && tg >= 0) {
+    const from = hand(a, e), to = [HOME[tg][0], HOME[tg][1] - 30];
+    if (t < WIND) charge(r, a, from, t);
+    projectile(a, u => (u < WIND || u > STRIKE ? null : arc(from, to, ease.inOutCubic((u - WIND) / TRAVEL))), Math.min(t, STRIKE + 1), C.flash);
+    burst(rng(D.seed ^ i ^ 0xA1), 60, to, e.time - STRIKE - 1, 18, [6, 14], [C.capture, C.flash, C.glow[a]], 0);
   }
+  if (VARIANTS[b.variant]) missDraw(e, VARIANTS[b.variant], r);
   if (b.kind === "fizzle" && a >= 0) burst(rng(D.seed ^ i ^ 0xD4), 8, hand(a, e), t, 20, [1, 2.5], [C.fizzle], -0.05);
   if (b.kind === "ko") {
     const l = loser(b), at = l >= 0 ? [HOME[l][0], HOME[l][1] - 30] : [W / 2, 360];
@@ -315,7 +447,7 @@ function text(ox, s, x, y, size, color, align = "left", weight = "") {
 function label(ox, s, x, y, size, color, align = "left", weight = "") {  // HUD text on a plate: legible over flashes
   ox.font = `${weight} ${size}px ui-monospace, Menlo, Consolas, monospace`;
   const w = ox.measureText(s).width, x0 = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
-  ox.fillStyle = "rgba(11,15,26,0.8)"; ox.fillRect(x0 - 8, y - size, w + 16, size * 1.4);
+  ox.fillStyle = "rgba(11,15,26,0.55)"; ox.fillRect(x0 - 8, y - size, w + 16, size * 1.4);
   text(ox, s, x, y, size, color, align, weight);
 }
 function slam(ox, s, t, color, size) {
@@ -334,15 +466,19 @@ function hud(ox, e) {
     const x = k === 0 ? 32 : W - 32, al = k === 0 ? "left" : "right";
     label(ox, n, x, 88, 26, C.side[k], al, "bold");
     label(ox, model, x, 114, 16, C.dim, al);
-    label(ox, b.sides[n].hud, x, H - 28, 18, C.hud, al);
+    const V = VARIANTS[b.variant], pulse = V?.pulse && k === roles(b).atk && t >= STRIKE && Math.floor((t - STRIKE) / 4) < V.pulse * 2;
+    label(ox, b.sides[n].hud, x, H - 28, 18, pulse && Math.floor((t - STRIKE) / 4) % 2 === 0 ? C.ko : C.hud, al);
   });
   const typed = b.kind === "build" ? b.outcome.slice(0, t + 1) : b.outcome;
   if (!(b.kind === "ko" && t >= 60)) label(ox, typed, W / 2, 600, 22, C.hud, "center");  // the card shows it
   const d = b.points;
   if (b.kind === "intro" && t >= 28) slam(ox, "VS", t - 28, C.flash, 96);
   if (b.kind === "impact" && t > STRIKE) text(ox, `+${d}`, HOME[side(b.target)][0], 230 - Math.min(40, (t - STRIKE) * 3), 48, C.capture, "center", "bold");
-  if (b.kind === "defend" && t > STRIKE) slam(ox, `BLOCK +${d}`, t - STRIKE, C.block, 72);
-  if (b.kind === "attack" && t > STRIKE) slam(ox, "MISS", t - STRIKE, C.dim, 64);
+  const V = VARIANTS[b.variant];
+  if (V && t > STRIKE) {
+    const [caption, color, size] = V.caption;
+    slam(ox, caption === "BLOCK" ? `BLOCK +${d}` : caption, t - STRIKE, tint(color, roles(b)), size);
+  }
   if (b.kind === "fizzle") slam(ox, "FIZZLE", t, C.fizzle, 72);
   if (b.kind === "round_end" && t >= 10) slam(ox, `ROUND ${b.round + 1}`, t - 10, C.hud, 96);
   if (b.kind === "ko") {
@@ -368,28 +504,39 @@ function draw(f) {
   if (e.flash > 0) { out.globalAlpha = e.flash; out.fillStyle = e.flashColor; out.fillRect(0, 0, W, H); out.globalAlpha = 1; }
   hud(out, e);
   window.__particles = particles;
+  window.__fx = { shake: Math.max(...e.shake.map(Math.abs)), tilt: e.tilt, pan: e.pan, zoom: e.zoom, flash: e.flash, bloom: e.bloom };
 }
 
 // ---- sound: seeded sfxr-style presets, rendered offline into one PCM track ----
-const PRESETS = {  // [wave, startHz, endHz, seconds, noiseMix]
-  intro: ["square", 220, 880, 0.5, 0], build: ["square", 1200, 1200, 0.05, 0], attack: ["saw", 300, 1400, 0.35, 0],
-  impact: ["noise", 120, 40, 0.45, 1], defend: ["square", 900, 300, 0.3, 0.5], fizzle: ["square", 600, 150, 0.3, 0],
-  round_end: ["square", 988, 1319, 0.25, 0], ko: ["noise", 90, 30, 1.6, 0.8],
+const PRESETS = {  // layers of [wave, startHz, endHz, seconds, noiseMix, gain, onset frame]; misses keyed by variant
+  intro: [["square", 220, 880, 0.5, 0, 0.25, 0]], build: [["square", 1200, 1200, 0.05, 0, 0.25, 0]],
+  impact: [["noise", 120, 40, 0.45, 1, 0.25, STRIKE]], fizzle: [["square", 600, 150, 0.3, 0, 0.25, 0]],
+  round_end: [["square", 988, 1319, 0.25, 0, 0.25, 0]], ko: [["noise", 90, 30, 1.6, 0.8, 0.25, 0]],
+  graze: [["saw", 1800, 600, 0.3, 0.2, 0.18, STRIKE]],
+  parry: [["square", 2400, 1800, 0.12, 0.3, 0.25, STRIKE], ["square", 3200, 3200, 0.05, 0, 0.25, STRIKE + 2]],
+  dodge: [["noise", 800, 200, 0.25, 1, 0.15, STRIKE]],
+  shatter: [["noise", 3000, 400, 0.4, 0.9, 0.25, STRIKE], ["square", 900, 300, 0.3, 0.5, 0.25, STRIKE]],
+  stumble: [["square", 200, 80, 0.35, 0.4, 0.22, 24]],
+  feint: [["square", 600, 1200, 0.1, 0, 0.2, STRIKE], ["square", 600, 1200, 0.1, 0, 0.2, STRIKE + 4]],
+  timeout: [["saw", 440, 110, 0.6, 0.1, 0.18, STRIKE]],
+  whiff: [["noise", 1200, 300, 0.2, 1, 0.12, STRIKE]],
 };
 function track() {
   const pcm = new Float32Array(Math.ceil(TOTAL / FPS * RATE));
   D.beats.forEach((b, i) => {
-    const [wave, f0, f1, dur, noise] = PRESETS[b.kind], r = rng(D.seed ^ i), jit = 1 + (r() - 0.5) * 0.06;
-    const at = Math.floor((b.start + (b.kind === "impact" ? STRIKE : 0)) / FPS * RATE), n = Math.floor(dur * RATE);
-    let ph = 0, nz = rng(D.seed ^ i ^ 0x5F);
-    for (let k = 0; k < n && at + k < pcm.length; k++) {
-      const p = k / n, hz = lerp(f0, f1, p) * jit;
-      ph += hz / RATE;
-      const tone = wave === "saw" ? 2 * (ph % 1) - 1 : (ph % 1 < 0.5 ? 1 : -1);
-      const sub = b.kind === "ko" ? Math.sin(2 * Math.PI * lerp(80, 30, p) * k / RATE) : 0;
-      const v = (tone * (1 - noise) + (nz() * 2 - 1) * noise + sub) * (1 - p) ** 2 * 0.25;
-      pcm[at + k] += v;
-    }
+    const r = rng(D.seed ^ i), jit = 1 + (r() - 0.5) * 0.06, loud = b.variant ? 0.8 + 0.2 * drama(b) : 1;
+    PRESETS[b.variant || b.kind].forEach(([wave, f0, f1, dur, noise, gain, onset], j) => {
+      const at = Math.floor((b.start + onset) / FPS * RATE), n = Math.floor(dur * RATE);
+      let ph = 0;
+      const nz = rng(D.seed ^ i ^ (0x5F + j));
+      for (let k = 0; k < n && at + k < pcm.length; k++) {
+        const p = k / n, hz = lerp(f0, f1, p) * jit;
+        ph += hz / RATE;
+        const tone = wave === "saw" ? 2 * (ph % 1) - 1 : (ph % 1 < 0.5 ? 1 : -1);
+        const sub = b.kind === "ko" ? Math.sin(2 * Math.PI * lerp(80, 30, p) * k / RATE) : 0;
+        pcm[at + k] += (tone * (1 - noise) + (nz() * 2 - 1) * noise + sub) * (1 - p) ** 2 * gain * loud;
+      }
+    });
   });
   return pcm;
 }

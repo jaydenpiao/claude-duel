@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
 from importlib import resources
+from typing import Any
 
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Usage
@@ -29,6 +31,14 @@ FRAMES = {  # beat length at 30fps (design §4): the one timeline both the page 
     DEFEND: STRIKE + HITSTOP[DEFEND] + 20,
     FIZZLE: 20, ROUND_END: 30, KO: 60 + 30,
 }  # fmt: skip
+# Miss variants (design "Miss variants"): (id, beat kinds, weight). The page's VARIANTS table renders each id.
+MISS_KINDS = (ATTACK, DEFEND)
+MISS_VARIANTS: tuple[tuple[str, tuple[str, ...], int], ...] = (
+    ("graze", (ATTACK,), 3), ("parry", (ATTACK, DEFEND), 3), ("dodge", (ATTACK,), 2), ("shatter", (DEFEND,), 3),
+    ("stumble", (ATTACK,), 2), ("feint", (ATTACK, DEFEND), 1), ("timeout", (DEFEND,), 3), ("whiff", (ATTACK,), 2),
+)  # fmt: skip
+SALT_MISS = 0x4D155
+REASON_TAGS = {"attempts exhausted": "attempts", "token budget exhausted": "tokens"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,9 @@ class Beat:
     points: int  # awarded by this beat (capture or defense)
     score: dict[str, int]
     sides: dict[str, Side]
+    pressure: float = 0.0  # 0..1, how desperate a miss is (tries or tokens used), never how close it was
+    reason_tag: str = ""  # why a defense held: "attempts", "tokens" or ""
+    variant: str = ""  # miss variant id (MISS_VARIANTS), picked by pick_variants
 
 
 @dataclass(frozen=True)
@@ -77,7 +90,9 @@ class _Beats(MatchFold):
         super().__init__(match_id)
         self.beats: list[Beat] = []
 
-    def _add(self, s: MatchState, kind: str, outcome: str, actor: str = "", target: str = "", points: int = 0) -> None:
+    def _add(
+        self, s: MatchState, kind: str, outcome: str, actor: str = "", target: str = "", points: int = 0, **miss: Any
+    ) -> None:
         names = [a.name for a in s.agents]
         last = self.beats[-1] if self.beats else None
         self.beats.append(
@@ -91,6 +106,7 @@ class _Beats(MatchFold):
                 points=points,
                 score={scrub(n): s.scores.get(n, 0) for n in names},
                 sides={scrub(n): _side(s.usage_by_agent.get(n) or Usage()) for n in names},
+                **miss,
             )
         )
 
@@ -112,13 +128,17 @@ class _Beats(MatchFold):
         if a.captured:
             self._add(s, IMPACT, f"{a.attacker} cracks '{title}' +{a.award}", a.attacker, a.author, a.award)
         else:
-            self._add(s, ATTACK, f"{a.attacker} misses '{title}' (try {a.try_no})", a.attacker, a.author)
+            p = _pressure(a.try_no / s.max_attempts(a.attacker))
+            self._add(s, ATTACK, f"{a.attacker} misses '{title}' (try {a.try_no})", a.attacker, a.author, pressure=p)
 
     def _attacked(self, s: MatchState, e: Event) -> None:
         held = defense(s, e)
         if held is not None:
             atk, ch, award = held
-            self._add(s, DEFEND, f"'{_title(ch)}' holds +{award}", ch.author, atk.attacker, award)
+            tag = REASON_TAGS.get(atk.reason, "")
+            p = _pressure(1.0 if tag == "attempts" else atk.tokens_used / s.attack_token_budget(atk.attacker))
+            held_by = f"'{_title(ch)}' holds +{award}"
+            self._add(s, DEFEND, held_by, ch.author, atk.attacker, award, pressure=p, reason_tag=tag)
 
     def _scored(self, s: MatchState, e: Event) -> None:
         if s.round >= s.rules.rounds:
@@ -128,6 +148,59 @@ class _Beats(MatchFold):
 
     def _failed(self, s: MatchState, e: Event) -> None:
         self._add(s, KO, f"match failed: {e.data.get('reason', '')}")
+
+
+def _pressure(p: float) -> float:
+    return min(1.0, max(0.0, round(p, 2)))
+
+
+def mulberry32(seed: int) -> Callable[[], float]:
+    """The page's ``rng``: same uint32 math, so a seed gives the same stream in both languages."""
+    a = seed & 0xFFFFFFFF
+
+    def imul(x: int, y: int) -> int:
+        return (x * y) & 0xFFFFFFFF
+
+    def nxt() -> float:
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = imul(a ^ (a >> 15), 1 | a)
+        t = ((t + imul(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
+
+    return nxt
+
+
+def miss_pool(b: Beat, prev: str) -> list[tuple[str, int]]:
+    """(variant, weight) a miss beat may show: its kind's variants minus the previous pick."""
+    pool = []
+    for vid, kinds, weight in MISS_VARIANTS:
+        if b.kind not in kinds or vid == prev or (vid == "timeout" and b.reason_tag != "tokens"):
+            continue
+        last_try = vid == "stumble" and b.kind == ATTACK and b.pressure == 1.0
+        pool.append((vid, weight * 2 if last_try else weight))
+    return pool
+
+
+def pick_variants(beats: list[Beat], seed: int) -> list[Beat]:
+    """Seeded, weighted miss variants with no immediate repeat (``prev`` spans the whole match)."""
+    out, prev = [], ""
+    for i, b in enumerate(beats):
+        if b.kind in MISS_KINDS:
+            pool = miss_pool(b, prev)
+            total = sum(w for _, w in pool)
+            x = min(total - 1, int(mulberry32(seed ^ i ^ SALT_MISS)() * total))
+            prev = next(vid for vid, cum in _cumulative(pool) if x < cum)
+        out.append(replace(b, variant=prev) if b.kind in MISS_KINDS else b)
+    return out
+
+
+def _cumulative(pool: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    total, out = 0, []
+    for vid, w in pool:
+        total += w
+        out.append((vid, total))
+    return out
 
 
 def fight_beats(state: MatchState, events: list[Event]) -> list[Beat]:
@@ -140,7 +213,7 @@ def fight_beats(state: MatchState, events: list[Event]) -> list[Beat]:
 
 def fight_data(state: MatchState, events: list[Event], digest: str) -> FightData:
     seed = int(hashlib.sha256((state.seed or digest).encode()).hexdigest()[:8], 16)
-    beats = fight_beats(state, events)
+    beats = pick_variants(fight_beats(state, events), seed)
     return FightData(
         match_id=scrub(state.match_id),
         players=[(scrub(a.name), scrub(a.model or "default")) for a in state.agents],

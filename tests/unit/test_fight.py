@@ -9,7 +9,9 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import asdict
+from collections import Counter
+from dataclasses import asdict, replace
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,23 @@ from claude_duel.domain.models import Event, MatchState, Rules, Usage
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.card import log_digest
 from claude_duel.presentation.common import usage_text
-from claude_duel.presentation.fight import FRAMES, HITSTOP, STRIKE, FightData, fight_beats, fight_data, fight_html
+from claude_duel.presentation.fight import (
+    ATTACK,
+    DEFEND,
+    FRAMES,
+    HITSTOP,
+    MISS_VARIANTS,
+    STRIKE,
+    Beat,
+    FightData,
+    Side,
+    fight_beats,
+    fight_data,
+    fight_html,
+    miss_pool,
+    mulberry32,
+    pick_variants,
+)
 from tests.helpers import FLAG, forfeit_events
 
 ROOT = Path(__file__).parent.parent.parent
@@ -196,3 +214,148 @@ def test_frame_pixels_are_stable(tmp_path: Path, rendered: tuple[FightData, Path
         assert (
             hashlib.sha256(again.read_bytes()).digest() == hashlib.sha256((out / f"f{f:05d}.png").read_bytes()).digest()
         )
+
+
+# ---- Miss variants (design "Miss variants") ----
+
+
+def _beat(kind: str, i: int = 0, pressure: float = 0.5, reason_tag: str = "") -> Beat:
+    empty = Side(0, 0, 0.0, "in 0 · out 0 · $0.0000")
+    return Beat(kind, i * 42, 1, "a", "b", "x", 0, {"a": 0, "b": 0}, {"a": empty, "b": empty}, pressure, reason_tag)
+
+
+def test_mulberry32_matches_js() -> None:
+    r = mulberry32(1)
+    assert [r() for _ in range(3)] == [0.6270739405881613, 0.002735721180215478, 0.5274470399599522]
+
+
+def test_variants_snapshot_includes_picks(tmp_path: Path) -> None:
+    d = _data(tmp_path)
+    assert {b.variant for b in d.beats if b.kind in {ATTACK, DEFEND}} <= {v[0] for v in MISS_VARIANTS}
+    assert any(b.variant for b in d.beats)
+    assert all(0 <= b.pressure <= 1 for b in d.beats)
+    assert all(b.reason_tag in {"", "attempts", "tokens"} for b in d.beats)
+
+
+def test_no_adjacent_repeat_over_10k() -> None:
+    beats = [_beat(ATTACK if i % 2 == 0 else DEFEND, i, 0.5, "tokens" if i % 2 else "") for i in range(10_000)]
+    out = pick_variants(beats, 0xC0FFEE)
+    misses = [b.variant for b in out if b.variant]
+    assert len(misses) == 10_000
+    assert all(a != b for a, b in pairwise(misses))
+
+
+def _steady(kind: str, tag: str) -> dict[str, float]:
+    """Markov steady state for miss picks with the no-repeat exclusion (pressure 0.5)."""
+    ids = [v for v, kinds, _ in MISS_VARIANTS if kind in kinds and (v != "timeout" or tag == "tokens")]
+    n = len(ids)
+    # P[i][j] = Prob(next=j | prev=i); for i==j it's 0
+    p = [[0.0] * n for _ in range(n)]
+    for i, prev in enumerate(ids):
+        pool = miss_pool(_beat(kind, 0, 0.5, tag), prev)
+        total = sum(w for _, w in pool)
+        for vid, w in pool:
+            p[i][ids.index(vid)] = w / total
+    # solve pi P = pi, sum pi = 1
+    a = [[p[j][i] - (1.0 if i == j else 0.0) for j in range(n)] + [0.0] for i in range(n)]
+    a[0] = [1.0] * n + [1.0]  # replace one equation with sum=1
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(a[r][col]))
+        a[col], a[piv] = a[piv], a[col]
+        for r in range(n):
+            if r == col:
+                continue
+            f = a[r][col] / a[col][col]
+            for c in range(col, n + 1):
+                a[r][c] -= f * a[col][c]
+    return {ids[i]: a[i][n] / a[i][i] for i in range(n)}
+
+
+def test_variant_distribution_within_three_points() -> None:
+    n, seed = 10_000, 0xFACE
+    for kind, tag in ((ATTACK, ""), (DEFEND, "tokens"), (DEFEND, "attempts")):
+        got = Counter(b.variant for b in pick_variants([_beat(kind, i, 0.5, tag) for i in range(n)], seed))
+        expect = _steady(kind, tag)
+        for vid, share in expect.items():
+            assert abs(100 * got[vid] / n - 100 * share) <= 3, (kind, tag, vid, got[vid] / n, share)
+
+
+def test_payload_has_pressure_and_variant_and_is_scrubbed(tmp_path: Path) -> None:
+    state, events = _fake(tmp_path)
+    html = fight_html(fight_data(state, events, log_digest(events)))
+    assert fight_html(fight_data(state, events, log_digest(events))).encode() == html.encode()
+    payload = json.loads(_payload(html))
+    assert any(b.get("variant") for b in payload["beats"])
+    assert any(b.get("pressure") for b in payload["beats"])
+    blob = json.dumps(payload)
+    assert '"payload"' not in blob
+    assert '"output"' not in blob
+    assert '"reason":' not in blob
+    assert {b["reason_tag"] for b in payload["beats"]} <= {"", "attempts", "tokens"}
+
+
+@needs_chrome
+def test_particle_budget_all_variants_at_k1(tmp_path: Path) -> None:
+    d = _data(tmp_path)
+    empty = Side(0, 0, 0.0, "in 0 · out 0 · $0.0000")
+    names = [n for n, _ in d.players[:2]]
+    sides = {n: empty for n in names}
+    score = dict.fromkeys(names, 0)
+    start = FRAMES["intro"]
+    beats = [Beat("intro", 0, 0, "", "", "VS", 0, score, sides)]
+    for vid, kinds, _ in MISS_VARIANTS:
+        kind = kinds[0]
+        tag = "tokens" if vid == "timeout" else ""
+        beats.append(Beat(kind, start, 1, names[0], names[1], vid, 0, score, sides, 1.0, tag, vid))
+        start += FRAMES[kind]
+    beats.append(Beat("ko", start, 1, "", "", "K.O.", 0, score, sides))
+    page = tmp_path / "allv.html"
+    page.write_text(fight_html(replace(d, beats=beats, frames=start + FRAMES["ko"])), encoding="utf-8")
+    stats = json.loads((_render(page, tmp_path / "allv") / "stats.json").read_text(encoding="utf-8"))
+    assert max(stats["particles"]) <= MAX_PARTICLES
+
+
+@pytest.mark.slow
+@needs_chrome
+def test_hud_contrast_per_variant(tmp_path: Path) -> None:
+    d = _data(tmp_path)
+    empty = Side(0, 0, 0.0, "in 0 · out 0 · $0.0000")
+    names = [n for n, _ in d.players[:2]]
+    sides = {n: empty for n in names}
+    score = dict.fromkeys(names, 0)
+    start = FRAMES["intro"]
+    beats = [Beat("intro", 0, 0, "", "", "VS", 0, score, sides)]
+    peaks = {}
+    for vid, kinds, _ in MISS_VARIANTS:
+        kind = kinds[0]
+        tag = "tokens" if vid == "timeout" else ""
+        peaks[vid] = start + STRIKE + 1
+        beats.append(Beat(kind, start, 1, names[0], names[1], vid, 30, score, sides, 1.0, tag, vid))
+        start += FRAMES[kind]
+    page = tmp_path / "hud.html"
+    page.write_text(fight_html(replace(d, beats=beats, frames=start)), encoding="utf-8")
+    out = _render(page, tmp_path / "hud")
+    for vid, f in peaks.items():
+        lum = sorted(_luminance(out / f"f{f:05d}.png", (24, 672, 260, 28)))  # left spend HUD plate
+        text, ground = lum[-1], lum[len(lum) // 2]
+        assert (text + 0.05) / (ground + 0.05) >= 4.5, (vid, f)
+
+
+@needs_chrome
+def test_reduced_motion_keeps_frames_clears_shake(tmp_path: Path) -> None:
+    d = _data(tmp_path)
+    page = tmp_path / "f.html"
+    page.write_text(fight_html(d), encoding="utf-8")
+    dest = tmp_path / "rm"
+    node = ["node", "--experimental-websocket", "--no-warnings", str(ROOT / "scripts" / "render_fight.mjs")]
+    env = {**os.environ, "FIGHT_STATS_ONLY": "1"}
+    subprocess.run([*node, f"{page}?motion=reduced", str(dest)], check=True, timeout=600, env=env)
+    stats = json.loads((dest / "stats.json").read_text(encoding="utf-8"))
+    assert stats["frames"] == d.frames
+    for b in d.beats:
+        if b.kind not in {ATTACK, DEFEND}:
+            continue
+        for f in range(b.start, b.start + FRAMES[b.kind]):
+            fx = stats["fx"][f]
+            assert fx["shake"] == 0, (b.variant, f, fx)
+            assert fx["tilt"] == 0, (b.variant, f, fx)

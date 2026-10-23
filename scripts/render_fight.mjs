@@ -1,14 +1,17 @@
 // Frame dumper for render_fight.sh: drives headless Chrome over the DevTools protocol (no npm deps).
-// usage: node --experimental-websocket render_fight.mjs <fight.html> <outdir> [first] [last]
+// usage: node --experimental-websocket render_fight.mjs <fight.html[?motion=reduced]> <outdir> [first] [last]
 // Writes <outdir>/f%05d.png for every frame (or frames first..last), <outdir>/audio.wav and
-// <outdir>/stats.json ({particles: [count per frame]}).
+// <outdir>/stats.json ({frames, particles: [count per frame], fx: [{shake, tilt, pan, zoom, flash, bloom} per frame]}).
+// FIGHT_STATS_ONLY=1 skips the screenshots (tests sweep effect state fast).
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [html, outdir, first, last] = process.argv.slice(2);
+const [target, outdir, first, last] = process.argv.slice(2);
+const [html, query = ""] = target.split("?");
+const statsOnly = process.env.FIGHT_STATS_ONLY === "1";
 mkdirSync(outdir, { recursive: true });
 const chrome = process.env.CHROME || "google-chrome";
 const profile = mkdtempSync(join(tmpdir(), "fight-chrome-"));
@@ -33,17 +36,19 @@ const evaluate = async expr => (await send("Runtime.evaluate", { expression: exp
 
 try {
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
-  await send("Page.navigate", { url: `${pathToFileURL(resolve(html))}#frame=0` });
+  await send("Page.navigate", { url: `${pathToFileURL(resolve(html))}${query && `?${query}`}#frame=0` });
   while (!(await evaluate("window.__ready === true"))) await new Promise(ok => setTimeout(ok, 50));
   const total = await evaluate("window.__frames");
-  const particles = [];
+  const particles = [], fx = [];
   const lo = Number(first ?? 0), hi = Math.min(Number(last ?? total - 1), total - 1);
   for (let f = lo; f <= hi; f++) {
-    particles.push(await evaluate(`window.__draw(${f}), window.__particles`));
+    const s = await evaluate(`window.__draw(${f}), [window.__particles, window.__fx]`);
+    particles.push(s[0]); fx.push(s[1]);
+    if (statsOnly) continue;
     const { data } = await send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 } });
     writeFileSync(join(outdir, `f${String(f - lo).padStart(5, "0")}.png`), Buffer.from(data, "base64"));
   }
-  writeFileSync(join(outdir, "stats.json"), JSON.stringify({ particles }));
+  writeFileSync(join(outdir, "stats.json"), JSON.stringify({ frames: total, particles, fx }));
   writeFileSync(join(outdir, "audio.wav"), Buffer.from(await evaluate("window.__wav()"), "base64"));
 } finally {
   ws.close();
