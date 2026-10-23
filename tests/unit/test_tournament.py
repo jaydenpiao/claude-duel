@@ -139,3 +139,10 @@ def test_unpairable_remainder_is_memoised() -> None:  # an odd clique that may o
     start = time.perf_counter()
     assert tr._pair(order, played) is None
     assert time.perf_counter() - start < 2
+
+
+def test_format_is_a_closed_literal() -> None:
+    """Arch round 3 #13: the format field and ``kind()`` are typed literals, not free strings."""
+    assert tr.TournamentRule(entrants=_entrants(3), format="swiss").kind() == "swiss"
+    with pytest.raises(ValueError, match="round_robin"):
+        tr.TournamentRule(entrants=_entrants(3), format="knockout")  # type: ignore[arg-type]
