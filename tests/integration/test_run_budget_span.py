@@ -1,4 +1,4 @@
-"""R3-1: the run spend cap spans every game of a series or tournament invocation, not one game."""
+"""The run spend cap spans every game of a series or tournament invocation, not one game."""
 
 from __future__ import annotations
 
