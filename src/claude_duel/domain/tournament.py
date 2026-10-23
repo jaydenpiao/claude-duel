@@ -15,8 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
-from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.driver import fold_created
+from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, Rules, SandboxLimits
 from claude_duel.domain.series import SeriesRule

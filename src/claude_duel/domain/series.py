@@ -13,8 +13,8 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.driver import fold_created
+from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
 
