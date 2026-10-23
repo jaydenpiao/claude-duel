@@ -8,6 +8,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 - `duel fight` HTML fight replay of a match log (hitstop, shake, slow-mo KO, seeded synth sound, per-side token/$ HUD)
   and `scripts/render_fight.sh` for MP4/GIF. Shared `usage_text` formatter for HUD and cost lines.
+- Fight miss variants: eight weighted, no-repeat animations (`graze`/`parry`/`dodge`/`shatter`/`stumble`/`feint`/
+  `timeout`/`whiff`) picked in Python from try/token pressure; one `VARIANTS` table drives fx, drawing and sound.
 
 ## [0.1.0]
 First public release.
