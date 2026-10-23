@@ -1,4 +1,4 @@
-"""open_match shared by session.play and tournament pool ."""
+"""open_match shared by session.play and tournament pool."""
 
 from __future__ import annotations
 

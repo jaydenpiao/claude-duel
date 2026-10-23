@@ -20,10 +20,6 @@ from claude_duel.config import Settings
 from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
 from claude_duel.domain.models import AgentSpec, Challenge
-<<<<<<< HEAD
-=======
-from claude_duel.domain.series import game_seed
->>>>>>> 3829eae (open_match helper for session and tournament pool)
 from claude_duel.ports import Metrics
 
 
