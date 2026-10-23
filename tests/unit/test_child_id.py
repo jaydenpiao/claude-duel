@@ -1,4 +1,4 @@
-"""Tournament child id normalisation (L2)."""
+"""Tournament child id normalisation."""
 
 from __future__ import annotations
 
