@@ -33,12 +33,12 @@ BYPASSES = [
     "from os import fork\nfork()\n",
     "from os import environ\nprint(environ)\n",
     "import os\nos.execvp('sh', ['sh'])\n",
-    "import os\nprint(os.listdir('/'))\n",  # L2
-    "import sys\nprint(sys.modules)\n",  # L2
+    "import os\nprint(os.listdir('/'))\n",
+    "import sys\nprint(sys.modules)\n",
     "import sys as s\nprint(s.stdin)\n",
     "import sys\ns = sys\nprint(s.modules)\n",
     "from sys import modules\n",
-    "b = __builtins__\nb.eval('1')\n",  # L3
+    "b = __builtins__\nb.eval('1')\n",
     "print(__loader__)\n",
     "x = getattr(1, 'real')\n",
     "print('{0.__class__}'.format(1))\n",
@@ -55,7 +55,7 @@ BYPASSES = [
     "print(str.mro())\n",
     "d = {}\nprint(d['__builtins__'])\n",
     "print(b'__import__')\n",
-    # round 2, arch #1: attribute chains into submodules
+    # attribute chains into submodules
     "import re\nre.enum.sys.modules['os'].system('id')\n",
     "import json\njson.codecs.open('/etc/passwd')\n",
     "from json import codecs\n",
@@ -80,7 +80,7 @@ def test_policy_accepts_sys_stdin_forms() -> None:
 class TestSubprocess:
     sb = SubprocessSandbox(any_source)
 
-    def test_flag_not_in_proc_environ(self) -> None:  # H2: scan every visible process while a challenge runs
+    def test_flag_not_in_proc_environ(self) -> None:  # scan every visible process while a challenge runs
         seen: list[str] = []
         done = threading.Event()
 
@@ -134,16 +134,16 @@ class TestSubprocess:
         )
         assert self.sb.run(src, "", FLAG, LIM).stdout.strip() == "['__import__']"
 
-    def test_flag_not_on_cmdline(self) -> None:  # H1
+    def test_flag_not_on_cmdline(self) -> None:
         r = self.sb.run("print(open('/proc/self/cmdline').read())", "", FLAG, LIM)
         assert FLAG not in r.stdout
 
-    def test_fork_is_refused(self) -> None:  # H4
+    def test_fork_is_refused(self) -> None:
         r = self.sb.run("import os\nos.fork()\nprint('forked')", "", FLAG, LIM)
         assert "forked" not in r.stdout
         assert r.exit_code != 0
 
-    def test_runaway_output_is_killed(self) -> None:  # L1
+    def test_runaway_output_is_killed(self) -> None:
         started = time.monotonic()
         r = self.sb.run("while True:\n    print('a' * 1000)", "", FLAG, LIM)
         assert r.killed_reason == "output"
@@ -155,7 +155,7 @@ class TestSubprocess:
         assert r.stdout.strip() == FLAG
 
 
-def test_timeout_kills_whole_process_group(tmp_path: Path) -> None:  # H3
+def test_timeout_kills_whole_process_group(tmp_path: Path) -> None:
     marker = tmp_path / "orphan"
     script = f"(sleep 1; touch {marker}) & sleep 30"
     r = execute(["/bin/sh", "-c", script], "", LIM, env={"PATH": "/usr/bin:/bin"}, wall_seconds=0.3)
@@ -165,7 +165,7 @@ def test_timeout_kills_whole_process_group(tmp_path: Path) -> None:  # H3
     assert not marker.exists()
 
 
-def test_children_killed_after_normal_exit(tmp_path: Path) -> None:  # H3
+def test_children_killed_after_normal_exit(tmp_path: Path) -> None:
     marker = tmp_path / "orphan"
     r = execute(["/bin/sh", "-c", f"(sleep 1; touch {marker}) &"], "", LIM, env={"PATH": "/usr/bin:/bin"})
     assert not r.timed_out

@@ -1,4 +1,4 @@
-"""Session: lock before load, stale locks, resume keeps the saved config (arch #5, #6, #7)."""
+"""Session: lock before load, stale locks, resume keeps the saved config."""
 
 from __future__ import annotations
 
