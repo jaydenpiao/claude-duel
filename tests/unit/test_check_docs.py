@@ -64,8 +64,17 @@ def test_modules(tmp_path: Path) -> None:
     root = _repo(tmp_path, "nothing")
     assert check_docs.check_modules(root) == [
         "AGENTS.md: port Sandbox not named",
+        "AGENTS.md: app module engine.py missing from the app summary",
         "AGENTS.md: module app/engine.py not named",
     ]
+
+
+def test_app_summary_names_every_app_module(tmp_path: Path) -> None:
+    """An app module named only in a sub-AGENTS.md still fails: the root app summary must list it."""
+    root = _repo(tmp_path, "- `src/claude_duel/app/`: `other.py`\n`Sandbox` `engine.py`")
+    assert check_docs.check_modules(root) == ["AGENTS.md: app module engine.py missing from the app summary"]
+    (root / "AGENTS.md").write_text("- `src/claude_duel/app/`: `engine.py`\n`Sandbox`")
+    assert check_docs.check_modules(root) == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
