@@ -99,9 +99,7 @@ _CODE = re.compile(
 
 def check_codes(root: Path = ROOT) -> list[str]:
     """Private review codes (``R3-2``, ``arch round 3``, ``r3 #8``, ``S4-3``) explain nothing to outside readers."""
-    files = sorted(
-        f for d in ("src", "tests", "docs") for f in (root / d).rglob("*") if f.suffix in {".py", ".md"}
-    )
+    files = sorted(f for d in ("src", "tests", "docs") for f in (root / d).rglob("*") if f.suffix in {".py", ".md"})
     return [
         f"{f.relative_to(root)}:{i}: review code {m.group()!r}; use the rationale, an issue or an ADR"
         for f in files
