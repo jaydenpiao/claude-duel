@@ -97,3 +97,13 @@ def docker_cmd() -> tuple[str, ...]:
     if os.environ.get("DUEL_REQUIRE_DOCKER") == "1":
         pytest.fail("DUEL_REQUIRE_DOCKER=1 but no usable docker: " + "; ".join(reasons), pytrace=False)
     pytest.skip("docker daemon not reachable")
+
+
+_REAL_DB_VARS = ("DATABASE_URL", "MIGRATE_DATABASE_URL", "EXPORT_DATABASE_URL")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A developer's real results-db URLs must never reach a test; tests use DUEL_TEST_DATABASE_URL."""
+    for var in _REAL_DB_VARS:
+        monkeypatch.delenv(var, raising=False)
