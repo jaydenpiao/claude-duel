@@ -125,6 +125,11 @@ def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
     return a, b
 
 
+def pin_entrants(settings: Settings, entrants: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
+    """Tournament entrants with their effective model written in (arch r3 #15), like ``pin_agents``."""
+    return tuple(e.model_copy(update={"model": settings.model_for(e)}) for e in entrants)
+
+
 def build_engine(
     settings: Settings,
     metrics: Metrics,
