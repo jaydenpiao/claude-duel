@@ -3,4 +3,4 @@ These are design-only specs from the 2026-10-22 design round. They were copied f
 
 Review specs that issues link to:
 - [product-2026-10-22.md](product-2026-10-22.md): product proposals (difficulty gate, benchmark slice, gVisor, replay card, demos).
-- [architecture-round2.md](architecture-round2.md): architecture review round 2 (N1-N13).
+- [architecture-round2.md](architecture-round2.md): architecture review round 2.

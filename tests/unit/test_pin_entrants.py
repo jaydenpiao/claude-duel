@@ -1,4 +1,4 @@
-"""Arch round 3 #15: tournament_created pins each entrant's model, so a later config change can't re-identify it."""
+"""tournament_created pins each entrant's model, so a later config change can't re-identify it (#125)."""
 
 from __future__ import annotations
 
