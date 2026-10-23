@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.driver import fold_created
 from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, Rules, SandboxLimits
 from claude_duel.domain.series import SeriesRule
@@ -218,12 +219,15 @@ def _pair(order: list[str], played: set[frozenset[str]], dead: set[frozenset[str
 
 
 def fold(tournament_id: str, events: Iterable[Event]) -> TournamentState:
-    it = iter(events)
-    first = next(it, None)
-    if first is None or first.type != TOURNAMENT_CREATED:
-        raise EventLogCorruptError("tournament log does not start with tournament_created")
-    check_version(first, TOURNAMENT_SCHEMA_VERSION, "tournament event")
-    state = typed(TournamentState, {"tournament_id": tournament_id, **first.data})
+    state, it = fold_created(
+        events,
+        created_type=TOURNAMENT_CREATED,
+        schema_version=TOURNAMENT_SCHEMA_VERSION,
+        what="tournament",
+        state_type=TournamentState,
+        id_field="tournament_id",
+        id_value=tournament_id,
+    )
     for e in it:
         check_version(e, TOURNAMENT_SCHEMA_VERSION, "tournament event")
         if e.type == POOL_SCORED and state.next_pair() is None and state.pool_points is None:
