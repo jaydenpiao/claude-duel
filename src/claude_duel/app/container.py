@@ -12,7 +12,7 @@ from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
-from claude_duel.adapters.store.file_store import FileMatchStore
+from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
@@ -75,6 +75,12 @@ def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
 
 
+def build_driver_lock(settings: Settings, log_id: str, kind: str) -> FileLock:
+    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (arch r3 #6)."""
+    settings.store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return FileLock(settings.store_dir / f"{log_id}.{kind}.lock")
+
+
 def build_series_log(settings: Settings) -> FileEventLog:
     """Series logs (#38) are ordinary hash-chained event logs named ``<series_id>.series.jsonl``."""
     return FileEventLog(settings.store_dir, suffix=".series.jsonl")
@@ -114,6 +120,11 @@ def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
     return a, b
 
 
+def pin_entrants(settings: Settings, entrants: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
+    """Tournament entrants with their effective model written in (arch r3 #15), like ``pin_agents``."""
+    return tuple(e.model_copy(update={"model": settings.model_for(e)}) for e in entrants)
+
+
 def build_engine(
     settings: Settings,
     metrics: Metrics,
@@ -124,7 +135,7 @@ def build_engine(
 ) -> MatchEngine:
     """Wire an engine for a match's own (saved) agents; settings only supply keys, adapters and caps.
 
-    ``budget`` is the invocation's shared ``CostBudget`` (R3-1): a series or tournament passes one so
+    ``budget`` is the invocation's shared ``CostBudget``: a series or tournament passes one so
     ``run_max_*`` spans every game it plays; omitted, the engine gets a fresh one (a single match)."""
     for agent in agents:
         check_model_allowed(settings.model_for(agent), settings.allow_premium)

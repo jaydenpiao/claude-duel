@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from claude_duel.adapters.providers.registry import VENDORS
 from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import MatchState
-from claude_duel.ports import Completion, SpendLedger
+from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
 # and deliberately not configurable: a config that could add models or lower prices would bypass the spend caps.
@@ -108,11 +108,21 @@ class CostBudget:
                 raise BudgetExceededError(f"budget exceeded: {what}")
         self.check_lifetime()
 
-    def charge(self, match_id: str, model: str, completion: Completion) -> float:
+    def reserve(self, match_id: str, model: str, request: CompletionRequest) -> str:
+        """ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
+        pin, pout = self._prices[model]
+        usd = (len(request.system) + len(request.prompt)) * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
+        return self._ledger.reserve(match_id, model, usd)
+
+    def release(self, match_id: str, model: str, reservation: str) -> None:
+        """The call failed without a charge: cancel its reservation."""
+        self._ledger.record(match_id, model, 0, 0.0, settles=reservation)
+
+    def charge(self, match_id: str, model: str, completion: Completion, reservation: str | None = None) -> float:
         """Count the call against the run caps and the shared ledger; return its cost in USD."""
         usd = self.cost(model, completion)
         self.run_calls += 1
         self.run_usd += usd
         # Every call is ledgered, $0 included, so mispriced or free models stay visible.
-        self._ledger.record(match_id, model, completion.total_tokens, usd)
+        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation)
         return usd
