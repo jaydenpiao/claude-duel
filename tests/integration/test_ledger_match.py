@@ -10,7 +10,10 @@ import pytest
 from pydantic import ValidationError
 
 from claude_duel.adapters.providers.fake import FakeProvider
-from claude_duel.app.budget import BudgetLimits
+from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
+from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
+from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
@@ -20,6 +23,7 @@ from claude_duel.domain.modes import preset
 from claude_duel.domain.series import game_winner
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
+from tests.helpers import any_source
 
 
 class Allocating:
@@ -70,7 +74,8 @@ def test_stake_zero_skips_attack_and_caps_spend(make_engine, new_state, event_lo
     assert all(a.stake == 0 and a.attempts == 0 and not a.solved for a in by_attacker["bob"])
     assert sum(a.stake == 0 for a in by_attacker["alice"]) == 2 * 2
     assert not any(p == "attack" and "AGENT: bob" in t for p, t in provs["bob"].prompts)
-    assert all(a.tokens_used <= 12000 + 2000 for a in by_attacker["alice"])  # pre-call check: <= one call over
+    assert all(a.stake_overshoot == max(0, a.tokens_used - 12000) for a in by_attacker["alice"])
+    assert all(a.stake_overshoot == 0 for a in by_attacker["alice"])  # fake input = len/4 <= the estimate
     assert replay(state, event_log.read("l1")).consistent
 
 
@@ -115,11 +120,14 @@ def test_ledger_rules_reject_unfundable_k() -> None:
 
 def _log_hash(event_log, match_id: str) -> str:  # type: ignore[no-untyped-def]
     """Hash of the log minus what differs per match id (created_seq, id-salted challenge ids)."""
-    rows = [(e.type, {k: v for k, v in e.data.items() if k != "created_seq"}) for e in event_log.read(match_id)]
-    # Attacks run concurrently, so order within a phase may interleave (pre-existing, not ledger): hash the sorted rows.
-    lines = sorted(json.dumps(r, sort_keys=True) for r in rows)
-    text = re.sub(r"(r\d+-\w+-\d+)-[0-9a-f]{8}", r"\1", "\n".join(lines))
-    return hashlib.sha256(text.encode()).hexdigest()
+    return hashlib.sha256("\n".join(_log_rows(event_log, match_id)).encode()).hexdigest()
+
+
+def _log_rows(event_log, match_id: str) -> list[str]:  # type: ignore[no-untyped-def]
+    """Rows in log order (ordering is part of what's tested), minus per-match ids and wall-clock latency."""
+    drop = {"created_seq", "elapsed_ms"}
+    rows = [(e.type, {k: v for k, v in e.data.items() if k not in drop}) for e in event_log.read(match_id)]
+    return [re.sub(r"(r\d+-\w+-\d+)-[0-9a-f]{8}", r"\1", json.dumps(r, sort_keys=True)) for r in rows]
 
 
 def test_same_seed_same_log_and_scores(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
@@ -127,7 +135,11 @@ def test_same_seed_same_log_and_scores(make_engine, new_state, event_log) -> Non
     one = make_engine().run(_ledger(new_state, "d1"))
     two = make_engine().run(_ledger(new_state, "d2"))
     assert one.scores == two.scores
-    assert _log_hash(event_log, "d1") == _log_hash(event_log, "d2")
+    a, b = _log_rows(event_log, "d1"), _log_rows(event_log, "d2")
+    first = next(((i, x, y) for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), None)
+    assert first is None, f"first differing row: {first}"
+    assert len(a) == len(b)
+    assert _log_hash(event_log, "d1") == _log_hash(event_log, "d2")  # replay consistency: test_ledger_match_completes
 
 
 def test_skipped_challenge_gets_no_attack_calls(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
@@ -141,16 +153,25 @@ def test_skipped_challenge_gets_no_attack_calls(make_engine, new_state) -> None:
     assert not any(cid in t for cid in skipped for t in attack_prompts)
 
 
+def _round_one(prompts: list[tuple[str, str]]) -> list[str]:
+    """An agent's prompts before its first round-2 prompt, with id-salted challenge ids normalized."""
+    out = []
+    for _, text in prompts:
+        if "ROUND: 2" in text:
+            break
+        out.append(re.sub(r"(r\d+-\w+-\d+)-[0-9a-f]{8}", r"\1", text))
+    return out
+
+
 def test_stakes_never_leak_before_reveal(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
-    """Review item 7: no round-1 prompt shows this round's stakes, own or the opponent's."""
-    alice, bob = '{"stakes": [6007, 0, 5993]}', '{"stakes": [7001, 3011, 1988]}'
-    provs = {"alice": Allocating(alice), "bob": Allocating(bob)}
-    make_engine(providers=provs).run(_ledger(new_state))
-    marks = ("6007", "5993", "7001", "3011", "1988")
-    for prov in provs.values():
-        round_one = [t for _, t in prov.prompts if "ROUND: 1" in t]
-        assert round_one
-        assert not [m for t in round_one for m in marks if m in t]
+    """Spec test 4/7, differential: alice's round-1 allocation changes nothing bob sees in round 1."""
+    seen = []
+    for mid, alice in (("x1", '{"stakes": [6000, 0, 6000]}'), ("x2", '{"stakes": [1000, 9000, 2000]}')):
+        provs = {"alice": Allocating(alice), "bob": Allocating('{"stakes": [4000, 4000, 4000]}')}
+        make_engine(providers=provs).run(_ledger(new_state, mid))
+        seen.append(_round_one(provs["bob"].prompts))
+    assert len(seen[0]) > 3
+    assert seen[0] == seen[1]
 
 
 @pytest.mark.parametrize("calls", [2, 3, 5])
@@ -160,3 +181,39 @@ def test_ledger_match_stops_at_the_call_cap(make_engine, new_state, store, calls
     with pytest.raises(BudgetExceededError):
         make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
     assert store.load("l1").stage is Stage.FAILED
+
+
+def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Spec test 10 (dollars): priced like gpt-5-nano, allocate calls included, the match cap aborts the match
+    once spend reaches it, before any further call. CAPPED (void) follows once #171 lands."""
+    spend = FileSpendLedger(tmp_path / "spend.jsonl")
+    cap = 0.0004
+    engine = MatchEngine(
+        {"alice": FakeProvider(skill=2), "bob": FakeProvider(skill=5)},
+        SubprocessSandbox(any_source),
+        store,
+        event_log,
+        InMemoryMetrics(),
+        CostBudget(BudgetLimits(match_max_usd=cap), spend, DEFAULT_PRICES),
+        dict.fromkeys(("alice", "bob"), "gpt-5-nano"),
+    )
+    with pytest.raises(BudgetExceededError, match="match"):
+        engine.run(_ledger(new_state))
+    assert store.load("l1").stage is Stage.FAILED
+    charged = [e.data for e in event_log.read("l1") if e.type == ev.CALL_CHARGED]
+    usd = [d["usd"] for d in charged]
+    assert usd
+    assert sum(usd[:-1]) < cap <= sum(usd)  # checked before each call: the last call is the one that crossed it
+
+
+def test_no_attack_call_when_the_stake_left_is_below_the_floor(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    """Review #192 (a): max_tokens is fitted to the stake; under STAKE_FLOOR the attack stops with no call."""
+    provs = {"alice": Allocating('{"stakes": [300, 300, 300]}'), "bob": Allocating('{"stakes": [0, 0, 0]}')}
+    st0 = _ledger(new_state)
+    assert st0.rules.ledger is not None
+    small = st0.rules.ledger.model_copy(update={"min_alloc": 100})
+    st0.rules = st0.rules.model_copy(update={"ledger": small})
+    state = make_engine(providers=provs).run(st0)
+    mine = [a for a in state.attacks.values() if a.attacker == "alice"]
+    assert all(a.reason == "stake exhausted" and a.attempts == 0 for a in mine)
+    assert not [p for p, _ in provs["alice"].prompts if p == "attack"]
