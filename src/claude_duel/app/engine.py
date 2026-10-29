@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, variety
+from claude_duel.domain import contract, findings, ledger, memory, policy, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact
@@ -475,6 +475,9 @@ class MatchEngine:
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
+        if state.rules.ledger is not None:
+            for agent in state.agents:
+                self._allocate(state, agent.name)
         for ch in state.round_challenges(state.round):
             if not state.validations[ch.id].valid or ch.spec is None:
                 continue
@@ -482,10 +485,60 @@ class MatchEngine:
             key = f"{ch.id}:{attacker}"
             if key in state.attacks:
                 continue
-            attack = self._solve(state, ch, key, attacker)
+            stake = self._stake(state, ch, attacker)
+            if stake == 0:
+                attack = Attack(
+                    challenge_id=ch.id, attacker=attacker, solved=False, attempts=0, tokens_used=0,
+                    reason="skipped: stake 0", stake=0,
+                )  # fmt: skip
+            else:
+                attack = self._solve(state, ch, key, attacker, stake)
+                if stake is not None:
+                    attack = attack.model_copy(update={"stake": stake})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
-    def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str) -> Attack:
+    @staticmethod
+    def _targets(state: MatchState, attacker: str) -> list[Challenge]:
+        """The opponent's challenges this round, in stake order (by id)."""
+        author = state.opponent(attacker)
+        return sorted((c for c in state.round_challenges(state.round) if c.author == author), key=lambda c: c.id)
+
+    def _stake(self, state: MatchState, ch: Challenge, attacker: str) -> int | None:
+        stakes = state.stakes.get(f"{state.round}:{attacker}")
+        if stakes is None:
+            return None
+        return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
+
+    def _allocate(self, state: MatchState, attacker: str) -> None:
+        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split."""
+        rule = state.rules.ledger
+        assert rule is not None
+        if f"{state.round}:{attacker}" in state.stakes:
+            return  # idempotent resume
+        targets = self._targets(state, attacker)
+        rows = [
+            (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
+            for c in targets
+        ]
+        prompt = agents.allocate_prompt(
+            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker)
+        )
+        for cid in state.challenges:
+            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+        raw: object = None
+        if allowance.empty(state, attacker) is None:
+            completion = self._complete(state, attacker, prompt, "allocate")
+            try:
+                if not completion.truncated:
+                    raw = agents.parse_allocation(completion.text)
+            except MalformedOutputError:
+                self._metrics.incr("model.malformed", purpose="allocate")
+        stakes, fallback = ledger.settle_stakes(raw, len(targets), rule)
+        if fallback:
+            self._metrics.incr("ledger.alloc_fallback")
+        self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=stakes, fallback=fallback)
+
+    def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
         """Attempts are checkpointed one by one; a resumed attack replays history instead of re-paying."""
         spec = ch.spec
         assert spec is not None, "only valid challenges are attacked"
@@ -497,6 +550,8 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=True, reason="flag captured")
             if len(history) >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
+            if stake is not None and tokens >= stake:
+                return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             if tokens >= state.attack_token_budget(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
             if (empty := allowance.empty(state, attacker)) is not None:

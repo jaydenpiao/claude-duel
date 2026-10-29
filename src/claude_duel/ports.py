@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from claude_duel.domain.models import Event, MatchState, SandboxLimits
 
-Purpose = Literal["build", "attack"]
+Purpose = Literal["build", "attack", "allocate"]
 
 
 class CompletionRequest(BaseModel):

@@ -2,16 +2,9 @@
 
 from collections.abc import Sequence
 
-from pydantic import Field
+from claude_duel.domain.models import LedgerRule
 
-from claude_duel.domain.models import _Frozen
-
-
-class LedgerRule(_Frozen):
-    """Per-round token stakes an attacker splits across the opponent's challenges."""
-
-    attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
-    min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+__all__ = ["LedgerRule", "even_split", "settle_stakes"]
 
 
 def even_split(k: int, rule: LedgerRule) -> tuple[int, ...]:

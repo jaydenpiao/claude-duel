@@ -105,6 +105,13 @@ class MemoryRule(_Frozen):
     source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
 
 
+class LedgerRule(_Frozen):
+    """Sealed Ledger stakes (design-core-logic.md): tokens an attacker splits across the opponent's challenges."""
+
+    attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
+    min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+
+
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
 
 
@@ -138,6 +145,7 @@ class Rules(_Frozen):
     scoring: ScoringRule = ScoringRule()
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
+    ledger: LedgerRule | None = Field(default=None, description="Sealed Ledger stakes (mode ledger); None = off")
     wallet: WalletRule = WalletRule()
     clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
@@ -302,6 +310,7 @@ class MatchState(BaseModel):
     stage: Stage = Stage.PENDING
     round: int = 0
     challenges: dict[str, Challenge] = Field(default_factory=dict)
+    stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)
