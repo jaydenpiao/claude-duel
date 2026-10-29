@@ -33,6 +33,7 @@ MODES: dict[str, Rules] = {
         max_attempts=3,
         scoring=ScoringRule(kind="ledger"),
         ledger=LedgerRule(),
+        clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
     ),
 }
