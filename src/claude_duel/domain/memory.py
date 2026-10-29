@@ -10,6 +10,7 @@ from collections import Counter
 
 from claude_duel.domain.flags import redact
 from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
+from claude_duel.domain.stakes import keystone_targets
 
 OMITTED = "[older rounds omitted]"
 PAYLOAD_CHARS = 120
@@ -61,12 +62,14 @@ def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) 
 
 def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attack], rule: MemoryRule) -> str:
     lines = [f"Round {r}:"]
+    stones = set(keystone_targets(state, r).values())  # revealed only, so past rounds never leak a sealed pick
     for ch in sorted(state.round_challenges(r), key=lambda c: c.id):
         atk = attacks.get(ch.id)
+        mark = " (keystone)" if ch.id in stones else ""
         if ch.author == agent:
-            lines.append(f"- yours {_title(ch)}: {_outcome(state, ch, atk, yours=True)}")
+            lines.append(f"- yours{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=True)}")
         else:
-            lines.append(f"- theirs {_title(ch)}: {_outcome(state, ch, atk, yours=False)}")
+            lines.append(f"- theirs{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=False)}")
             if ch.spec is not None:
                 source = redact(ch.spec.source)
                 cut = source[: rule.source_chars] + ("\n…" if len(source) > rule.source_chars else "")

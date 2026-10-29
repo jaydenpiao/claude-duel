@@ -131,8 +131,9 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
-        else:
-            scores[author] += defense_award(stone.spec, facts.round_no, rule)
+        else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
+            award = defense_award(stone.spec, facts.round_no, rule)
+            scores[author] += award // 2 if stone.probe_solved else award
     return scores
 
 

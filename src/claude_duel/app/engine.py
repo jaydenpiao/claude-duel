@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import time
 from collections.abc import Mapping
 
@@ -55,6 +56,9 @@ REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the refe
 def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     raw = f"{match_id}:{round_no}:{author}:{index}"
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
+
+
+STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
 
 
 class MatchEngine:
@@ -388,18 +392,33 @@ class MatchEngine:
             assert_no_flag(note, f, "note")
         self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
-    def _complete(self, state: MatchState, agent: str, prompt: str, purpose: Purpose) -> Completion:
+    def _complete(
+        self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
+    ) -> Completion:
         """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
-        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``."""
-        completion = self._call(state, agent, self._request(state, prompt, purpose))
+        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``.
+        ``left`` (ledger: stake tokens left) fits max_tokens to the stake; no repair call below ``STAKE_FLOOR``."""
+        completion = self._call(state, agent, self._request(state, prompt, purpose, left))
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
-            completion = self._call(state, agent, self._request(state, f"{prompt}\n\n{agents.TRUNCATED_HINT}", purpose))
+            repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
+            rest = None if left is None else left - completion.total_tokens
+            if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
+                return completion
+            completion = self._call(state, agent, self._request(state, repair, purpose, rest))
         return completion
 
-    def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
+    @staticmethod
+    def _fit(state: MatchState, prompt: str, left: int) -> int:
+        """Output tokens that fit in ``left`` after a deterministic input estimate (bytes / 4, rounded up)."""
+        system = agents.system_prompt(state.framing_text)
+        return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
+
+    def _request(self, state: MatchState, prompt: str, purpose: Purpose, left: int | None = None) -> CompletionRequest:
         cap = state.rules.wallet.max_output_tokens
         tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+        if left is not None:
+            tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
             system=agents.system_prompt(state.framing_text),
             prompt=prompt,
@@ -495,7 +514,8 @@ class MatchEngine:
             else:
                 attack = self._solve(state, ch, key, attacker, stake)
                 if stake is not None:
-                    attack = attack.model_copy(update={"stake": stake})
+                    over = max(0, attack.tokens_used - stake)  # only the input-estimate gap can land here
+                    attack = attack.model_copy(update={"stake": stake, "stake_overshoot": over})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
     def _draw_terrain(self, state: MatchState) -> None:
@@ -544,7 +564,11 @@ class MatchEngine:
         ]
         own = stakes.own_challenges(state.challenges, state.round, attacker)
         valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
-        own_rows = [(c.spec.title if c.spec else "", valid.get(c.id, False)) for c in own] if rule.keystone else None
+        own_rows = (
+            [(c.spec.title if c.spec else "", c.spec.source if c.spec else "", valid.get(c.id, False)) for c in own]
+            if rule.keystone
+            else None
+        )
         prompt = agents.allocate_prompt(
             attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
         )
@@ -602,8 +626,11 @@ class MatchEngine:
                 state.rules.retry_hint,
             )
             assert_no_flag(prompt, flag, "attack prompt")
+            left = None if stake is None else stake - tokens
+            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+                return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
-            completion = self._complete(state, attacker, prompt, "attack")
+            completion = self._complete(state, attacker, prompt, "attack", left)
             self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
