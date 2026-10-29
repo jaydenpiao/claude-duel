@@ -141,6 +141,8 @@ class MatchEngine:
         events = self._log.read(state.match_id)
         if not events:
             self._checkpoint(state, ev.MATCH_CREATED, **ev.created_data(state))
+            if self._budget.override is not None:
+                self._checkpoint(state, ev.BUDGET_OVERRIDDEN, **self._budget.override.model_dump())
             return
         for event in events:
             if event.seq > state.last_seq:
@@ -178,7 +180,8 @@ class MatchEngine:
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: wallet, then budget caps (strictest wins), call, charge, checkpoint."""
-        allowance.check(state, agent)
+        if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (arch r3 #8)
+            allowance.check(state, agent)
         self._budget.check(state)
         if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
             raise DeadlineExceededError(
