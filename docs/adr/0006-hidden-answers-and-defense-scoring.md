@@ -16,3 +16,17 @@ Status: accepted.
 `rules.gate_mode = "score"` keeps a challenge the difficulty-gate probe solves on its first try, instead of
 sending it back to repair. The arena marks it `Challenge.probe_solved`; authors cannot set this, since the
 arena overwrites it. Its defense award is halved. The default, `"reject"`, is unchanged.
+
+## Addendum: defender-side penalty lines (2026-10-29, ledger)
+Modes may charge the defender *penalty lines* (keystone captured, novelty heat), provided:
+1. Each is logged as its own line, never folded into `defense_award` or a capture award. Heat is recorded in
+   `round_scored.heat` (challenge id -> `heat_penalty`) and replay recomputes it.
+2. `defense_award` stays >= the largest capture award for that challenge; the inequality is evaluated on awards,
+   before penalty lines.
+3. Each line has a documented cap: heat <= `heat_max_pct`% (50) of that challenge's defense award,
+   `min(D*max//100, D*(h-thr)//(100-thr))`; keystone captured = `base // 2`.
+4. No line credits the opponent or raises a capture above `solve_award`.
+5. Lines are pure functions of the event log. Heat similarity is a pre-order AST token LCS over logged source;
+   the interpreter version that parsed it is recorded in `match_created.python`.
+
+The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
