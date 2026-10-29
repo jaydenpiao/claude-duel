@@ -15,6 +15,7 @@ class Stage(StrEnum):
     ATTACK = "attack"
     SCORE = "score"
     COMPLETE = "complete"
+    CAPPED = "capped"  # a match-scoped cap was hit: terminal, void (ADR 0014)
     FAILED = "failed"
 
 
@@ -64,6 +65,9 @@ class ScoringRule(_Frozen):
     # efficiency unit (#35): "tokens" (same-vendor) or "usd" (cross-vendor: recorded micro-$)
     unit: Literal["tokens", "usd"] = "tokens"
     reference_usd_micros: int = Field(default=2000, ge=1)
+    # ADR 0014: a CAPPED match is "void" (no winner, excluded from ratings) or, for casual play, "partial"
+    # (a series counts it on the rounds already scored). Ratings always exclude CAPPED matches.
+    on_cap: Literal["void", "partial"] = "void"
     # timed (#36): a capture loses min(full - 1, floor(max_penalty * min(1, tokens_used / par_tokens)))
     par_tokens: int = Field(default=8000, ge=1)
 
@@ -265,6 +269,17 @@ class Usage(BaseModel):
     elapsed_ms: int = 0  # recorded provider time; the match deadline is measured on it, so resume keeps it
 
 
+class CapHit(_Frozen):
+    """Why a match ended ``CAPPED`` (ADR 0014)."""
+
+    limit: Literal["match_usd", "match_tokens", "match_calls"]
+    spent: float
+    cap: float
+    breaching_agent: str | None  # whose charged call took usage to the cap (None: cap reached before any call)
+    stage: Stage
+    round: int
+
+
 class Finding(_Frozen):
     """A detector hit (domain/findings.py). Logged for review; never changes scores."""
 
@@ -310,6 +325,8 @@ class MatchState(BaseModel):
     last_seq: int = -1
     failure: str | None = None
     failed_stage: Stage | None = None
+    capped: CapHit | None = None
+    last_agent: str | None = None  # agent of the latest charged call (the breacher if the next call is capped)
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
