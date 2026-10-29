@@ -29,6 +29,8 @@ from claude_duel.app.container import (
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.export import write as write_export
+from claude_duel.app.experiment import footer as experiment_footer
+from claude_duel.app.experiment import run_stakes
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -101,8 +103,16 @@ def _parser() -> argparse.ArgumentParser:
     db_p = sub.add_parser("db", help="results database administration")
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
-    exp = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
-    exp.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    exp_out = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
+    exp_out.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
+    exp_sub = exp.add_subparsers(dest="experiment", required=True)
+    stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
+    stakes.add_argument("--prereg", type=Path, required=True, help="pre-registration written before any spend")
+    stakes.add_argument("--seeds", type=int, default=1, help="seeds; each runs once per framing")
+    stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
+    stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
+    stakes.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -181,6 +191,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "export": lambda: _export(settings, args.out),
         "db": lambda: _migrate(settings),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
+        "experiment": lambda: _experiment(settings, args),
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
@@ -192,6 +203,24 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _experiment(settings: Settings, args: argparse.Namespace) -> int:
+    if args.override_reason and args.run_max_usd is None:
+        raise ConfigError("--override-reason needs --run-max-usd")
+    result = run_stakes(settings, args.prereg, args.seeds, InMemoryMetrics(), args.run_max_usd, args.override_reason)
+    if args.format == "json":
+        print(json.dumps(result))
+        return 0
+    for m in result["matches"]:
+        print(f"{m['match_id']}  {m['seed']}  {m['framing']:<11} {m['stage']}")
+    if result["stopped"]:
+        print(f"stopped: {result['stopped']}")
+    b = result["budget"]
+    print(f"{result['run_id']}: {len(result['matches'])} matches, ${b['run_usd']:.4f} of ${b['run_max_usd']:.2f}")
+    if line := experiment_footer(result):
+        print(line)
+    return 0
 
 
 def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
