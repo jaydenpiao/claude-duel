@@ -24,6 +24,8 @@ HOOKS = {
     ev.ATTACK_ATTEMPTED: "_attempted",
     ev.CHALLENGE_ATTACKED: "_attacked",
     ev.ROUND_SCORED: "_scored",
+    ev.STAKES_SET: "_staked",
+    ev.KEYSTONE_REVEALED: "_revealed",
     ev.MATCH_FAILED: "_failed",
     ev.MATCH_RECOVERED: "_recovered",
     ev.FINDING_FLAGGED: "_flagged",
