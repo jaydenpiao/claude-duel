@@ -17,6 +17,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
+from claude_duel.domain import stakes
 from claude_duel.domain.errors import BudgetExceededError
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
 from claude_duel.domain.modes import preset
@@ -252,3 +253,17 @@ def test_no_attack_call_when_the_stake_left_is_below_the_floor(make_engine, new_
     mine = [a for a in state.attacks.values() if a.attacker == "alice"]
     assert all(a.reason == "stake exhausted" and a.attempts == 0 for a in mine)
     assert not [p for p, _ in provs["alice"].prompts if p == "attack"]
+
+
+def test_keystone_pick_shows_sources_and_memory_recalls_past_keystones(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    provs = {
+        "alice": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 1}'),
+        "bob": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 0}'),
+    }
+    state = make_engine(providers=provs).run(_ledger(new_state))
+    alloc = [p for purpose, p in provs["alice"].prompts if purpose == "allocate"]
+    assert len(alloc) == 2
+    own = stakes.own_challenges(state.challenges, 1, "alice")
+    assert all(c.spec is not None and c.spec.source.strip().splitlines()[0] in alloc[0] for c in own)
+    assert "(keystone)" not in alloc[0]  # nothing to recall in round 1
+    assert alloc[1].count("(keystone)") == 2  # round 2 memory: alice's and bob's revealed round-1 keystones

@@ -16,8 +16,8 @@ from tests.unit.test_domain import spec
 RULE = ScoringRule()
 
 
-def _facts(solved: bool, valid: bool = True, keystone: bool = True) -> RoundFacts:
-    ch = Challenge(id="c0", round=1, author="a", spec=spec(difficulty=2))
+def _facts(solved: bool, valid: bool = True, keystone: bool = True, probed: bool = False) -> RoundFacts:
+    ch = Challenge(id="c0", round=1, author="a", spec=spec(difficulty=2), probe_solved=probed)
     atk = Attack(challenge_id="c0", attacker="b", solved=solved, attempts=1, tokens_used=0, reason="r", stake=4000)
     v = Validation(challenge_id="c0", valid=valid, reason="r")
     return RoundFacts(1, ("a", "b"), (ch,), {"c0": v}, {"c0": atk}, {"a": "c0"} if keystone else {})
@@ -28,6 +28,14 @@ def test_defended_keystone_doubles_defense() -> None:
     stone = SCORERS["ledger"](_facts(False), RULE)
     assert stone["a"] - plain["a"] == defense_award(spec(difficulty=2), 1, RULE)
     assert stone["b"] == plain["b"]
+
+
+def test_probe_solved_keystone_doubles_its_halved_defense() -> None:
+    plain = SCORERS["ledger"](_facts(False, keystone=False, probed=True), RULE)
+    stone = SCORERS["ledger"](_facts(False, probed=True), RULE)
+    half = defense_award(spec(difficulty=2), 1, RULE) // 2
+    assert plain["a"] == half
+    assert stone["a"] == 2 * half
 
 
 def test_captured_keystone_costs_half_base_and_never_raises_the_capture() -> None:

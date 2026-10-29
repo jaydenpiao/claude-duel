@@ -304,7 +304,7 @@ def allocate_prompt(
     min_alloc: int,
     targets: list[tuple[str, str, str, bool]],
     memory: str = "",
-    own: list[tuple[str, bool]] | None = None,
+    own: list[tuple[str, str, bool]] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -327,7 +327,8 @@ def allocate_prompt(
     if own:
         lines.append("Your own challenges this round (pick one as your keystone; your opponent sees only a hash):")
         lines += [
-            f"  keystone {i}: {fence(title)} [{'valid' if ok else 'INVALID'}]" for i, (title, ok) in enumerate(own)
+            f"  keystone {i}: {fence(title)} [{'valid' if ok else 'INVALID'}]\n{fence(src)}"
+            for i, (title, src, ok) in enumerate(own)
         ]
         lines.append(
             "Keystone: if it survives, its defense pays double; if captured, you lose half its capture value. "

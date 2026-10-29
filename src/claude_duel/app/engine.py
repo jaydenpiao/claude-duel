@@ -542,7 +542,11 @@ class MatchEngine:
         ]
         own = stakes.own_challenges(state.challenges, state.round, attacker)
         valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
-        own_rows = [(c.spec.title if c.spec else "", valid.get(c.id, False)) for c in own] if rule.keystone else None
+        own_rows = (
+            [(c.spec.title if c.spec else "", c.spec.source if c.spec else "", valid.get(c.id, False)) for c in own]
+            if rule.keystone
+            else None
+        )
         prompt = agents.allocate_prompt(
             attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
         )
