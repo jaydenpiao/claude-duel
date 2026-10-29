@@ -1,5 +1,5 @@
 # prod profile. Secrets come from env only (OPENAI_API_KEY).
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5-nano"
 
 [budget]
 match_max_usd = 1.00
