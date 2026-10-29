@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, ledger, memory, policy, variety
+from claude_duel.domain import contract, findings, memory, policy, stakes, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact
@@ -533,10 +533,10 @@ class MatchEngine:
                     raw = agents.parse_allocation(completion.text)
             except MalformedOutputError:
                 self._metrics.incr("model.malformed", purpose="allocate")
-        stakes, fallback = ledger.settle_stakes(raw, len(targets), rule)
+        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
-        self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=stakes, fallback=fallback)
+        self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
         """Attempts are checkpointed one by one; a resumed attack replays history instead of re-paying."""

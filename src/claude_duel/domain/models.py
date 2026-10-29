@@ -168,6 +168,16 @@ class Rules(_Frozen):
         data["scoring"] = base | moved  # an explicit legacy override wins (e.g. over a preset's scoring)
         return data
 
+    @model_validator(mode="after")
+    def _ledger_k_fits(self) -> Rules:
+        """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
+        if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
+            raise ValueError(
+                f"ledger: {self.challenges_per_round} challenges per round cannot each get min_alloc "
+                f"{self.ledger.min_alloc} from attack_tokens {self.ledger.attack_tokens}"
+            )
+        return self
+
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""
         return self.max_source_bytes_base * round_no

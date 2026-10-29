@@ -37,7 +37,7 @@ class AttackMove(BaseModel):
 
 class AllocationMove(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    stakes: list[object] = Field(max_length=10)  # checked by domain/ledger.settle_stakes, not here
+    stakes: list[object] = Field(max_length=10)  # checked by domain/stakes.settle_stakes, not here
 
 
 EXAMPLE_CHALLENGE = {

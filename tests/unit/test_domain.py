@@ -216,7 +216,7 @@ def _facts(outcomes: list[tuple[str, int, int]], round_no: int) -> RoundFacts:
         if outcome in ("held", "captured"):
             attacks[cid] = Attack(
                 challenge_id=cid, attacker="ba"[i % 2], solved=outcome == "captured", attempts=attempts,
-                tokens_used=1, reason="r",
+                tokens_used=1, reason="r", stake=1000,
             )  # fmt: skip
     return RoundFacts(round_no, ("a", "b"), tuple(challenges), validations, attacks)
 
