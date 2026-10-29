@@ -70,11 +70,25 @@ def test_errors(env: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path) -
 def test_budget_abort_then_resume(
     env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "5")
+    monkeypatch.setenv("DUEL_RUN_MAX_CALLS", "5")  # run caps stay a resumable failure (ADR 0014)
     assert main(["run", "--match-id", "cap"]) == 2
     assert "budget exceeded" in capsys.readouterr().err
-    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "500")
+    monkeypatch.setenv("DUEL_RUN_MAX_CALLS", "500")
     assert main(["resume", "cap"]) == 0
+
+
+def test_match_cap_is_terminal_and_resume_is_a_no_op(
+    env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "5")
+    assert main(["run", "--match-id", "cap"]) == 3
+    assert "match capped: match_calls 5/5 by " in capsys.readouterr().err
+    logs = sorted(env.rglob("cap.events.jsonl"))
+    before = [p.read_bytes() for p in logs]
+    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "500")  # raising the cap does not reopen a capped match
+    assert main(["resume", "cap"]) == 3
+    assert [p.read_bytes() for p in logs] == before
+    assert logs
 
 
 OPENAI = (AgentSpec(name="a", provider="openai"), AgentSpec(name="b"))
