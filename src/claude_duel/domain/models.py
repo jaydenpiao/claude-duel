@@ -55,7 +55,7 @@ class SandboxLimits(_Frozen):
 class ScoringRule(_Frozen):
     """Which pure scorer (``scoring.SCORERS``) and its parameters (ADR 0007)."""
 
-    kind: Literal["classic", "efficiency", "timed"] = "classic"
+    kind: Literal["classic", "efficiency", "timed", "ledger"] = "classic"
     solve_points: int = 10
     defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
     invalid_penalty: int = 5
@@ -242,6 +242,7 @@ class Attack(_Frozen):
     tokens_used: int
     reason: str
     usd_micros: int = 0
+    stake: int | None = Field(default=None, ge=0)  # ledger mode: tokens the attacker allocated here (0 = skipped)
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
