@@ -45,6 +45,14 @@ class BudgetExceededError(DuelError):
     """Arena cost circuit breaker tripped."""
 
 
+class MatchCapError(BudgetExceededError):
+    """A match-scoped cap (calls, tokens or $) was reached: the match ends ``CAPPED`` (ADR 0014)."""
+
+    def __init__(self, limit: str, spent: float, cap: float) -> None:
+        super().__init__(f"budget exceeded: {limit.replace('_', ' ')} {spent:g}/{cap:g}")
+        self.limit, self.spent, self.cap = limit, spent, cap
+
+
 class MalformedOutputError(DuelError):
     """Model output could not be parsed."""
 

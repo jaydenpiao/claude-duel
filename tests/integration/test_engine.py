@@ -119,8 +119,8 @@ def test_crash_recovery_is_idempotent(make_engine, new_state, store, event_log) 
 
 
 def test_budget_breaker_trips(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
-    with pytest.raises(BudgetExceededError, match="match calls"):
-        make_engine(budget=BudgetLimits(match_max_calls=3)).run(new_state())
+    with pytest.raises(BudgetExceededError, match="run calls"):  # run caps fail resumably; match caps cap (ADR 0014)
+        make_engine(budget=BudgetLimits(run_max_calls=3)).run(new_state())
     assert store.load("m1").stage is Stage.FAILED
 
 
