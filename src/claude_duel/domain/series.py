@@ -97,10 +97,21 @@ def game_winner(state: MatchState) -> str | None:
     (a, sa), (b, sb) = sorted(final.items())
     if sa != sb:
         return a if sa > sb else b
+    if state.rules.scoring.kind == "ledger":  # fewer recorded dollars, then fewer tokens (design-core-logic.md 4.3)
+        key = {n: _spend(state, n) for n in (a, b)}
+        if key[a] != key[b]:
+            return a if key[a] < key[b] else b
+        return None
     spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
     if spent[a] != spent[b]:
         return a if spent[a] < spent[b] else b
     return None
+
+
+def _spend(state: MatchState, name: str) -> tuple[int, int]:
+    """(micro-dollars, tokens) recorded in this agent's ``call_charged`` events; never wall time."""
+    u = state.usage_by_agent.get(name)
+    return (round(u.usd * 1_000_000), u.tokens) if u else (0, 0)
 
 
 def game_of(game_no: int, state: MatchState, decider: MatchState | None = None) -> Game:
