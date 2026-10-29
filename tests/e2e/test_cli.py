@@ -135,4 +135,5 @@ def test_live_openai_tiny_match(
     print(out)
     assert code == 0
     assert "replay verified ✓" in out
-    assert "of $50 burned" in out
+    assert "of $33 cap" in out  # the enforced lifetime cap, not the key limit ($50)
+    assert "$50" not in out
