@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, SandboxLimits
 from claude_duel.ports import RunResult
 
+_HOST_REPO = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.docker
 
 FLAG = "DUEL{0123456789abcdef0123456789abcdef}"
@@ -114,7 +116,7 @@ def test_read_only_non_root_no_host_files(sb: DockerSandbox, docker_cmd: tuple[s
     src = (
         "import os\nprint(os.getuid())\n"
         "try:\n    open('/x', 'w')\n    print('wrote')\nexcept OSError:\n    print('ro')\n"
-        "print(os.path.exists('/workspace'), os.path.exists('/home/box'))"
+        f"print(os.path.exists({str(_HOST_REPO)!r}), os.path.exists({str(Path.home())!r}))"
     )
     assert _raw(sb, docker_cmd, src).stdout.split() == ["65534", "ro", "False", "False"]
 

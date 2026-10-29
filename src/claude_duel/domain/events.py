@@ -45,6 +45,7 @@ CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
+BUDGET_OVERRIDDEN = "budget_overridden"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -140,6 +141,16 @@ class ChallengeAttacked(_Payload):
     attack: Attack
 
 
+class BudgetOverridden(_Payload):
+    """Audit record of a run-cap override (design-stakes-modes.md). It changes no match state."""
+
+    field: str
+    default: float
+    value: float
+    reason: str
+    ceiling: float
+
+
 class NoteRecorded(_Payload):
     """An agent's private scratchpad note (memory kind ``summary+scratchpad``), already flag-redacted."""
 
@@ -226,6 +237,10 @@ def _attacked(state: MatchState, p: ChallengeAttacked) -> None:
     state.attacks[p.key] = p.attack
 
 
+def _overridden(state: MatchState, p: BudgetOverridden) -> None:
+    del state, p  # audit only
+
+
 def _noted(state: MatchState, p: NoteRecorded) -> None:
     state.notes.setdefault(p.agent, {})[p.round] = p.text  # last note of the round wins
 
@@ -251,6 +266,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     ROUND_SCORED: (RoundScored, _scored),
     FINDING_FLAGGED: (FindingFlagged, _flagged),
     NOTE_RECORDED: (NoteRecorded, _noted),
+    BUDGET_OVERRIDDEN: (BudgetOverridden, _overridden),
 }
 
 

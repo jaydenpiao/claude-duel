@@ -159,6 +159,8 @@ class MatchEngine:
         events = self._log.read(state.match_id)
         if not events:
             self._checkpoint(state, ev.MATCH_CREATED, **ev.created_data(state))
+            if self._budget.override is not None:
+                self._checkpoint(state, ev.BUDGET_OVERRIDDEN, **self._budget.override.model_dump())
             return
         for event in events:
             if event.seq > state.last_seq:

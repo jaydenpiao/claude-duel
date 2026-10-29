@@ -19,6 +19,8 @@ from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
 from claude_duel.app.estimate import estimate, render
+from claude_duel.app.experiment import footer as experiment_footer
+from claude_duel.app.experiment import run_stakes
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -81,6 +83,14 @@ def _parser() -> argparse.ArgumentParser:
     tour = sub.add_parser("tournament", help="play or resume the config's [tournament] (round robin or Swiss)")
     tour.add_argument("--tournament-id", help="explicit id (re-running an existing id resumes it)")
     tour.add_argument("--format", choices=("text", "json"), default="text")
+    exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
+    exp_sub = exp.add_subparsers(dest="experiment", required=True)
+    stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
+    stakes.add_argument("--prereg", type=Path, required=True, help="pre-registration written before any spend")
+    stakes.add_argument("--seeds", type=int, default=1, help="seeds; each runs once per framing")
+    stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
+    stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
+    stakes.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -161,6 +171,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
+        "experiment": lambda: _experiment(settings, args),
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
@@ -172,6 +183,24 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _experiment(settings: Settings, args: argparse.Namespace) -> int:
+    if args.override_reason and args.run_max_usd is None:
+        raise ConfigError("--override-reason needs --run-max-usd")
+    result = run_stakes(settings, args.prereg, args.seeds, InMemoryMetrics(), args.run_max_usd, args.override_reason)
+    if args.format == "json":
+        print(json.dumps(result))
+        return 0
+    for m in result["matches"]:
+        print(f"{m['match_id']}  {m['seed']}  {m['framing']:<11} {m['stage']}")
+    if result["stopped"]:
+        print(f"stopped: {result['stopped']}")
+    b = result["budget"]
+    print(f"{result['run_id']}: {len(result['matches'])} matches, ${b['run_usd']:.4f} of ${b['run_max_usd']:.2f}")
+    if line := experiment_footer(result):
+        print(line)
+    return 0
 
 
 def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:

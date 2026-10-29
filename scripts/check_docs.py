@@ -2,7 +2,8 @@
 
 Checks: (a) backticked repo paths and relative links exist; (b) every `duel ... --option` named in the
 docs is a real CLI option; (c) every DUEL_* env var is in README; (d) every port Protocol and every
-module is named in its AGENTS.md; (e) CLAUDE.md and .cursor/skills are symlinks. Stdlib only.
+module is named in its AGENTS.md; (e) CLAUDE.md and .cursor/skills are symlinks; (f) every
+workflow action is pinned to a full commit SHA. Stdlib only.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "src" / "claude_duel"
 _PATH = re.compile(r"`([\w./-]+\.(?:py|md|toml|ya?ml|json|txt|tape|gif|svg))`")
 _LINK = re.compile(r"\]\(([^)#\s]+)\)")
+_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)", re.M)
+_PINNED = re.compile(r"@[0-9a-f]{40}$")
 _DUEL_OPT = re.compile(r"`duel [^`]*`|^duel .*$", re.M)
 _OPT = re.compile(r"(?<![\w-])--[a-z][a-z-]+")
 
@@ -111,12 +114,21 @@ def check_links(root: Path = ROOT) -> list[str]:
     ]
 
 
+def check_pins(root: Path = ROOT) -> list[str]:
+    errors = []
+    for wf in sorted((root / ".github").rglob("*.y*ml")):
+        for ref in _USES.findall(wf.read_text()):
+            if not ref.startswith(("./", "docker://")) and not _PINNED.search(ref):
+                errors.append(f"{wf.relative_to(root)}: action not pinned to a commit SHA: {ref}")
+    return errors
+
+
 def main() -> int:
     sys.path.insert(0, str(ROOT / "src"))
     from claude_duel import cli, config  # noqa: PLC0415 - import from this checkout, not site-packages
 
     errors = check_paths() + check_options(cli_options(cli._parser())) + check_env(config.ENV_VARS)
-    errors += check_modules() + check_links() + check_codes()
+    errors += check_modules() + check_links() + check_codes() + check_pins()
     print("\n".join(errors) or "docs ok")
     return 1 if errors else 0
 
