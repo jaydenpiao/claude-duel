@@ -109,6 +109,7 @@ def decide(state: MatchState, scores: dict[str, int]) -> str | None:
     (a, sa), (b, sb) = sorted((x.name, scores.get(x.name, 0)) for x in state.agents)
     if sa != sb:
         return a if sa > sb else b
+    key: dict[str, tuple[int, ...]]
     if state.rules.scoring.kind == "ledger":  # design-core-logic.md 4.3
         key = {n: _spend(state, n) for n in (a, b)}
     else:
