@@ -109,6 +109,7 @@ class CallCharged(_Payload):
     output_tokens: int = 0
     reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
     truncated: bool = False
+    reasoning_effort: str | None = None  # the effort actually sent, defaults included (#191)
 
 
 class BuildRejected(_Payload):
