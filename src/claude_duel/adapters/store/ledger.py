@@ -63,6 +63,13 @@ class FileSpendLedger:
             jsonl.append(fd, (json.dumps(entry) + "\n").encode())
             self._catch_up(fd)
 
+    def record_override(self, run_id: str, value: float, reason: str) -> None:
+        """A $0 audit row for a run-cap override; it never adds to the total."""
+        entry = {"ts": time.time(), "kind": "override", "run_id": run_id, "value": value, "reason": reason, "usd": 0.0}
+        with jsonl.locked(self._path, exclusive=True) as fd:
+            jsonl.append(fd, (json.dumps(entry) + "\n").encode())
+            self._catch_up(fd)
+
     def _catch_up(self, fd: int) -> None:
         if os.fstat(fd).st_size < self._offset:  # truncated or replaced: refold from the start
             self._offset, self._total, self._open, self._by_match = 0, 0.0, {}, {}

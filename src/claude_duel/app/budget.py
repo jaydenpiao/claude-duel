@@ -74,9 +74,47 @@ class BudgetLimits(BaseModel):
         return self
 
 
+RUN_OVERRIDE_CEILING_USD = 2.00  # hard top for ``--run-max-usd``; code-defined, not configurable
+
+
+class RunOverride(BaseModel):
+    """A per-invocation raise of ``run_max_usd`` (``duel experiment``); defaults never change."""
+
+    model_config = ConfigDict(frozen=True)
+    field: str = "run_max_usd"
+    default: float
+    value: float
+    reason: str
+    ceiling: float = RUN_OVERRIDE_CEILING_USD
+
+
+def make_override(limits: BudgetLimits, field: str, value: float, reason: str, spent: float) -> RunOverride:
+    """Check every guard rail; raise ``ConfigError`` before any call is made."""
+    if field != "run_max_usd":
+        raise ConfigError(f"budget override: only run_max_usd may be overridden, not {field!r}")
+    if not reason.strip():
+        raise ConfigError("budget override: --override-reason is required")
+    if value > RUN_OVERRIDE_CEILING_USD:
+        raise ConfigError(f"budget override: {value:.2f} exceeds the ceiling {RUN_OVERRIDE_CEILING_USD:.2f}")
+    if value < limits.run_max_usd:
+        raise ConfigError(f"budget override: {value:.2f} is below the default {limits.run_max_usd:.2f}")
+    if spent + value > limits.lifetime_max_usd:
+        raise ConfigError(
+            f"budget override: lifetime spent ${spent:.2f} + {value:.2f} exceeds ${limits.lifetime_max_usd:.2f}"
+        )
+    return RunOverride(field=field, default=limits.run_max_usd, value=value, reason=reason.strip())
+
+
 class CostBudget:
-    def __init__(self, limits: BudgetLimits, ledger: SpendLedger, prices: Mapping[str, tuple[float, float]]) -> None:
+    def __init__(
+        self,
+        limits: BudgetLimits,
+        ledger: SpendLedger,
+        prices: Mapping[str, tuple[float, float]],
+        override: RunOverride | None = None,
+    ) -> None:
         self.limits = limits
+        self.override = override
         self._ledger = ledger
         self._prices = prices
         self.run_calls = 0
