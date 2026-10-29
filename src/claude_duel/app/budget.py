@@ -7,6 +7,7 @@ processes can each overshoot the lifetime cap by at most one in-flight call.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -94,6 +95,8 @@ def make_override(limits: BudgetLimits, field: str, value: float, reason: str, s
         raise ConfigError(f"budget override: only run_max_usd may be overridden, not {field!r}")
     if not reason.strip():
         raise ConfigError("budget override: --override-reason is required")
+    if not math.isfinite(value):  # NaN would pass every comparison below and disable the run cap
+        raise ConfigError(f"budget override: {value!r} is not a finite amount")
     if value > RUN_OVERRIDE_CEILING_USD:
         raise ConfigError(f"budget override: {value:.2f} exceeds the ceiling {RUN_OVERRIDE_CEILING_USD:.2f}")
     if value < limits.run_max_usd:
