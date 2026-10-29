@@ -44,14 +44,14 @@ can't enforce cgroup limits (`docker_probe`); run them locally against a rootful
 disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
-- dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
+- dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
 - PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).
 - Workflows: actions pinned to commit SHAs (Dependabot bumps them), top-level `permissions: {}` with per-job grants, `persist-credentials: false`. Keep it that way.
 - Prod: push tag `vX.Y.Z` -> `release.yml` Trivy-scans, then pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
 
 ## Cost rules
 - Default allowlist is low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Premium models are opt-in via `allow_premium` and never default.
-- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
+- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$33`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
 - `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` come from env only, held as `SecretStr`. Never print, log, commit or put them in CI without asking.
 
 ## Security invariants
