@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, stakes, variety
+from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact
@@ -497,6 +497,7 @@ class MatchEngine:
         if state.rules.ledger is not None:
             for agent in state.agents:
                 self._allocate(state, agent.name)
+        self._ghosts(state)
         for ch in state.round_challenges(state.round):
             if not state.validations[ch.id].valid or ch.spec is None:
                 continue
@@ -505,7 +506,13 @@ class MatchEngine:
             if key in state.attacks:
                 continue
             stake = self._stake(state, ch, attacker)
-            if stake == 0:
+            ghost = self._ghost_hit(state, ch.id)
+            if ghost is not None:
+                attack = Attack(
+                    challenge_id=ch.id, attacker=attacker, solved=True, attempts=0, tokens_used=0,
+                    reason=f"ghost: {ghost}", stake=stake, ghost=ghost,
+                )  # fmt: skip
+            elif stake == 0:
                 attack = Attack(
                     challenge_id=ch.id, attacker=attacker, solved=False, attempts=0, tokens_used=0,
                     reason="skipped: stake 0", stake=0,
@@ -516,6 +523,39 @@ class MatchEngine:
                     over = max(0, attack.tokens_used - stake)  # only the input-estimate gap can land here
                     attack = attack.model_copy(update={"stake": stake, "stake_overshoot": over})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
+
+    def _ghosts(self, state: MatchState) -> None:
+        """Deep: replay past captures' winning payloads against this round's valid challenges. $0 API, seeded order,
+        one checkpoint per run so resume never reruns; a challenge already hit is not run again."""
+        deep = state.rules.deep
+        if deep is None or not deep.ghosts:
+            return
+        valid = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
+        plan = ghosts.ghost_schedule(
+            state.seed, state.round, ghosts.ghosts_before(state, state.round), valid, deep.max_ghost_runs
+        )
+        for ghost, ch in plan:
+            run_key = f"{state.round}:{ghost.id}>{ch.id}"
+            if run_key in state.ghost_runs or self._ghost_hit(state, ch.id) is not None:
+                continue
+            assert ch.spec is not None
+            flag = self._flag_for(state, ch.id)
+            run = self._run_challenge(ch.spec.source, ghost.payload, flag, state, "ghost")
+            hit = flag in run.stdout
+            sha = hashlib.sha256(redact(run.stdout, (flag,)).encode()).hexdigest()
+            self._checkpoint(
+                state, ev.GHOST_RUN, round=state.round, ghost_id=ghost.id, target=ch.id, hit=hit, stdout_sha=sha
+            )
+
+    @staticmethod
+    def _ghost_hit(state: MatchState, challenge_id: str) -> str | None:
+        """The ghost that captured ``challenge_id`` this round, if any."""
+        for key, hit in state.ghost_runs.items():
+            r, rest = key.split(":", 1)
+            gid, target = rest.rsplit(">", 1)
+            if hit and int(r) == state.round and target == challenge_id:
+                return gid
+        return None
 
     @staticmethod
     def _targets(state: MatchState, attacker: str) -> list[Challenge]:

@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.ghosts import ghost_award
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -111,17 +112,18 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     below 1, so defense >= capture (ADR 0006) still holds. A revealed keystone doubles its defense award, or costs
     its author ``base // 2`` when captured.
     """
-    for a in facts.attacks.values():
-        if a.solved and a.stake is None:
-            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
-        if a.solved and a.stake == 0:
-            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
+    _check_stakes(facts)
     scores = classic(facts, rule)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
-        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
-            full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
+        if ch.spec is None or v is None or not v.valid or atk is None or not atk.solved:
+            continue
+        full = solve_award(ch.spec, facts.round_no, max(1, atk.attempts), rule)
+        paid = solve_award(ch.spec, facts.round_no, atk.attempts, rule)  # what classic added
+        if atk.ghost is not None:
+            scores[atk.attacker] -= paid - ghost_award(full)
+        elif atk.stake:
             scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
@@ -130,11 +132,21 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             continue  # an invalid keystone forfeits
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
-            scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
+            scores[author] -= solve_award(stone.spec, facts.round_no, max(1, hit.attempts), rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
             award = defense_award(stone.spec, facts.round_no, rule)
             scores[author] += award // 2 if stone.probe_solved else award
     return scores
+
+
+def _check_stakes(facts: RoundFacts) -> None:
+    for a in facts.attacks.values():
+        if a.ghost is not None:
+            continue  # a ghost capture is free: its stake (if any) is refunded, so none is required
+        if a.solved and a.stake is None:
+            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
+        if a.solved and a.stake == 0:
+            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
 
 
 def stake_award(full: int, used: int, stake: int) -> int:
