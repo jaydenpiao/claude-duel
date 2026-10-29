@@ -277,7 +277,7 @@ class ArenaView(MatchFold):
 
     def _revealed(self, s: MatchState, e: Event) -> None:
         idx = e.data.get("index")
-        key = f"keystone #{int(idx) + 1}" if idx is not None else "no keystone"
+        key = f"keystone #{cast('int', idx) + 1}" if idx is not None else "no keystone"
         agent = str(e.data["agent"])
         self.model.ledger[agent] = " · ".join(x for x in (self.model.ledger.get(agent, ""), key) if x)
 
