@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.heat import heat as heat_of
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -17,6 +18,7 @@ class RoundFacts:
     validations: Mapping[str, Validation]
     attacks: Mapping[str, Attack]  # by challenge id
     keystones: Mapping[str, str] = field(default_factory=dict)  # author -> revealed keystone challenge id (ledger)
+    heat: Mapping[str, int] = field(default_factory=dict)  # challenge id -> similarity %, heated ones only (ledger)
 
 
 Scorer = Callable[[RoundFacts, ScoringRule], dict[str, int]]
@@ -31,6 +33,7 @@ def score_round(
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
+    challenges = list(challenges)
     facts = RoundFacts(
         round_no=round_no,
         agents=tuple(agents),
@@ -38,6 +41,7 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
+        heat=heat_of(challenges, round_no, rules.ledger) if rules.ledger is not None else {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
@@ -67,6 +71,7 @@ def _discounted(
 ) -> dict[str, int]:
     """Classic, with each capture's value replaced by ``award(full, cost(attack), rule)``; defenses unchanged."""
     scores = classic(facts, rule)
+    _cool(facts, rule, scores)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
@@ -109,7 +114,8 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     A stake of 0 means the attacker skipped the challenge, so it scores as a defense; a recorded capture on a
     0-stake challenge, or one with no stake, is a corrupt or tampered log and raises. Discount is 0..50%, never
     below 1, so defense >= capture (ADR 0006) still holds. A revealed keystone doubles its defense award, or costs
-    its author ``base // 2`` when captured.
+    its author ``base // 2`` when captured. A heated challenge (domain/heat.py) defends for half, keystone
+    bonus included.
     """
     for a in facts.attacks.values():
         if a.solved and a.stake is None:
@@ -117,6 +123,7 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if a.solved and a.stake == 0:
             raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
     scores = classic(facts, rule)
+    _cool(facts, rule, scores)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
@@ -132,9 +139,26 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
-            award = defense_award(stone.spec, facts.round_no, rule)
-            scores[author] += award // 2 if stone.probe_solved else award
+            paid = _defense(stone, facts.round_no, rule)
+            scores[author] += paid // 2 if cid in facts.heat else paid
     return scores
+
+
+def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """Heat: a defended challenge too like its author's recent ones pays half of what classic paid."""
+    for ch in facts.challenges:
+        v = facts.validations.get(ch.id)
+        atk = facts.attacks.get(ch.id)
+        if ch.id in facts.heat and ch.spec is not None and v is not None and v.valid and not (atk and atk.solved):
+            paid = _defense(ch, facts.round_no, rule)
+            scores[ch.author] -= paid - paid // 2
+
+
+def _defense(ch: Challenge, round_no: int, rule: ScoringRule) -> int:
+    """What classic pays a defended challenge: halved when the build probe solved it."""
+    assert ch.spec is not None
+    award = defense_award(ch.spec, round_no, rule)
+    return award // 2 if ch.probe_solved else award
 
 
 def stake_award(full: int, used: int, stake: int) -> int:

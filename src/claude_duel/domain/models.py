@@ -114,6 +114,8 @@ class LedgerRule(_Frozen):
         default=True, description="each author commits to one challenge: defended x2, captured -base//2"
     )
     terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # AST-shingle Jaccard at or over this halves defense
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
