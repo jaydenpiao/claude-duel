@@ -48,7 +48,7 @@ def test_output_cap_and_schema_are_the_same_for_every_agent(make_engine, new_sta
     make_engine({"alice": alice, "bob": bob}).run(new_state(rounds=1, challenges_per_round=1, max_output_tokens=6000))
     reqs = alice.requests + bob.requests
     assert {r.max_tokens for r in reqs} == {6000}
-    assert {r.purpose: r.json_schema for r in reqs} == agents.ANSWER_SCHEMAS
+    assert {r.purpose: r.json_schema for r in reqs} == {p: agents.ANSWER_SCHEMAS[p] for p in ("build", "attack")}
 
 
 def test_wallet_cap_still_lowers_the_output_cap(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
