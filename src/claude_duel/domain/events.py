@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
@@ -199,6 +199,7 @@ class KeystoneRevealed(_Payload):
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+    points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
 
 
 class FindingFlagged(_Payload):

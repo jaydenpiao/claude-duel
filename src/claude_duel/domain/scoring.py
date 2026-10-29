@@ -46,6 +46,26 @@ def score_round(
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
 
+def capture_points(
+    round_no: int,
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    attacks: Mapping[str, Attack],
+    rules: Rules,
+) -> dict[str, int]:
+    """Ledger: what each staked capture of the round paid its attacker, by challenge id (logged, never folded)."""
+    if rules.ledger is None:
+        return {}
+    points = {}
+    for ch in sorted((c for c in challenges if c.round == round_no), key=lambda c: c.id):
+        v = validations.get(ch.id)
+        atk = next((a for a in attacks.values() if a.challenge_id == ch.id), None)
+        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
+            full = solve_award(ch.spec, round_no, atk.attempts, rules.scoring)
+            points[ch.id] = stake_award(full, atk.tokens_used, atk.stake)
+    return points
+
+
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     """ADR 0006 scoring: invalid costs the author, a capture pays the attacker, a defense pays the author."""
     scores = dict.fromkeys(facts.agents, 0)
