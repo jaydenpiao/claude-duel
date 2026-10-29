@@ -65,7 +65,7 @@ class BudgetLimits(BaseModel):
     match_max_usd: float = Field(default=0.25, gt=0)
     run_max_calls: int = Field(default=200, ge=1)
     run_max_usd: float = Field(default=0.50, gt=0)
-    lifetime_max_usd: float = Field(default=40.0, gt=0)
+    lifetime_max_usd: float = Field(default=33.0, gt=0)
     key_limit_usd: float = Field(default=50.0, gt=0, description="provider key's hard limit; shown in output")
 
     @model_validator(mode="after")
