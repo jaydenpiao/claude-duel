@@ -28,11 +28,17 @@ def even_split(k: int, rule: LedgerRule) -> tuple[int, ...]:
     return tuple(rule.min_alloc if i < funded else 0 for i in range(k))
 
 
-def settle_stakes(raw: object, k: int, rule: LedgerRule) -> tuple[tuple[int, ...], bool]:
-    """The stakes to use and whether they fell back to ``even_split`` (the arena logs ``alloc_fallback``)."""
-    if _valid(raw, k, rule):
+def settle_stakes(
+    raw: object, k: int, rule: LedgerRule, zero: frozenset[int] = frozenset()
+) -> tuple[tuple[int, ...], bool]:
+    """The stakes to use and whether they fell back to ``even_split`` (the arena logs ``alloc_fallback``).
+
+    Indices in ``zero`` (targets a ghost already captured) must be staked 0; the fallback splits over the rest, so a
+    ghost's refund is real budget for the other targets."""
+    if _valid(raw, k, rule) and all(raw[i] == 0 for i in zero):
         return tuple(raw), False
-    return even_split(k, rule), True
+    rest = iter(even_split(k - len(zero), rule))
+    return tuple(0 if i in zero else next(rest) for i in range(k)), True
 
 
 def _valid(raw: object, k: int, rule: LedgerRule) -> TypeGuard[Sequence[int]]:

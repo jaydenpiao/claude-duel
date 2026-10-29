@@ -18,6 +18,7 @@ class RoundFacts:
     validations: Mapping[str, Validation]
     attacks: Mapping[str, Attack]  # by challenge id
     keystones: Mapping[str, str] = field(default_factory=dict)  # author -> revealed keystone challenge id (ledger)
+    ghost_hits: Mapping[str, str] = field(default_factory=dict)  # challenge id -> ghost from the log (deep ghosts on)
 
 
 Scorer = Callable[[RoundFacts, ScoringRule], dict[str, int]]
@@ -31,6 +32,7 @@ def score_round(
     attacks: Mapping[str, Attack],
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
+    ghost_hits: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     facts = RoundFacts(
         round_no=round_no,
@@ -39,6 +41,7 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
+        ghost_hits=ghost_hits or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
@@ -140,9 +143,14 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
 
 
 def _check_stakes(facts: RoundFacts) -> None:
-    for a in facts.attacks.values():
-        if a.ghost is not None:
-            continue  # a ghost capture is free: its stake (if any) is refunded, so none is required
+    ids = {c.id for c in facts.challenges}  # attacks may span every round; check only this one's
+    for a in (a for a in facts.attacks.values() if a.challenge_id in ids):
+        if a.ghost is not None:  # free capture: only real if the log's ghost_run hit it, and staked 0 (refunded)
+            if not a.solved or facts.ghost_hits.get(a.challenge_id) != a.ghost:
+                raise EventLogCorruptError(f"tampered: ghost capture on {a.challenge_id} has no matching ghost_run hit")
+            if a.stake:
+                raise EventLogCorruptError(f"tampered: ghost capture on {a.challenge_id} was staked {a.stake}, not 0")
+            continue
         if a.solved and a.stake is None:
             raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
         if a.solved and a.stake == 0:

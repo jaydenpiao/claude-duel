@@ -512,10 +512,10 @@ class MatchEngine:
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
+        self._ghosts(state)  # before allocation: hits are public in the allocate prompt and force stake 0
         if state.rules.ledger is not None:
             for agent in state.agents:
                 self._allocate(state, agent.name)
-        self._ghosts(state)
         for ch in state.round_challenges(state.round):
             if not state.validations[ch.id].valid or ch.spec is None:
                 continue
@@ -528,7 +528,7 @@ class MatchEngine:
             if ghost is not None:
                 attack = Attack(
                     challenge_id=ch.id, attacker=attacker, solved=True, attempts=0, tokens_used=0,
-                    reason=f"ghost: {ghost}", stake=stake, ghost=ghost,
+                    reason=f"ghost: {ghost}", stake=None if stake is None else 0, ghost=ghost,
                 )  # fmt: skip
             elif stake == 0:
                 attack = Attack(
@@ -553,7 +553,7 @@ class MatchEngine:
             state.seed, state.round, ghosts.ghosts_before(state, state.round), valid, deep.max_ghost_runs
         )
         for ghost, ch in plan:
-            run_key = f"{state.round}:{ghost.id}>{ch.id}"
+            run_key = ghosts.run_key(state.round, ghost.id, ch.id)
             if run_key in state.ghost_runs or self._ghost_hit(state, ch.id) is not None:
                 continue
             assert ch.spec is not None
@@ -568,12 +568,7 @@ class MatchEngine:
     @staticmethod
     def _ghost_hit(state: MatchState, challenge_id: str) -> str | None:
         """The ghost that captured ``challenge_id`` this round, if any."""
-        for key, hit in state.ghost_runs.items():
-            r, rest = key.split(":", 1)
-            gid, target = rest.rsplit(">", 1)
-            if hit and int(r) == state.round and target == challenge_id:
-                return gid
-        return None
+        return ghosts.round_hits(state, state.round).get(challenge_id)
 
     @staticmethod
     def _targets(state: MatchState, attacker: str) -> list[Challenge]:
@@ -594,10 +589,12 @@ class MatchEngine:
         if f"{state.round}:{attacker}" in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
+        hits = ghosts.round_hits(state, state.round)
         rows = [
             (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
             for c in targets
         ]
+        ghosted = frozenset(i for i, c in enumerate(targets) if c.id in hits)
         own = stakes.own_challenges(state.challenges, state.round, attacker)
         valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
         own_rows = (
@@ -606,7 +603,14 @@ class MatchEngine:
             else None
         )
         prompt = agents.allocate_prompt(
-            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
+            attacker,
+            state.round,
+            rule.attack_tokens,
+            rule.min_alloc,
+            rows,
+            self._memory(state, attacker),
+            own_rows,
+            {i: hits[targets[i].id] for i in sorted(ghosted)},
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -620,7 +624,7 @@ class MatchEngine:
                     raw, pick = move.stakes, move.keystone
             except MalformedOutputError:
                 self._metrics.incr("model.malformed", purpose="allocate")
-        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
+        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule, ghosted)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
         if rule.keystone:  # sealed with the allocation: same call, so it costs nothing extra
@@ -707,5 +711,6 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            ghosts.round_hits(state, state.round),
         )
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
