@@ -10,7 +10,7 @@ from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import allowance
 from claude_duel.app.budget import BudgetLimits
 from claude_duel.app.replay import replay
-from claude_duel.domain.errors import BudgetExceededError, WalletEmptyError
+from claude_duel.domain.errors import WalletEmptyError
 from claude_duel.domain.models import ScoringRule, Usage
 from claude_duel.domain.scoring import efficiency_award
 from claude_duel.ports import Completion, CompletionRequest
@@ -42,8 +42,9 @@ def test_empty_wallet_forfeits_builds_and_stops_attacks(make_engine, new_state, 
 
 def test_match_cap_binds_before_a_larger_wallet(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
     engine = make_engine(budget=BudgetLimits(match_max_tokens=1))
-    with pytest.raises(BudgetExceededError, match="match tokens"):
-        engine.run(new_state(wallet={"per_agent_tokens": 10_000_000}))
+    state = engine.run(new_state(wallet={"per_agent_tokens": 10_000_000}))
+    assert state.capped is not None  # the match cap, not the wallet, ends it (ADR 0014)
+    assert state.capped.limit == "match_tokens"
 
 
 def test_usd_wallet_and_check(new_state) -> None:  # type: ignore[no-untyped-def]
