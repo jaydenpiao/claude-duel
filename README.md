@@ -54,7 +54,7 @@ flowchart LR
   OB --> PR[presentation:<br/>arena, commentary]
   EL --> RP[replay + card]
 ```
-Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
+Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. A match-scoped cap (`match_max_usd`/`_tokens`/`_calls`) instead ends the match in the terminal stage `capped`, naming the agent whose call crossed it; `resume` is a no-op, the CLI exits 3, a series with a capped game ends void (or counts its scored rounds with `scoring.on_cap = "partial"`), and ratings exclude it ([ADR 0014](docs/adr/0014-match-caps.md)). Run and lifetime caps still fail resumably (exit 2). See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
 
 ## Cost controls
 - Code-defined allowlist of low-cost models (`app/budget.py:DEFAULT_PRICES`); config cannot add models or change prices.
