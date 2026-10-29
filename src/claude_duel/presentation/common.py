@@ -11,6 +11,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Attack, Challenge, Event, Handicap, MatchState, Usage, Validation
 from claude_duel.domain.scoring import defense_award, solve_award
+from claude_duel.domain.series import decide
 
 SNIPPET_LINES = 3
 SNIPPET_WIDTH = 72
@@ -147,11 +148,8 @@ def agent_cost(s: MatchState, name: str) -> str:
 
 
 def leader(s: MatchState) -> str | None:
-    """Name of the agent ahead, or None on a tie."""
-    ranked = sorted(s.final_scores().items(), key=lambda kv: -kv[1])
-    if len(ranked) < 2 or ranked[0][1] == ranked[1][1]:
-        return None
-    return ranked[0][0]
+    """Name of the agent ahead on the shared tiebreak (``series.decide``), or None on a full tie."""
+    return decide(s, s.final_scores()) if len(s.agents) == 2 else None
 
 
 def result(s: MatchState) -> str:
