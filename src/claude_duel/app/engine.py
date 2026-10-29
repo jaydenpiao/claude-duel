@@ -569,7 +569,7 @@ class MatchEngine:
             index = stakes.pick_keystone(pick, own, valid)
             salt = stakes.keystone_salt(state.seed, state.round, attacker)
             commit = stakes.keystone_commit(index, salt)
-            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit, index=index)
+            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
         self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
@@ -638,9 +638,9 @@ class MatchEngine:
             r, author = key.split(":", 1)
             if int(r) == state.round and not ks.revealed:
                 salt = stakes.keystone_salt(state.seed, state.round, author)
-                self._checkpoint(
-                    state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=ks.index, salt=salt
-                )
+                n = len(stakes.own_challenges(state.challenges, state.round, author))
+                index = stakes.open_keystone(ks.commit, salt, n)  # the seal logs only the commit
+                self._checkpoint(state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=index, salt=salt)
         delta = score_round(
             state.round,
             [a.name for a in state.agents],
