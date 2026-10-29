@@ -537,7 +537,11 @@ class MatchEngine:
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
     def _draw_terrain(self, state: MatchState) -> None:
-        """Ledger: after both commits are fixed and before allocation; logged once per round."""
+        """Ledger: after both challenge commits are fixed and before allocation; logged once per round.
+
+        Ordering vs the keystone: since #193 the keystone is picked in the allocate call, so terrain is drawn before
+        the keystone commit and authors pick knowing it. Terrain is public and identical for both sides, so this is
+        fair (and gives the pick more to reason about); design-core-logic.md 4.2 is updated to match."""
         rule = state.rules.ledger
         assert rule is not None
         live = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
