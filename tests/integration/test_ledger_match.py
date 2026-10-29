@@ -160,3 +160,34 @@ def test_ledger_match_stops_at_the_call_cap(make_engine, new_state, store, calls
     with pytest.raises(BudgetExceededError):
         make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
     assert store.load("l1").stage is Stage.FAILED
+
+
+def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    provs = {"alice": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 1}'), "bob": Allocating("not json")}
+    state = make_engine(providers=provs).run(_ledger(new_state))
+    log = event_log.read("l1")
+    types = [e.type for e in log]
+    sealed = [e.data for e in log if e.type == ev.KEYSTONE_SEALED]
+    assert [(d["round"], d["agent"]) for d in sealed] == [(1, "alice"), (1, "bob"), (2, "alice"), (2, "bob")]
+    assert {d["agent"]: d["index"] for d in sealed if d["round"] == 1} == {"alice": 1, "bob": None}
+    for r in (1, 2):  # reveal comes after every attack of the round and before its score
+        reveals = [i for i, e in enumerate(log) if e.type == ev.KEYSTONE_REVEALED and e.data["round"] == r]
+        attacks = [
+            i for i, e in enumerate(log) if e.type == ev.CHALLENGE_ATTACKED and e.data["key"].startswith(f"r{r}-")
+        ]
+        scored = next(i for i, e in enumerate(log) if e.type == ev.ROUND_SCORED and e.data["round"] == r)
+        assert len(reveals) == 2
+        assert max(attacks) < min(reveals)
+        assert max(reveals) < scored
+    assert all(ks.revealed for ks in state.keystones.values())
+    assert types.count(ev.KEYSTONE_REVEALED) == 4
+    assert replay(state, log).consistent
+
+
+def test_keystone_never_reaches_the_opponent_before_reveal(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    provs = {"alice": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 2}'), "bob": Allocating("x")}
+    make_engine(providers=provs).run(_ledger(new_state))
+    secrets = [e.data["commit"] for e in event_log.read("l1") if e.type == ev.KEYSTONE_SEALED]
+    secrets += [e.data["salt"] for e in event_log.read("l1") if e.type == ev.KEYSTONE_REVEALED]
+    for _, prompt in provs["bob"].prompts + provs["alice"].prompts:
+        assert not [s for s in secrets if s in prompt]

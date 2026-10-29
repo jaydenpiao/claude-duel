@@ -106,7 +106,7 @@ class FakeProvider:
         agent = _field(_AGENT, request.prompt, "anon")
         if request.purpose == "allocate":  # even split, all of it
             k = int(_field(_CHALLENGES, request.prompt, "1"))
-            body: dict[str, object] = {"stakes": [int(_field(_BUDGET, request.prompt, "0")) // k] * k}
+            body: dict[str, object] = {"stakes": [int(_field(_BUDGET, request.prompt, "0")) // k] * k, "keystone": 0}
         elif request.purpose == "build":
             idx = _stable(agent, _field(_ROUND, request.prompt, "1"), _field(_INDEX, request.prompt, "0"))
             t = TEMPLATES[idx % len(TEMPLATES)]
