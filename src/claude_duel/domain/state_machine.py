@@ -11,8 +11,9 @@ _ALLOWED: dict[Stage, frozenset[Stage]] = {
     Stage.SCORE: frozenset({Stage.BUILD, Stage.COMPLETE}),
     Stage.COMPLETE: frozenset(),
     Stage.FAILED: frozenset(),
+    Stage.CAPPED: frozenset(),
 }
-TERMINAL = frozenset({Stage.COMPLETE, Stage.FAILED})
+TERMINAL = frozenset({Stage.COMPLETE, Stage.FAILED, Stage.CAPPED})
 # The single successor of each linear stage; SCORE branches on the round.
 _NEXT: dict[Stage, Stage] = {
     Stage.PENDING: Stage.BUILD,
@@ -32,6 +33,9 @@ def next_stage(state: MatchState) -> Stage:
 
 
 def transition(state: MatchState, target: Stage) -> None:
+    if target is Stage.CAPPED and state.stage not in TERMINAL:
+        state.stage = target
+        return
     if target is Stage.FAILED and state.stage not in TERMINAL:
         state.failed_stage = state.stage
         state.stage = target
