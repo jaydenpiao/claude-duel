@@ -10,7 +10,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import Attack, Challenge, ScoringRule, Validation
 from claude_duel.domain.scoring import SCORERS, RoundFacts, defense_award, solve_award
-from claude_duel.domain.stakes import keystone_commit, keystone_salt, pick_keystone
+from claude_duel.domain.stakes import keystone_commit, keystone_salt, open_keystone, pick_keystone
 from tests.unit.test_domain import spec
 
 RULE = ScoringRule()
@@ -66,8 +66,16 @@ def test_pick_keystone_forfeits_bad_picks(raw: object, want: int | None) -> None
 def test_reveal_that_does_not_match_commit_is_tampered(new_state) -> None:  # type: ignore[no-untyped-def]
     state = new_state()
     salt = keystone_salt("", 1, "a")
-    ev._sealed(state, ev.KeystoneSealed(agent="a", round=1, commit=keystone_commit(0, salt), index=0))
+    ev._sealed(state, ev.KeystoneSealed(agent="a", round=1, commit=keystone_commit(0, salt)))
     with pytest.raises(EventLogCorruptError, match="tampered"):
         ev._revealed(state, ev.KeystoneRevealed(agent="a", round=1, index=1, salt=salt))
     ev._revealed(state, ev.KeystoneRevealed(agent="a", round=1, index=0, salt=salt))
     assert state.keystones["1:a"].revealed
+
+
+def test_open_keystone_finds_the_sealed_index() -> None:
+    salt = keystone_salt("s", 1, "a")
+    assert open_keystone(keystone_commit(2, salt), salt, 3) == 2
+    assert open_keystone(keystone_commit(None, salt), salt, 3) is None
+    with pytest.raises(ValueError, match="no index"):
+        open_keystone("0" * 64, salt, 3)

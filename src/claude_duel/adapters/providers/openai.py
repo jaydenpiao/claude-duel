@@ -1,6 +1,6 @@
 """OpenAI adapter (plain HTTP, no SDK).
 
-Models in ``RESPONSES_MODELS`` (the gpt-6 and gpt-5.6 reasoning families) go through the Responses API: no
+Models in ``RESPONSES_MODELS`` (the gpt-6 and gpt-5 reasoning families) go through the Responses API: no
 temperature (reasoning models reject it), ``max_output_tokens`` (reasoning included) and the request's strict
 ``json_schema`` as structured output. Older models keep Chat Completions with JSON mode at temperature 0.
 Either way a reply stopped by the token cap is marked ``truncated``.
@@ -22,7 +22,16 @@ from claude_duel.domain.errors import (
 )
 from claude_duel.ports import Completion, CompletionRequest
 
-RESPONSES_MODELS = ("gpt-6", "gpt-5.6")  # model-name prefixes served via /responses
+RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
+# Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
+MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
+
+
+def default_effort(model: str, effort: str | None) -> str | None:
+    """The effort sent: the request's own, else ``minimal`` for the small gpt-5 models, else vendor default."""
+    if effort is not None:
+        return effort
+    return "minimal" if model.startswith(MINIMAL_EFFORT_MODELS) else None
 
 
 def _retry_after(resp: httpx.Response) -> float | None:
@@ -110,8 +119,9 @@ class OpenAIProvider:
             "text": {"format": fmt},
             "store": False,
         }
-        if request.reasoning_effort is not None:
-            body["reasoning"] = {"effort": request.reasoning_effort}
+        effort = default_effort(self._model, request.reasoning_effort)
+        if effort is not None:
+            body["reasoning"] = {"effort": effort}
         return body
 
 
@@ -122,6 +132,7 @@ def _parse_chat(data: Any) -> Completion:
         text=choice["message"]["content"] or "",
         input_tokens=int(usage.get("prompt_tokens", 0)),
         output_tokens=int(usage.get("completion_tokens", 0)),
+        reasoning_tokens=int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)),
         truncated=choice.get("finish_reason") == "length",
     )
 

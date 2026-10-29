@@ -52,6 +52,15 @@ def keystone_commit(index: int | None, salt: str) -> str:
     return hashlib.sha256(f"{'none' if index is None else index}:{salt}".encode()).hexdigest()
 
 
+def open_keystone(commit: str, salt: str, n: int) -> int | None:
+    """The index (or None, forfeited) that ``commit`` seals over ``n`` own challenges; the reveal logs it."""
+    candidates: list[int | None] = [*range(n), None]
+    for index in candidates:
+        if keystone_commit(index, salt) == commit:
+            return index
+    raise ValueError("keystone commit matches no index")
+
+
 def own_challenges(challenges: Mapping[str, Challenge], round_no: int, author: str) -> list[Challenge]:
     """An author's challenges of one round in keystone (sorted id) order."""
     return sorted((c for c in challenges.values() if c.round == round_no and c.author == author), key=lambda c: c.id)

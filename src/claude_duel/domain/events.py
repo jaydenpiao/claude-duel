@@ -16,6 +16,7 @@ from claude_duel.domain.models import (
     AgentSpec,
     Attack,
     AttackAttempt,
+    CapHit,
     Challenge,
     Event,
     Finding,
@@ -35,6 +36,7 @@ MATCH_CREATED = "match_created"
 STAGE_CHANGED = "stage_changed"
 MATCH_FAILED = "match_failed"
 MATCH_RECOVERED = "match_recovered"
+MATCH_CAPPED = "match_capped"
 CALL_CHARGED = "call_charged"
 BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
@@ -93,6 +95,10 @@ class StageChanged(_Payload):
 
 class MatchFailed(_Payload):
     reason: str
+
+
+class MatchCapped(_Payload):
+    hit: CapHit
 
 
 class MatchRecovered(_Payload):
@@ -176,12 +182,11 @@ class StakesSet(_Payload):
 
 
 class KeystoneSealed(_Payload):
-    """An author's keystone commit; ``index`` is the sealed field, never put in an opponent prompt before reveal."""
+    """An author's keystone commit only; the index is logged at reveal (KeystoneRevealed)."""
 
     agent: str
     round: int
     commit: str
-    index: int | None = None
 
 
 class KeystoneRevealed(_Payload):
@@ -217,12 +222,18 @@ def _failed(state: MatchState, p: MatchFailed) -> None:
     state.failure = p.reason
 
 
+def _capped(state: MatchState, p: MatchCapped) -> None:
+    transition(state, Stage.CAPPED)
+    state.capped = p.hit
+
+
 def _recovered(state: MatchState, p: MatchRecovered) -> None:
     recover(state)
 
 
 def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.calls += 1
+    state.last_agent = p.agent
     state.usage.tokens += p.tokens
     state.usage.usd += p.usd
     state.usage.elapsed_ms += p.elapsed_ms
@@ -280,15 +291,15 @@ def _terrain(state: MatchState, p: TerrainDrawn) -> None:
 
 
 def _sealed(state: MatchState, p: KeystoneSealed) -> None:
-    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit, index=p.index)
+    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit)
 
 
 def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
     key = f"{p.round}:{p.agent}"
     sealed = state.keystones.get(key)
-    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt) or sealed.index != p.index:
+    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt):
         raise EventLogCorruptError(f"tampered: keystone reveal for {key} does not match its commit")
-    state.keystones[key] = sealed.model_copy(update={"salt": p.salt, "revealed": True})
+    state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
 
 
 def _scored(state: MatchState, p: RoundScored) -> None:
@@ -301,6 +312,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     STAGE_CHANGED: (StageChanged, _stage),
     MATCH_FAILED: (MatchFailed, _failed),
     MATCH_RECOVERED: (MatchRecovered, _recovered),
+    MATCH_CAPPED: (MatchCapped, _capped),
     CALL_CHARGED: (CallCharged, _charged),
     BUILD_REJECTED: (BuildRejected, _rejected),
     CHALLENGE_BUILT: (ChallengeBuilt, _built),

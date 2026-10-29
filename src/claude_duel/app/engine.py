@@ -7,18 +7,20 @@ import logging
 import math
 import time
 from collections.abc import Mapping
+from typing import Any, cast
 
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
-from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
+from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
     AttackAttempt,
+    CapHit,
     Challenge,
     ChallengeSpec,
     Event,
@@ -94,6 +96,9 @@ class MatchEngine:
                 started, stage = time.monotonic(), state.stage.value
                 try:
                     self._execute_stage(state)
+                except MatchCapError as cap:
+                    self._cap(state, cap)
+                    break
                 except Exception as exc:
                     self._checkpoint(state, ev.MATCH_FAILED, reason=f"{type(exc).__name__}: {redact(str(exc))}")
                     raise
@@ -109,6 +114,19 @@ class MatchEngine:
                 **match_stats(state),
             )
         return state
+
+    def _cap(self, state: MatchState, cap: MatchCapError) -> None:
+        """Terminal ``CAPPED`` (ADR 0014): resuming it makes no call, since ``run`` never leaves a terminal stage."""
+        hit = CapHit(
+            limit=cast(Any, cap.limit),
+            spent=cap.spent,
+            cap=cap.cap,
+            breaching_agent=state.last_agent,
+            stage=state.stage,
+            round=state.round,
+        )
+        self._checkpoint(state, ev.MATCH_CAPPED, hit=hit.model_dump(mode="json"))
+        self._metrics.incr("match.capped", limit=cap.limit)
 
     def attack_pool(self, state: MatchState, pool: list[Challenge]) -> MatchState:
         """Shared-pool attacks (#39): ``agents[0]`` attacks each imported challenge once. No stages, no scoring;
@@ -591,7 +609,7 @@ class MatchEngine:
             index = stakes.pick_keystone(pick, own, valid)
             salt = stakes.keystone_salt(state.seed, state.round, attacker)
             commit = stakes.keystone_commit(index, salt)
-            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit, index=index)
+            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
         self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
@@ -667,9 +685,9 @@ class MatchEngine:
             r, author = key.split(":", 1)
             if int(r) == state.round and not ks.revealed:
                 salt = stakes.keystone_salt(state.seed, state.round, author)
-                self._checkpoint(
-                    state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=ks.index, salt=salt
-                )
+                n = len(stakes.own_challenges(state.challenges, state.round, author))
+                index = stakes.open_keystone(ks.commit, salt, n)  # the seal logs only the commit
+                self._checkpoint(state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=index, salt=salt)
         delta = score_round(
             state.round,
             [a.name for a in state.agents],

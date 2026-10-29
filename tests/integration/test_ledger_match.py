@@ -18,7 +18,6 @@ from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
-from claude_duel.domain.errors import BudgetExceededError
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.series import game_winner
@@ -179,9 +178,10 @@ def test_stakes_never_leak_before_reveal(make_engine, new_state) -> None:  # typ
 def test_ledger_match_stops_at_the_call_cap(make_engine, new_state, store, calls: int) -> None:  # type: ignore[no-untyped-def]
     """Spec test 10: the match cap (allocation calls included) aborts before the call that would exceed it."""
     metrics = InMemoryMetrics()
-    with pytest.raises(BudgetExceededError):
-        make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
-    assert store.load("l1").stage is Stage.FAILED
+    state = make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
+    assert state.stage is Stage.CAPPED  # ADR 0014 (#171)
+    assert store.load("l1").stage is Stage.CAPPED
+    assert state.usage.calls == calls
 
 
 def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
@@ -191,7 +191,8 @@ def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, eve
     types = [e.type for e in log]
     sealed = [e.data for e in log if e.type == ev.KEYSTONE_SEALED]
     assert [(d["round"], d["agent"]) for d in sealed] == [(1, "alice"), (1, "bob"), (2, "alice"), (2, "bob")]
-    assert {d["agent"]: d["index"] for d in sealed if d["round"] == 1} == {"alice": 1, "bob": None}
+    opened = [e.data for e in log if e.type == ev.KEYSTONE_REVEALED]
+    assert {d["agent"]: d["index"] for d in opened if d["round"] == 1} == {"alice": 1, "bob": None}
     for r in (1, 2):  # reveal comes after every attack of the round and before its score
         reveals = [i for i, e in enumerate(log) if e.type == ev.KEYSTONE_REVEALED and e.data["round"] == r]
         attacks = [
@@ -203,6 +204,7 @@ def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, eve
         assert max(reveals) < scored
     assert all(ks.revealed for ks in state.keystones.values())
     assert types.count(ev.KEYSTONE_REVEALED) == 4
+    assert all("index" not in e.data for e in log if e.type == ev.KEYSTONE_SEALED)  # the seal logs only the commit
     assert replay(state, log).consistent
 
 
@@ -221,7 +223,7 @@ def test_keystone_never_reaches_the_opponent_before_reveal(make_engine, new_stat
 
 def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Spec test 10 (dollars): priced like gpt-5-nano, allocate calls included, the match cap aborts the match
-    once spend reaches it, before any further call. CAPPED (void) follows once #171 lands."""
+    once spend reaches it, before any further call. It ends CAPPED (ADR 0014)."""
     spend = FileSpendLedger(tmp_path / "spend.jsonl")
     cap = 0.0004
     engine = MatchEngine(
@@ -233,9 +235,8 @@ def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_p
         CostBudget(BudgetLimits(match_max_usd=cap), spend, DEFAULT_PRICES),
         dict.fromkeys(("alice", "bob"), "gpt-5-nano"),
     )
-    with pytest.raises(BudgetExceededError, match="match"):
-        engine.run(_ledger(new_state))
-    assert store.load("l1").stage is Stage.FAILED
+    assert engine.run(_ledger(new_state)).stage is Stage.CAPPED
+    assert store.load("l1").stage is Stage.CAPPED
     charged = [e.data for e in event_log.read("l1") if e.type == ev.CALL_CHARGED]
     usd = [d["usd"] for d in charged]
     assert usd
