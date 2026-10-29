@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -11,10 +13,14 @@ from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import ghosts
-from claude_duel.domain.models import Challenge, DeepRule, MatchState, Stage
+from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.models import Attack, Challenge, DeepRule, MatchState, ScoringRule, Stage, Validation
 from claude_duel.domain.modes import preset
-from claude_duel.domain.scoring import solve_award
+from claude_duel.domain.scoring import SCORERS, RoundFacts, defense_award, solve_award
+from claude_duel.domain.stakes import settle_stakes
 from claude_duel.ports import Completion, CompletionRequest
+from tests.integration.test_ledger_match import _log_rows
+from tests.unit.test_domain import spec
 
 
 class Recording:
@@ -45,12 +51,18 @@ def test_ghost_runs_are_deterministic_and_replay(make_engine, new_state, event_l
     assert a.stage is Stage.COMPLETE
     assert a.scores == b.scores
 
-    def shape(mid: str) -> list[tuple[bool, str]]:  # challenge ids embed the match id; outcomes must not differ
-        return sorted((r["hit"], r["stdout_sha"]) for r in _runs(event_log, mid))
-
-    assert shape("d1") == shape("d2")
+    rows, other = _log_rows(event_log, "d1"), _log_rows(event_log, "d2")
+    # whole log, in order, minus per-match ids and latency
+    assert next(((x, y) for x, y in zip(rows, other, strict=True) if x != y), None) is None
+    assert (
+        hashlib.sha256("\n".join(rows).encode()).hexdigest()
+        == hashlib.sha256("\n".join(_log_rows(event_log, "d2")).encode()).hexdigest()
+    )
     assert any(r["hit"] for r in _runs(event_log))
-    assert replay(a, event_log.read("d1")).consistent
+    ra, rb = replay(a, event_log.read("d1")), replay(b, event_log.read("d2"))
+    assert ra.consistent
+    assert rb.consistent
+    assert ra.recomputed == rb.recomputed == a.scores
 
 
 def _ch(cid: str, author: str, rnd: int = 2) -> Challenge:
@@ -92,7 +104,7 @@ def test_ghost_capture_pays_the_quarter_and_defense_still_beats_it(make_engine, 
         spec = state.challenges[atk.challenge_id].spec
         assert spec is not None
         full = solve_award(spec, 2, 1, rule)
-        assert ghosts.ghost_award(full) <= rule.defense_points * spec.difficulty * 2  # ADR 0006
+        assert ghosts.ghost_award(full) <= defense_award(spec, 2, rule)  # ADR 0006; the property test is shared
 
 
 def test_ghost_runs_are_capped_and_make_no_model_calls(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
@@ -105,7 +117,7 @@ def test_ghost_runs_are_capped_and_make_no_model_calls(make_engine, new_state, e
     assert not any(p == "ghost" for prov in provs.values() for p, _ in prov.calls)
 
 
-def test_ghost_capture_skips_the_live_attack_and_refunds_the_stake(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+def test_ghost_capture_skips_the_live_attack_and_refunds_the_stake(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
     provs = {"alice": Recording(2), "bob": Recording(5)}
     state = make_engine(providers=provs).run(_deep(new_state))
     hit = [a for a in state.attacks.values() if a.ghost]
@@ -114,7 +126,13 @@ def test_ghost_capture_skips_the_live_attack_and_refunds_the_stake(make_engine, 
     for a in hit:
         title = state.challenges[a.challenge_id].spec.title  # type: ignore[union-attr]
         assert not any(p == "attack" and title in t and "Round 2" in t for p, t in provs[a.attacker].calls)
-    assert state.usage_by_agent  # charged usage comes only from live calls; ghosts charge nothing
+        assert f"{a.challenge_id}:{a.attacker}" not in state.attempts  # no live attempts, so no tokens
+        assert a.stake == 0  # refunded: the allocator had to stake it 0
+        targets = sorted(c.id for c in state.challenges.values() if c.round == 2 and c.author != a.attacker)
+        assert state.stakes[f"2:{a.attacker}"][targets.index(a.challenge_id)] == 0
+    for name, prov in provs.items():  # one call_charged per provider call: ghosts charge nothing
+        charged = [e for e in event_log.read("d1") if e.type == ev.CALL_CHARGED and e.data["agent"] == name]
+        assert len(charged) == len(prov.calls)
 
 
 def test_ledger_preset_has_no_ghosts(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
@@ -125,3 +143,53 @@ def test_ledger_preset_has_no_ghosts(make_engine, new_state, event_log) -> None:
     make_engine().run(state)
     assert not _runs(event_log, "l1")
     assert not any(a.ghost for a in state.attacks.values())
+
+
+def test_ghosts_run_before_allocation_and_show_in_the_allocate_prompt(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    provs = {"alice": Recording(2), "bob": Recording(5)}
+    state = make_engine(providers=provs).run(_deep(new_state))
+    types = [e.type for e in event_log.read("d1")]
+    r2 = [i for i, e in enumerate(event_log.read("d1")) if e.type == ev.GHOST_RUN]
+    assert r2
+    assert max(r2) < max(i for i, t in enumerate(types) if t == ev.STAKES_SET)  # round 2 stakes come after ghosts
+    hit = [a for a in state.attacks.values() if a.ghost]
+    assert hit
+    for a in hit:
+        prompts = [t for p, t in provs[a.attacker].calls if p == "allocate" and "ROUND: 2" in t]
+        assert any(f"CAPTURED BY GHOST {a.ghost}" in t for t in prompts)
+
+
+def test_fallback_split_skips_ghost_captured_targets() -> None:
+    rule = preset("ledger_deep").ledger
+    assert rule is not None
+    stakes, fallback = settle_stakes([rule.min_alloc, 0, 0], 3, rule, frozenset({0}))
+    assert fallback
+    assert stakes[0] == 0
+    assert sum(stakes) == rule.attack_tokens - rule.attack_tokens % 2
+    assert settle_stakes([0, rule.min_alloc, 0], 3, rule, frozenset({0})) == ((0, rule.min_alloc, 0), False)
+
+
+def _forged(ghost: str = "g", stake: int = 0, hits: dict[str, str] | None = None) -> RoundFacts:
+    ch = Challenge(id="c0", round=1, author="a", spec=spec())
+    atk = Attack(challenge_id="c0", attacker="b", solved=True, attempts=0, tokens_used=0, reason="r", stake=stake,
+                 ghost=ghost)  # fmt: skip
+    v = Validation(challenge_id="c0", valid=True, reason="r")
+    return RoundFacts(1, ("a", "b"), (ch,), {"c0": v}, {"c0": atk}, ghost_hits=hits or {})
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        _forged(),  # plain ledger / deep off: no ghost hits at all
+        _forged(hits={"c0": "other"}),  # deep on, but the log's hit is a different ghost
+        _forged(stake=3000, hits={"c0": "g"}),  # a real hit, but staked (the refund was not taken)
+    ],
+    ids=["no-ghost-run", "wrong-ghost", "staked"],
+)
+def test_forged_ghost_captures_are_tampered(facts: RoundFacts) -> None:
+    with pytest.raises(EventLogCorruptError, match="tampered"):
+        SCORERS["ledger"](facts, ScoringRule())
+
+
+def test_matching_ghost_capture_scores() -> None:
+    assert SCORERS["ledger"](_forged(hits={"c0": "g"}), ScoringRule())["b"] >= 1

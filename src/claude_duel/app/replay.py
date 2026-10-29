@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from claude_duel.domain import events as ev
-from claude_duel.domain import stakes
+from claude_duel.domain import ghosts, stakes
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, score_round
 
@@ -55,7 +55,14 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
         r = int(str(event.data["round"]))
         keystones = stakes.keystone_targets(folded, r)
         delta = score_round(
-            r, names, folded.challenges.values(), folded.validations, folded.attacks, folded.rules, keystones
+            r,
+            names,
+            folded.challenges.values(),
+            folded.validations,
+            folded.attacks,
+            folded.rules,
+            keystones,
+            ghosts.round_hits(folded, r),
         )
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")

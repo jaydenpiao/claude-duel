@@ -305,6 +305,7 @@ def allocate_prompt(
     targets: list[tuple[str, str, str, bool]],
     memory: str = "",
     own: list[tuple[str, str, bool]] | None = None,
+    ghosted: dict[int, str] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -317,6 +318,8 @@ def allocate_prompt(
     ]
     for i, (cid, title, source, valid) in enumerate(targets, 1):
         state = "valid" if valid else "INVALID (cannot be attacked; stake it 0)"
+        if ghosted and i - 1 in ghosted:
+            state = f"CAPTURED BY GHOST {ghosted[i - 1]} (already scored for you at no cost; stake it 0)"
         lines.append(f"#{i} {cid} [{state}] title={fence(title)}\nSource:\n{fence(source)}")
     lines += memory_lines(memory)
     lines.append(
