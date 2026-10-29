@@ -96,3 +96,16 @@ def test_cli_json_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     assert out["budget"]["overrides"][0]["reason"] == REASON
     assert main([*base, "--run-max-usd", "2.0"]) == 2
     assert main([*base, "--override-reason", REASON]) == 2
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), -0.0])
+def test_non_finite_or_negative_zero_override_is_refused(value: float) -> None:
+    with pytest.raises(ConfigError):
+        make_override(BudgetLimits(), "run_max_usd", value, REASON, 0.0)
+
+
+def test_built_limits_are_validated(tmp_path: Path) -> None:
+    override = make_override(BudgetLimits(), "run_max_usd", 1.0, REASON, 0.0)
+    nan = override.model_copy(update={"value": float("nan")})  # bypasses make_override
+    with pytest.raises(ValueError):
+        build_budget(_settings(tmp_path), nan)
