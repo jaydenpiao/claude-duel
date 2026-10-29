@@ -107,11 +107,11 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     0-stake challenge, or one with no stake, is a corrupt or tampered log and raises. Discount is 0..50%, never
     below 1, so defense >= capture (ADR 0006) still holds.
     """
-    for atk in facts.attacks.values():
-        if atk.solved and atk.stake is None:
-            raise EventLogCorruptError(f"ledger: solved attack on {atk.challenge_id} has no stake")
-        if atk.solved and atk.stake == 0:
-            raise EventLogCorruptError(f"tampered: capture on {atk.challenge_id}, which was staked 0 (skipped)")
+    for a in facts.attacks.values():
+        if a.solved and a.stake is None:
+            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
+        if a.solved and a.stake == 0:
+            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
     scores = classic(facts, rule)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
