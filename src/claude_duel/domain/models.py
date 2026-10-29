@@ -260,6 +260,7 @@ class Attack(_Frozen):
     reason: str
     usd_micros: int = 0
     stake: int | None = Field(default=None, ge=0)  # ledger mode: tokens the attacker allocated here (0 = skipped)
+    stake_overshoot: int = Field(default=0, ge=0)  # ledger: tokens past the stake (input estimate gap only)
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
