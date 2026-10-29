@@ -29,7 +29,7 @@ duel resume demo                    # continue a crashed or aborted match
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
-To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-4.1-nano`).
+To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`; `gpt-4.1-nano` was shut down 2026-10-23).
 
 ## Architecture
 ```mermaid
@@ -54,7 +54,7 @@ flowchart LR
   OB --> PR[presentation:<br/>arena, commentary]
   EL --> RP[replay + card]
 ```
-Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
+Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. A match-scoped cap (`match_max_usd`/`_tokens`/`_calls`) instead ends the match in the terminal stage `capped`, naming the agent whose call crossed it; `resume` is a no-op, the CLI exits 3, a series with a capped game ends void (or counts its scored rounds with `scoring.on_cap = "partial"`), and ratings exclude it ([ADR 0014](docs/adr/0014-match-caps.md)). Run and lifetime caps still fail resumably (exit 2). See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
 
 ## Cost controls
 - Code-defined allowlist of low-cost models (`app/budget.py:DEFAULT_PRICES`); config cannot add models or change prices.
@@ -86,9 +86,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_SANDBOX` | `sandbox` (`auto`/`docker`/`subprocess`) | `auto` |
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
-| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-4.1-nano` |
+| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
-| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-4.1-nano` |
+| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-5-nano` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
@@ -101,7 +101,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_MATCH_MAX_CALLS` | `[budget] match_max_calls` | 80 |
 | `DUEL_MATCH_MAX_TOKENS` | `[budget] match_max_tokens` | 150000 |
 | `DUEL_RUN_MAX_CALLS` | `[budget] run_max_calls` | 200 |
-| `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 40 |
+| `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 33 |
 | `DUEL_DOCKER` | docker command, e.g. `"sudo docker"` | `docker` |
 | `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 | `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
