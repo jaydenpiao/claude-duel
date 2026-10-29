@@ -103,10 +103,8 @@ def _parser() -> argparse.ArgumentParser:
     db_p = sub.add_parser("db", help="results database administration")
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
-    exp_out = sub.add_parser(
-        "export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)"
-    )
-    exp_out.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    out_p = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
+    out_p.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
     exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
     exp_sub = exp.add_subparsers(dest="experiment", required=True)
     stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
