@@ -17,7 +17,6 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
-from claude_duel.domain.errors import BudgetExceededError
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.series import game_winner
@@ -178,14 +177,15 @@ def test_stakes_never_leak_before_reveal(make_engine, new_state) -> None:  # typ
 def test_ledger_match_stops_at_the_call_cap(make_engine, new_state, store, calls: int) -> None:  # type: ignore[no-untyped-def]
     """Spec test 10: the match cap (allocation calls included) aborts before the call that would exceed it."""
     metrics = InMemoryMetrics()
-    with pytest.raises(BudgetExceededError):
-        make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
-    assert store.load("l1").stage is Stage.FAILED
+    state = make_engine(budget=BudgetLimits(match_max_calls=calls), metrics=metrics).run(_ledger(new_state))
+    assert state.stage is Stage.CAPPED  # ADR 0014 (#171)
+    assert store.load("l1").stage is Stage.CAPPED
+    assert state.usage.calls == calls
 
 
 def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Spec test 10 (dollars): priced like gpt-5-nano, allocate calls included, the match cap aborts the match
-    once spend reaches it, before any further call. CAPPED (void) follows once #171 lands."""
+    once spend reaches it, before any further call. It ends CAPPED (ADR 0014)."""
     spend = FileSpendLedger(tmp_path / "spend.jsonl")
     cap = 0.0004
     engine = MatchEngine(
@@ -197,9 +197,8 @@ def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_p
         CostBudget(BudgetLimits(match_max_usd=cap), spend, DEFAULT_PRICES),
         dict.fromkeys(("alice", "bob"), "gpt-5-nano"),
     )
-    with pytest.raises(BudgetExceededError, match="match"):
-        engine.run(_ledger(new_state))
-    assert store.load("l1").stage is Stage.FAILED
+    assert engine.run(_ledger(new_state)).stage is Stage.CAPPED
+    assert store.load("l1").stage is Stage.CAPPED
     charged = [e.data for e in event_log.read("l1") if e.type == ev.CALL_CHARGED]
     usd = [d["usd"] for d in charged]
     assert usd
