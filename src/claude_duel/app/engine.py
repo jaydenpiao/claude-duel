@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, stakes, variety
+from claude_duel.domain import contract, findings, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact
@@ -476,6 +476,7 @@ class MatchEngine:
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
         if state.rules.ledger is not None:
+            self._draw_terrain(state)
             for agent in state.agents:
                 self._allocate(state, agent.name)
         for ch in state.round_challenges(state.round):
@@ -497,6 +498,22 @@ class MatchEngine:
                     attack = attack.model_copy(update={"stake": stake})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
+    def _draw_terrain(self, state: MatchState) -> None:
+        """Ledger: after both commits are fixed and before allocation; logged once per round."""
+        rule = state.rules.ledger
+        assert rule is not None
+        live = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
+        if rule.terrain != "seeded" or not live or any(c.id in state.terrains for c in live):
+            return
+        refs = [
+            (c.id, f"{author}:{i}", c.spec.reference_payload)
+            for author in sorted({c.author for c in live})
+            for i, c in enumerate(stakes.own_challenges(state.challenges, state.round, author))
+            if c in live and c.spec
+        ]
+        drawn = terrain.draw_round(state.seed, state.round, refs)
+        self._checkpoint(state, ev.TERRAIN_DRAWN, round=state.round, terrains=drawn)
+
     @staticmethod
     def _targets(state: MatchState, attacker: str) -> list[Challenge]:
         """The opponent's challenges this round, in stake order (by id)."""
@@ -517,7 +534,12 @@ class MatchEngine:
             return  # idempotent resume
         targets = self._targets(state, attacker)
         rows = [
-            (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
+            (
+                c.id,
+                _with_terrain(c.spec.title if c.spec else "", state.terrains.get(c.id)),
+                c.spec.source if c.spec else "",
+                bool(state.validations[c.id].valid),
+            )
             for c in targets
         ]
         own = stakes.own_challenges(state.challenges, state.round, attacker)
@@ -571,7 +593,7 @@ class MatchEngine:
                 attacker,
                 ch.id,
                 spec.title,
-                spec.description,
+                _with_terrain(spec.description, state.terrains.get(ch.id)),
                 spec.source,
                 len(history) + 1,
                 pairs,
@@ -583,11 +605,17 @@ class MatchEngine:
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
             completion = self._complete(state, attacker, prompt, "attack")
             self._note(state, attacker, completion.text)
-            attempt = self._attempt(state, attacker, spec, flag, completion)
+            attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
 
     def _attempt(
-        self, state: MatchState, agent: str, spec: ChallengeSpec, flag: str, completion: Completion
+        self,
+        state: MatchState,
+        agent: str,
+        spec: ChallengeSpec,
+        flag: str,
+        completion: Completion,
+        ground: str | None = None,
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         try:
@@ -599,7 +627,8 @@ class MatchEngine:
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
         source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
-        run = self._run_challenge(source, payload, flag, state, "attack")
+        stdin = terrain.apply(ground, payload) if ground else payload
+        run = self._run_challenge(source, stdin, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 
@@ -624,3 +653,7 @@ class MatchEngine:
             stakes.keystone_targets(state, state.round),
         )
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
+
+
+def _with_terrain(text: str, ground: str | None) -> str:
+    return text if ground is None else f"{text} [terrain={ground}] {terrain.describe(ground)}"

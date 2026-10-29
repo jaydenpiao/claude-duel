@@ -49,6 +49,7 @@ BUDGET_OVERRIDDEN = "budget_overridden"
 STAKES_SET = "stakes_set"
 KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
+TERRAIN_DRAWN = "terrain_drawn"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -156,6 +157,13 @@ class NoteRecorded(_Payload):
     agent: str
     round: int
     text: str
+
+
+class TerrainDrawn(_Payload):
+    """Ledger: the round's public stdin transform per valid challenge (challenge id -> terrain)."""
+
+    round: int
+    terrains: dict[str, str]
 
 
 class StakesSet(_Payload):
@@ -267,6 +275,10 @@ def _staked(state: MatchState, p: StakesSet) -> None:
     state.stakes[f"{p.round}:{p.agent}"] = list(p.stakes)
 
 
+def _terrain(state: MatchState, p: TerrainDrawn) -> None:
+    state.terrains.update(p.terrains)
+
+
 def _sealed(state: MatchState, p: KeystoneSealed) -> None:
     state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit, index=p.index)
 
@@ -303,6 +315,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     STAKES_SET: (StakesSet, _staked),
     KEYSTONE_SEALED: (KeystoneSealed, _sealed),
     KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
+    TERRAIN_DRAWN: (TerrainDrawn, _terrain),
 }
 
 

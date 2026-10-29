@@ -191,3 +191,23 @@ def test_keystone_never_reaches_the_opponent_before_reveal(make_engine, new_stat
     secrets += [e.data["salt"] for e in event_log.read("l1") if e.type == ev.KEYSTONE_REVEALED]
     for _, prompt in provs["bob"].prompts + provs["alice"].prompts:
         assert not [s for s in secrets if s in prompt]
+
+
+def test_terrain_drawn_before_allocation_and_applied_to_stdin(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    state = make_engine().run(_ledger(new_state))
+    log = event_log.read("l1")
+    drawn = [i for i, e in enumerate(log) if e.type == ev.TERRAIN_DRAWN]
+    allocs = [i for i, e in enumerate(log) if e.type == ev.STAKES_SET]
+    assert len(drawn) == 2
+    assert drawn[0] < allocs[0]
+    assert set(state.terrains) == {c.id for c in state.challenges.values() if state.validations[c.id].valid}
+    assert any(a.solved for a in state.attacks.values())  # the fake inverts the terrain, so captures still happen
+    assert replay(state, log).consistent
+
+
+def test_terrain_none_logs_nothing(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    st0 = _ledger(new_state)
+    rules = st0.rules.model_copy(update={"ledger": st0.rules.ledger.model_copy(update={"terrain": "none"})})
+    state = make_engine().run(st0.model_copy(update={"rules": rules}))
+    assert not state.terrains
+    assert ev.TERRAIN_DRAWN not in [e.type for e in event_log.read("l1")]
