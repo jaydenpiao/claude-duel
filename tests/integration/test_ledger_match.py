@@ -191,7 +191,8 @@ def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, eve
     types = [e.type for e in log]
     sealed = [e.data for e in log if e.type == ev.KEYSTONE_SEALED]
     assert [(d["round"], d["agent"]) for d in sealed] == [(1, "alice"), (1, "bob"), (2, "alice"), (2, "bob")]
-    assert {d["agent"]: d["index"] for d in sealed if d["round"] == 1} == {"alice": 1, "bob": None}
+    opened = [e.data for e in log if e.type == ev.KEYSTONE_REVEALED]
+    assert {d["agent"]: d["index"] for d in opened if d["round"] == 1} == {"alice": 1, "bob": None}
     for r in (1, 2):  # reveal comes after every attack of the round and before its score
         reveals = [i for i, e in enumerate(log) if e.type == ev.KEYSTONE_REVEALED and e.data["round"] == r]
         attacks = [
@@ -203,6 +204,7 @@ def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, eve
         assert max(reveals) < scored
     assert all(ks.revealed for ks in state.keystones.values())
     assert types.count(ev.KEYSTONE_REVEALED) == 4
+    assert all("index" not in e.data for e in log if e.type == ev.KEYSTONE_SEALED)  # the seal logs only the commit
     assert replay(state, log).consistent
 
 

@@ -176,12 +176,11 @@ class StakesSet(_Payload):
 
 
 class KeystoneSealed(_Payload):
-    """An author's keystone commit; ``index`` is the sealed field, never put in an opponent prompt before reveal."""
+    """An author's keystone commit only; the index is logged at reveal (KeystoneRevealed)."""
 
     agent: str
     round: int
     commit: str
-    index: int | None = None
 
 
 class KeystoneRevealed(_Payload):
@@ -280,15 +279,15 @@ def _terrain(state: MatchState, p: TerrainDrawn) -> None:
 
 
 def _sealed(state: MatchState, p: KeystoneSealed) -> None:
-    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit, index=p.index)
+    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit)
 
 
 def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
     key = f"{p.round}:{p.agent}"
     sealed = state.keystones.get(key)
-    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt) or sealed.index != p.index:
+    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt):
         raise EventLogCorruptError(f"tampered: keystone reveal for {key} does not match its commit")
-    state.keystones[key] = sealed.model_copy(update={"salt": p.salt, "revealed": True})
+    state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
 
 
 def _scored(state: MatchState, p: RoundScored) -> None:

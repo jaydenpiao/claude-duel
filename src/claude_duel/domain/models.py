@@ -312,8 +312,8 @@ class Keystone(_Frozen):
     """An author's committed keystone (design-core-logic.md 4.2): ``commit = sha256("<index>:<salt>")``.
 
     ``index`` is positional over the author's own challenges of the round, sorted by id; None = forfeited (no or
-    invalid pick). It is sealed: never shown to the opponent before ``revealed``. The commit is integrity-only (the
-    log can't be rewritten after the fact); it does not hide the index from the engine or anyone reading the log.
+    invalid pick); it stays None until ``revealed``, since the seal event logs only the commit. The commit is
+    integrity-only (the log can't be rewritten after the fact); the index is recoverable from the seeded salt.
     """
 
     commit: str
