@@ -70,7 +70,7 @@ def test_tie_on_points_falls_to_pool_points() -> None:
 
 
 def test_pool_matches_pin_framing(tmp_path: Path) -> None:
-    """Pool match creation goes through open_match, so framing_text is pinned ."""
+    """Pool match creation goes through open_match, so framing_text is pinned."""
     rules = Rules(rounds=1, challenges_per_round=1, framing=FramingRule(kind="notice"))
     settings = _settings(tmp_path).model_copy(update={"rules": rules})
     entrants = (AgentSpec(name="a", skill=5), AgentSpec(name="b", skill=5), AgentSpec(name="c", skill=5))

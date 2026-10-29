@@ -21,6 +21,9 @@ from claude_duel.domain import series as sr
 from claude_duel.domain.models import Stage
 from claude_duel.ports import EventObserver, Metrics
 
+# A CAPPED game is terminal (ADR 0014): recorded void (or on partial scores), never resumed or replayed.
+_COUNTED = frozenset({Stage.COMPLETE, Stage.CAPPED})
+
 
 def play_series(
     settings: Settings,
@@ -69,15 +72,15 @@ def _play_series(
             update={"agents": sr.game_agents(state.agents, n), "seed": sr.game_seed(state.seed, n)}
         )
         match = play(game_settings, state.game_id(n), metrics, observer, budget)
-        if match.stage is not Stage.COMPLETE:
+        if match.stage not in _COUNTED:
             return state  # failed game: `duel series` again resumes it
         decider = None
-        if state.rule.sudden_death and sr.game_winner(match) is None:
+        if match.stage is Stage.COMPLETE and state.rule.sudden_death and sr.game_winner(match) is None:
             decider_settings = game_settings.model_copy(
                 update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
             )
             decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget)
-            if decider.stage is not Stage.COMPLETE:
+            if decider.stage not in _COUNTED:
                 return state
         game = sr.game_of(n, match, decider)
         append(
