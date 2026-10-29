@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import io
 import os
+import re
 from pathlib import Path
 
 import pytest
 from rich.console import Console
 
+from claude_duel.app import budget
 from claude_duel.app.session import play
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
@@ -48,7 +50,9 @@ def deep(tmp_path_factory: pytest.TempPathFactory) -> tuple[Tap, MatchState]:
     tap = Tap(console)
     rules = preset("ledger_deep").model_copy(update={"rounds": 2})
     settings = Settings(store_dir=tmp_path_factory.mktemp("deep"), sandbox="subprocess", rules=rules)
-    state = play(settings, "deep", InMemoryMetrics(), tap)
+    with pytest.MonkeyPatch.context() as mp:  # priced like gpt-5-nano, so the $ figures are real, not $0.0000
+        mp.setitem(budget.DEFAULT_PRICES, budget.FAKE_MODEL, budget.DEFAULT_PRICES["gpt-5-nano"])
+        state = play(settings, "deep", InMemoryMetrics(), tap)
     tap.close()
     return tap, state
 
@@ -81,17 +85,25 @@ def test_arena_tokens_and_dollars_are_call_charged_sums(deep: tuple[Tap, MatchSt
         mine = [e.data for e in tap.events if e.type == ev.CALL_CHARGED and e.data["agent"] == name]
         tokens_in = sum(int(d.get("input_tokens", 0)) for d in mine)  # type: ignore[call-overload]
         usd = sum(float(d["usd"]) for d in mine)  # type: ignore[arg-type]
+        assert usd > 0
         assert f"{name}: in {tokens_in:,} · " in text
         assert f"${usd:.4f}" in text
 
 
 def test_no_flag_or_payload_bytes_in_any_frame(deep: tuple[Tap, MatchState]) -> None:
+    """Every payload, short ones included (the marquee exploit is 4 bytes), as a whole token in every frame.
+
+    Opponent prompts are covered by the ledger differential tests (#192 stakes, #193 keystone)."""
     tap, state = deep
-    payloads = {a.payload for tries in state.attempts.values() for a in tries if len(a.payload) >= 5}
-    assert payloads
+    payloads = sorted({a.payload.strip() for tries in state.attempts.values() for a in tries if a.payload.strip()})
+    chrome = tap.frames[0]  # rendered before any payload existed: words like "duel" there are the app's own
+    payloads = [p for p in payloads if not re.search(rf"(?<!\w){re.escape(p)}(?!\w)", chrome)]
+    assert any(len(p) < 5 for p in payloads)
+    alts = "|".join(re.escape(p) for p in sorted(payloads, key=len, reverse=True))
+    pattern = re.compile(rf"(?<!\w)(?:{alts})(?!\w)")
     for text in tap.frames:
         assert not FLAG_PATTERN.search(text)
-        assert not any(p in text for p in payloads)
+        assert not pattern.search(text), pattern.search(text)
 
 
 def test_ghost_row_is_hidden_without_ghosts(tmp_path: Path) -> None:
