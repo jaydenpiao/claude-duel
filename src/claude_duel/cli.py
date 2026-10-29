@@ -28,9 +28,9 @@ from claude_duel.app.container import (
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
-from claude_duel.app.export import write as write_export
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
+from claude_duel.app.export import write as write_export
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -103,7 +103,9 @@ def _parser() -> argparse.ArgumentParser:
     db_p = sub.add_parser("db", help="results database administration")
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
-    exp_out = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
+    exp_out = sub.add_parser(
+        "export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)"
+    )
     exp_out.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
     exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
     exp_sub = exp.add_subparsers(dest="experiment", required=True)
