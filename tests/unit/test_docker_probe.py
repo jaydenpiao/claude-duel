@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.sandbox.docker_sandbox import docker_probe
+from tests.conftest import find_docker
 
 
 def _fake_docker(tmp_path: Path, out: str) -> tuple[str, ...]:
@@ -29,3 +30,8 @@ def _fake_docker(tmp_path: Path, out: str) -> tuple[str, ...]:
 def test_probe(tmp_path: Path, out: str, problem: str | None) -> None:
     got = docker_probe(_fake_docker(tmp_path, out))
     assert got is None if problem is None else problem in (got or "")
+
+
+def test_find_docker_reports_each_refusal() -> None:
+    _, reasons = find_docker({"DUEL_DOCKER": "false"})
+    assert reasons[0].startswith("false: ")
