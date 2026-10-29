@@ -228,6 +228,7 @@ class MatchEngine:
             output_tokens=completion.output_tokens,
             reasoning_tokens=completion.reasoning_tokens,
             truncated=completion.truncated,
+            reasoning_effort=completion.reasoning_effort,
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion

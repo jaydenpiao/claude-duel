@@ -5,6 +5,7 @@ from __future__ import annotations
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import agents
 from claude_duel.app.engine import TRUNCATED
+from claude_duel.domain import events as ev
 from claude_duel.ports import Completion, CompletionRequest
 
 
@@ -62,3 +63,40 @@ def test_answer_schemas_are_strict() -> None:
     for schema in agents.ANSWER_SCHEMAS.values():
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"])
+
+
+class Thinks(Cut):
+    """A reasoning model whose thinking eats the whole cap: empty text, all output tokens are reasoning."""
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        if request.purpose == "build" and self.cuts > 0:
+            self.requests.append(request)
+            self.cuts -= 1
+            cap = request.max_tokens
+            return Completion(text="", input_tokens=10, output_tokens=cap, reasoning_tokens=cap, truncated=True)
+        return super().complete(request)
+
+
+def test_reasoning_that_eats_the_cap_gets_one_brief_retry(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    alice = Thinks(1)
+    state = make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    builds = [r for r in alice.requests if r.purpose == "build"]
+    assert len(builds) == 2
+    assert agents.TRUNCATED_HINT in builds[1].prompt
+    mine = next(c for c in state.challenges.values() if c.author == "alice")
+    assert state.validations[mine.id].valid
+    assert mine.id not in state.build_errors
+
+
+class Minimal(Cut):
+    """Reports the effort it sent, as the OpenAI adapter does."""
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        return super().complete(request).model_copy(update={"reasoning_effort": "minimal"})
+
+
+def test_call_charged_logs_the_effort_sent(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    state = make_engine({"alice": Minimal(0), "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    charged = [e.data for e in event_log.read(state.match_id) if e.type == ev.CALL_CHARGED]
+    assert {d["reasoning_effort"] for d in charged if d["agent"] == "alice"} == {"minimal"}
+    assert {d["reasoning_effort"] for d in charged if d["agent"] == "bob"} == {None}

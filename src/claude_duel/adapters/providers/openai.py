@@ -20,10 +20,11 @@ from claude_duel.domain.errors import (
     RateLimitError,
     TransientProviderError,
 )
-from claude_duel.ports import Completion, CompletionRequest
+from claude_duel.ports import RESPONSES_MODELS, Completion, CompletionRequest
 
-RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
 # Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
+# Exact prefixes on purpose: gpt-5.1+ names (e.g. gpt-5.1-mini) do not accept ``minimal`` (they use ``none``), so do not
+# widen these to match them.
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
 
 
@@ -89,7 +90,10 @@ class OpenAIProvider:
         raise_for_status(resp)
         try:
             data = resp.json()
-            return _parse_responses(data) if responses else _parse_chat(data)
+            if not responses:
+                return _parse_chat(data)
+            effort = default_effort(self._model, request.reasoning_effort)
+            return _parse_responses(data).model_copy(update={"reasoning_effort": effort})
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise TransientProviderError("openai returned an unexpected body") from exc
 
