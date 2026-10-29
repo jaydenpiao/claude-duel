@@ -136,7 +136,7 @@ class MatchEngine:
         """Apply events a crash left out of the snapshot; create the log only if it is empty.
 
         The log, not ``last_seq``, decides: a crash after ``match_created`` but before the first
-        snapshot leaves ``last_seq == -1`` with a non-empty log (round-2 N2).
+        snapshot leaves ``last_seq == -1`` with a non-empty log.
         """
         events = self._log.read(state.match_id)
         if not events:
@@ -158,7 +158,7 @@ class MatchEngine:
         handler(state)
 
     def _record(self, state: MatchState, kind: str, **data: object) -> Event:
-        """Validate by applying to a copy, then append durably, then apply for real (round-2 N3).
+        """Validate by applying to a copy, then append durably, then apply for real.
 
         An event that can't be applied never reaches the log, so it can't poison resume or replay.
         """
@@ -178,18 +178,24 @@ class MatchEngine:
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: wallet, then budget caps (strictest wins), call, charge, checkpoint."""
-        allowance.check(state, agent)
+        if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (arch r3 #8)
+            allowance.check(state, agent)
         self._budget.check(state)
         if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
             raise DeadlineExceededError(
                 f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
             )
+        model = self._models[agent]
+        reservation = self._budget.reserve(state.match_id, model, request)  # a crash keeps it counted
         started = time.monotonic()
-        completion = self._providers[agent].complete(request)
+        try:
+            completion = self._providers[agent].complete(request)
+        except Exception:
+            self._budget.release(state.match_id, model, reservation)
+            raise
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
-        model = self._models[agent]
-        usd = self._budget.charge(state.match_id, model, completion)
+        usd = self._budget.charge(state.match_id, model, completion, reservation)
         self._checkpoint(
             state,
             ev.CALL_CHARGED,
@@ -224,23 +230,33 @@ class MatchEngine:
                 if cid in state.challenges:
                     continue  # idempotent resume
                 try:
-                    spec, reason = self._author(state, cid, agent.name, index)
+                    spec, reason, probed = self._author(state, cid, agent.name, index)
                 except WalletEmptyError as exc:
-                    spec, reason = None, str(exc)
+                    spec, reason, probed = None, str(exc), False
                 epoch = len(state.build_errors.get(cid, []))
                 ch = Challenge(
-                    id=cid, round=state.round, author=agent.name, spec=spec, forfeit_reason=reason, flag_epoch=epoch
+                    id=cid,
+                    round=state.round,
+                    author=agent.name,
+                    spec=spec,
+                    forfeit_reason=reason,
+                    flag_epoch=epoch,
+                    probe_solved=probed,
                 )
                 self._checkpoint(state, ev.CHALLENGE_BUILT, challenge=ch.model_dump(mode="json"))
 
-    def _author(self, state: MatchState, cid: str, agent: str, index: int) -> tuple[ChallengeSpec | None, str | None]:
+    def _author(
+        self, state: MatchState, cid: str, agent: str, index: int
+    ) -> tuple[ChallengeSpec | None, str | None, bool]:
         """Repair loop: a malformed or invalid answer is fed back (with the reason) for up to
         ``rules.max_format_retries`` more paid, budgeted calls. Provider errors propagate and fail the
         stage (resumable). Each rejection is checkpointed, so a resumed build continues from the last retry.
-        The last invalid answer is kept, so validation records why it failed.
+        The last invalid answer is kept, so validation records why it failed. The bool is the gate's
+        ``probe_solved`` verdict for the returned spec.
         """
         errors = state.build_errors.get(cid, [])
         last: ChallengeSpec | None = None
+        probed = False
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
@@ -257,24 +273,32 @@ class MatchEngine:
             completion = self._complete(state, agent, prompt, "build")
             self._note(state, agent, completion.text)
             try:
-                if completion.truncated:
-                    raise MalformedOutputError(TRUNCATED)
-                last = agents.parse_challenge(completion.text)
-                last, problem = self._shape(state, last)
-                if problem is None and state.rules.variety:
-                    problem = variety.repeat_reason(state, agent, last)
-                if problem is None:
-                    last, problem = self._assess(state, cid, agent, last)
+                last, problem, probed = self._judge(state, cid, agent, completion)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
             if problem is None:
-                return last, None
+                return last, None, probed
             if not problem.startswith("malformed"):
                 self._metrics.incr("model.invalid", purpose="build")
             self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
             errors = state.build_errors[cid]
-        return (last, None) if last is not None else (None, errors[-1])
+        return (last, None, False) if last is not None else (None, errors[-1], False)
+
+    def _judge(
+        self, state: MatchState, cid: str, agent: str, completion: Completion
+    ) -> tuple[ChallengeSpec, str | None, bool]:
+        """Parse, shape, variety and assess one build answer (spec, problem, probe_solved);
+        raises ``MalformedOutputError`` if unparseable."""
+        if completion.truncated:
+            raise MalformedOutputError(TRUNCATED)
+        spec, problem = self._shape(state, agents.parse_challenge(completion.text))
+        if problem is None and state.rules.variety:
+            problem = variety.repeat_reason(state, agent, spec)
+        probed = False
+        if problem is None:
+            spec, problem, probed = self._assess(state, cid, agent, spec)
+        return spec, problem, probed
 
     # -- stage 2: validate ------------------------------------------------
     def _validate(self, state: MatchState) -> None:
@@ -299,20 +323,23 @@ class MatchEngine:
         source, problem = contract.compose(spec.source)
         return spec.model_copy(update={"source": source}), problem
 
-    def _assess(self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+    def _assess(
+        self, state: MatchState, cid: str, agent: str, spec: ChallengeSpec
+    ) -> tuple[ChallengeSpec, str | None, bool]:
         """Solver, policy and runs, difficulty gate; then the tamper detector on the answer (logged only)."""
         spec, problem = self._solve_reference(state, cid, spec)
         problem = problem or self._problem(state, cid, state.round, spec)
+        probed = False
         if problem is None:
-            spec, problem = self._gate(state, cid, spec)
+            problem, probed = self._gate(state, cid, spec)
         policy_reason = problem if problem and policy.reason_code(problem) != "other" else None
         hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
         self._flag(state, hits, self._flag_for(state, cid))
-        return spec, problem
+        return spec, problem, probed
 
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
-        """R3-2 invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
+        """Invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
         if not state.secret:
             return
         body = event.model_dump_json()
@@ -325,7 +352,7 @@ class MatchEngine:
 
     @staticmethod
     def _flag_for(state: MatchState, cid: str) -> str:
-        """The challenge's flag. Before it is built, each repair try gets a fresh one (R3-2), so anything a
+        """The challenge's flag. Before it is built, each repair try gets a fresh one, so anything a
         rejected try leaked names a dead flag; the built challenge keeps the flag of the try that produced it."""
         ch = state.challenges.get(cid)
         return flag_of(state.secret, cid, ch.flag_epoch if ch else len(state.build_errors.get(cid, [])))
@@ -380,19 +407,19 @@ class MatchEngine:
             json_schema=agents.ANSWER_SCHEMAS[purpose],
         )
 
-    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
+    def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[str | None, bool]:
         """Difficulty gate: one paid, budgeted attack by the cheap ``GATE`` probe. A capture means too easy: in
-        gate_mode "reject" the build goes back to repair; in "score" it stays valid with a halved defense award."""
-        spec = spec.model_copy(update={"probe_solved": False})  # only the arena may set it
+        gate_mode "reject" the build goes back to repair; in "score" it stays valid with a halved defense award
+        (returned as the ``probe_solved`` verdict, which only the arena sets)."""
         if not state.rules.difficulty_gate:
-            return spec, None
+            return None, False
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
         completion = self._call(state, GATE, self._request(state, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
-            return spec.model_copy(update={"probe_solved": True}), None
-        return spec, GATE_REJECTION if solved else None
+            return None, True
+        return (GATE_REJECTION if solved else None), False
 
     def _solve_reference(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[ChallengeSpec, str | None]:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
@@ -416,7 +443,7 @@ class MatchEngine:
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
             flag = self._flag_for(state, cid)
-            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # R3-2: the solver runs with the real flag
+            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # the solver runs with the real flag
             reason = f"solver failed ({status}); it printed {seen!r}"
             assert_no_flag(reason, flag, "solver failure")
             return spec, reason
@@ -504,7 +531,8 @@ class MatchEngine:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
-        run = self._run_challenge(spec.source, payload, flag, state, "attack")
+        source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
+        run = self._run_challenge(source, payload, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
 

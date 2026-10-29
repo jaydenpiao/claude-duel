@@ -78,3 +78,24 @@ def test_links(tmp_path: Path) -> None:
     (tmp_path / "CLAUDE.md").symlink_to("AGENTS.md")
     (tmp_path / ".cursor" / "skills").symlink_to("../.agents/skills")
     assert check_docs.check_links(tmp_path) == []
+
+
+def test_review_codes_rejected(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    code, medium = "R3" + "-2", "M" + "2"  # built at runtime so this file passes its own check
+    (tmp_path / "src" / "a.py").write_text(f"x = 1  # {code}: fresh flag\ny = 2  # see #12\n")
+    (tmp_path / "tests" / "b.md").write_text(f"- old ({medium}) note\n")
+    errors = check_docs.check_codes(tmp_path)
+    assert len(errors) == 2
+    assert "a.py:1" in errors[0]
+
+
+def test_unpinned_action_is_caught(tmp_path: Path) -> None:
+    wf = tmp_path / ".github" / "workflows" / "ci.yml"
+    wf.parent.mkdir(parents=True)
+    sha = "a" * 40
+    wf.write_text(f"steps:\n  - uses: actions/checkout@v4\n  - uses: actions/setup-uv@{sha} # v1\n  - uses: ./local\n")
+    errors = check_docs.check_pins(tmp_path)
+    assert len(errors) == 1
+    assert "actions/checkout@v4" in errors[0]

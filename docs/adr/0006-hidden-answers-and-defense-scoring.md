@@ -14,5 +14,5 @@ Status: accepted.
 
 ## Addendum: gate as a score (#78)
 `rules.gate_mode = "score"` keeps a challenge the difficulty-gate probe solves on its first try, instead of
-sending it back to repair. The arena marks it `ChallengeSpec.probe_solved`; authors cannot set this, since the
+sending it back to repair. The arena marks it `Challenge.probe_solved`; authors cannot set this, since the
 arena overwrites it. Its defense award is halved. The default, `"reject"`, is unchanged.

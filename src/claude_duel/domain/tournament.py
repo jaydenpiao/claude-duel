@@ -11,14 +11,17 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Iterable
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, Rules, SandboxLimits
 from claude_duel.domain.series import SeriesRule
 
 TOURNAMENT_CREATED, PAIRING_FINISHED, POOL_SCORED = "tournament_created", "pairing_finished", "pool_scored"
+TOURNAMENT_SCHEMA_VERSION = 1  # Event.v of tournament events, versioned apart from match events (#139)
 BYE = "-"
 POOL = "pool"  # the stand-in opponent of a pool match; not a valid entrant name
 ROUND_ROBIN_MAX = 6
@@ -55,10 +58,13 @@ def pool_points(rule: DecayRule, solvers: dict[str, list[str]], names: Iterable[
     return points
 
 
+Kind = Literal["round_robin", "swiss"]
+
+
 class TournamentRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     entrants: tuple[AgentSpec, ...] = Field(min_length=3, max_length=32)
-    format: str = Field(default="auto", pattern="^(auto|round_robin|swiss)$")
+    format: Literal["auto", "round_robin", "swiss"] = "auto"
     swiss_rounds: int | None = Field(default=None, ge=1, le=20, description="default ceil(log2(entrants))")
     series: SeriesRule = SeriesRule(games=1)
     tournament_max_usd: float = Field(default=5.0, gt=0)
@@ -75,7 +81,7 @@ class TournamentRule(BaseModel):
             raise ValueError(f"{POOL!r} is reserved")
         return entrants
 
-    def kind(self) -> str:
+    def kind(self) -> Kind:
         if self.format != "auto":
             return self.format
         return "round_robin" if len(self.entrants) <= ROUND_ROBIN_MAX else "swiss"
@@ -97,6 +103,11 @@ class Pairing(BaseModel):
     usd: float = 0.0
 
 
+class PoolScored(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    points: dict[str, int]
+
+
 class TournamentState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tournament_id: str
@@ -106,6 +117,8 @@ class TournamentState(BaseModel):
     limits: SandboxLimits | None = None
     pairings: list[Pairing] = Field(default_factory=list)
     pool_points: dict[str, int] | None = None  # set by pool_scored once the shared pool is attacked
+    # round -> (pairings before it, its pairs); pairings are append-only, so a stale entry has a smaller count.
+    _round_cache: dict[int, tuple[int, list[Pair]]] = PrivateAttr(default_factory=dict)
 
     def names(self) -> list[str]:
         return [e.name for e in self.rule.entrants]
@@ -134,13 +147,14 @@ class TournamentState(BaseModel):
         """The pairs of ``round_no``: fixed up front for round robin; from the standings before it for Swiss."""
         if self.rule.kind() == "round_robin":
             return round_robin(self.names())[round_no - 1]
-        before = TournamentState(
-            tournament_id=self.tournament_id,
-            seed=self.seed,
-            rule=self.rule,
-            pairings=[p for p in self.pairings if p.round < round_no],
-        )
-        return swiss_round(before.table(), before.played(), {p.a for p in before.pairings if p.b == BYE})
+        prior = [p for p in self.pairings if p.round < round_no]
+        hit = self._round_cache.get(round_no)
+        if hit is not None and hit[0] == len(prior):
+            return hit[1]
+        before = TournamentState(tournament_id=self.tournament_id, seed=self.seed, rule=self.rule, pairings=prior)
+        pairs = swiss_round(before.table(), before.played(), {p.a for p in prior if p.b == BYE})
+        self._round_cache[round_no] = (len(prior), pairs)
+        return pairs
 
     def next_pair(self) -> tuple[int, Pair] | None:
         done = {(p.round, p.a, p.b) for p in self.pairings}
@@ -183,16 +197,23 @@ def swiss_round(table: list[tuple[str, float]], played: set[frozenset[str]], had
     return pairs + bye
 
 
-def _pair(order: list[str], played: set[frozenset[str]]) -> list[Pair] | None:
+def _pair(order: list[str], played: set[frozenset[str]], dead: set[frozenset[str]] | None = None) -> list[Pair] | None:
+    """Backtracking pairer; ``dead`` memoises remainders that cannot be paired (the remainder's order is fixed by
+    its members, so the set is a sound key), which keeps the worst case polynomial in practice."""
+    dead = set() if dead is None else dead
     if not order:
         return []
+    key = frozenset(order)
+    if key in dead:
+        return None
     first, rest = order[0], order[1:]
     for i, other in enumerate(rest):
         if frozenset((first, other)) in played:
             continue
-        tail = _pair(rest[:i] + rest[i + 1 :], played)
+        tail = _pair(rest[:i] + rest[i + 1 :], played, dead)
         if tail is not None:
             return [(first, other), *tail]
+    dead.add(key)
     return None
 
 
@@ -201,14 +222,16 @@ def fold(tournament_id: str, events: Iterable[Event]) -> TournamentState:
     first = next(it, None)
     if first is None or first.type != TOURNAMENT_CREATED:
         raise EventLogCorruptError("tournament log does not start with tournament_created")
-    state = TournamentState.model_validate({"tournament_id": tournament_id, **first.data})
+    check_version(first, TOURNAMENT_SCHEMA_VERSION, "tournament event")
+    state = typed(TournamentState, {"tournament_id": tournament_id, **first.data})
     for e in it:
+        check_version(e, TOURNAMENT_SCHEMA_VERSION, "tournament event")
         if e.type == POOL_SCORED and state.next_pair() is None and state.pool_points is None:
-            state.pool_points = {str(k): int(v) for k, v in dict(e.data["points"]).items()}  # type: ignore[call-overload]
+            state.pool_points = typed(PoolScored, e.data).points
             continue
         if e.type != PAIRING_FINISHED:
             raise EventLogCorruptError(f"unknown tournament event {e.type!r}")
-        p = Pairing.model_validate(e.data)
+        p = typed(Pairing, e.data)
         if state.next_pair() != (p.round, (p.a, p.b)):
             raise EventLogCorruptError(f"pairing {p.a} v {p.b} (round {p.round}) recorded out of order")
         state.pairings.append(p)

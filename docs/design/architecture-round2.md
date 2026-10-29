@@ -1,10 +1,10 @@
 # claude-duel: architecture re-review, round 2 (2026-10-21)
 
-**Commit reviewed:** `66dbefc` ("add readable match output (#8)"). This is HEAD of `main` in /workspace/claude-duel, and the working tree is clean. I left the repo untouched and ran the tests in a throwaway clone at /tmp/cd-r2.
+**Commit reviewed:** `66dbefc` ("add readable match output (#8)"). This is HEAD of `main`, and the working tree is clean. I left the repo untouched and ran the tests in a throwaway clone.
 
-**Baseline:** round 1, /workspace/claude-duel-reviews/architecture-2026-10-21.md (23 findings), checked against fix PRs #2–#8.
+**Baseline:** round 1 architecture review of 2026-10-21 (23 findings), checked against fix PRs #2–#8.
 
-## Test and tool results (/tmp/cd-r2, Python venv, `pip install -e .[dev]`)
+## Test and tool results (throwaway clone, Python venv, `pip install -e .[dev]`)
 - `pytest`: **151 passed, 1 deselected** (the `live` marker). Coverage was 98.93%, above the 90% gate.
 - `ruff check src tests`: clean. `mypy src` (strict): no issues in 37 files.
 - I also ran three probes outside the test suite, all confirmed:
