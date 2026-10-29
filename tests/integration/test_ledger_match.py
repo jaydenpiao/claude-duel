@@ -311,3 +311,23 @@ def test_round_scored_logs_points_per_capture(make_engine, new_state, event_log)
 
 def test_no_capture_points_outside_ledger() -> None:
     assert capture_points(1, [], {}, {}, Rules()) == {}
+
+
+class Heavy(Allocating):
+    """Reports more input tokens than the engine's len/4 estimate, so spend can pass the stake."""
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        c = super().complete(request)
+        extra = 3_217 if request.purpose == "attack" else 0
+        return c.model_copy(update={"input_tokens": c.input_tokens + extra})
+
+
+def test_stake_overshoot_records_the_estimate_gap(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Real input counts above the estimate: overshoot is exactly tokens past the stake, and never folds into score."""
+    provs = {"alice": Heavy(json.dumps({"stakes": [3000, 0, 0]}), skill=0), "bob": Allocating('{"stakes": [0, 0, 0]}')}
+    state = make_engine(providers=provs).run(_ledger(new_state))
+    staked = [a for a in state.attacks.values() if a.attacker == "alice" and a.stake]
+    assert staked
+    assert all(a.stake_overshoot == max(0, a.tokens_used - 3000) for a in staked)
+    assert any(a.stake_overshoot > 0 for a in staked)
+    assert replay(state, event_log.read("l1")).consistent
