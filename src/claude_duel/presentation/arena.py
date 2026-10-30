@@ -276,7 +276,7 @@ class ArenaView(MatchFold):
             title = scrub(ch.spec.title) if ch.spec else "forfeit"
             self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
         lines = {cid: line for cid, line in cast("dict[str, int]", e.data.get("heat", {})).items() if line}
-        rnd = int(e.data["round"])
+        rnd = int(str(e.data["round"]))
         hot = heat(s.challenges.values(), s.validations, rnd, s.rules.ledger) if lines and s.rules.ledger else {}
         for cid, line in sorted(lines.items()):  # a 0 line (at the threshold) is not news
             ch = s.challenges.get(cid)
@@ -298,7 +298,7 @@ class ArenaView(MatchFold):
 
     def _terrain(self, s: MatchState, e: Event) -> None:
         drawn = cast("dict[str, str]", e.data["terrains"])
-        rnd = int(e.data["round"])
+        rnd = int(str(e.data["round"]))
         per: dict[str, list[str]] = {}
         for cid, t in drawn.items():  # every challenge's terrain, by its keystone number: "alice #3 swapcase"
             ch = s.challenges.get(cid)
