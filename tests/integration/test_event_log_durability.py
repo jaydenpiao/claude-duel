@@ -1,4 +1,4 @@
-"""Crash-injection tests for event-log durability (architecture round 2, N1-N3)."""
+"""Crash-injection tests for event-log durability (architecture review round 2)."""
 
 from __future__ import annotations
 

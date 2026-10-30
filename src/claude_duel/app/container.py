@@ -87,7 +87,7 @@ def build_event_log(settings: Settings) -> FileEventLog:
 
 
 def build_driver_lock(settings: Settings, log_id: str, kind: str) -> FileLock:
-    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (arch r3 #6)."""
+    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (#120)."""
     settings.store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     return FileLock(settings.store_dir / f"{log_id}.{kind}.lock")
 
@@ -139,7 +139,7 @@ def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
 
 
 def pin_entrants(settings: Settings, entrants: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
-    """Tournament entrants with their effective model written in (arch r3 #15), like ``pin_agents``."""
+    """Tournament entrants with their effective model written in (#125), like ``pin_agents``."""
     return tuple(e.model_copy(update={"model": settings.model_for(e)}) for e in entrants)
 
 
