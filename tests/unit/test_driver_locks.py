@@ -1,4 +1,4 @@
-"""Arch round 3 #6: a second series/tournament driver on the same id fails fast with MatchLockedError."""
+"""A second series/tournament driver on the same id fails fast with MatchLockedError (#120)."""
 
 from __future__ import annotations
 
