@@ -1,4 +1,4 @@
-"""Arch round 3 (major): series and tournament logs pin rules and limits; resume ignores config drift."""
+"""Series and tournament logs pin rules and limits; resume ignores config drift."""
 
 from __future__ import annotations
 
