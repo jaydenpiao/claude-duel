@@ -14,7 +14,7 @@ from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, memory, policy, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, flag_of, redact
+from claude_duel.domain.flags import assert_no_flag, flag_of, redact, shares_fragment
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -496,6 +496,12 @@ class MatchEngine:
         if rejected:
             return rejected
         flag = self._flag_for(state, cid)
+        if shares_fragment(spec.reference_payload, flag):
+            return "flag-dependent: the reference payload contains part of the flag"
+        return self._runs(state, cid, spec, flag)
+
+    def _runs(self, state: MatchState, cid: str, spec: ChallengeSpec, flag: str) -> str | None:
+        """The sandboxed validation runs: reference under two flags, then input that must not reveal the flag."""
         ref = self._run_challenge(spec.source, spec.reference_payload, flag, state, "validate")
         if flag not in ref.stdout:
             seen = redact(ref.stdout, (flag,)).strip()[:REF_OUTPUT_CHARS]
