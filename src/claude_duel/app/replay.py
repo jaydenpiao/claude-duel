@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
 from claude_duel.domain.models import Event, MatchState
-from claude_duel.domain.scoring import add_scores, capture_points, score_round
+from claude_duel.domain.scoring import add_scores, capture_points, heat_of_state, score_round
 
 _COMPARED = (
     "stage",
@@ -62,5 +62,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
         points = capture_points(r, folded.challenges.values(), folded.validations, folded.attacks, folded.rules)
         if points != event.data.get("points", {}):
             mismatches.append(f"round {r} points")
+        if heat_of_state(folded, r) != event.data.get("heat", {}):
+            mismatches.append(f"round {r} heat")
         recomputed = add_scores(recomputed, delta)
     return recomputed
