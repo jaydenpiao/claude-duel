@@ -273,6 +273,10 @@ class ArenaView(MatchFold):
                 continue
             title = scrub(ch.spec.title) if ch.spec else "forfeit"
             self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
+        for cid, line in sorted(cast("dict[str, int]", e.data.get("heat", {})).items()):
+            ch = s.challenges.get(cid)
+            if ch is not None and line:
+                self.model.log(f"🔥 {ch.author}'s {scrub(ch.spec.title) if ch.spec else 'forfeit'!r} ran hot -{line}")
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
 
@@ -285,6 +289,11 @@ class ArenaView(MatchFold):
         title = scrub(ch.spec.title) if ch.spec else ""
         self.model.flash = f"👻 {attacker}'s ghost struck {ch.author}'s {title!r} (no call)"
         self.model.log(self.model.flash)
+
+    def _terrain(self, s: MatchState, e: Event) -> None:
+        drawn = cast("dict[str, str]", e.data["terrains"])
+        names = sorted({t.partition(":")[0] for t in drawn.values()})
+        self.model.log(f"terrain r{e.data['round']}: {', '.join(names) or 'none'}")
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self.model.log("resuming where the match stopped")

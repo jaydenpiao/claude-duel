@@ -10,10 +10,10 @@ bob: in 11,770 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/def
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
 🛡 bob defended 'Mirror' +20
-· 🛡 bob defended 'Mirror' +20
-· bob +5 for alice's 'Mirror'
-· bob +5 for alice's 'Maze'
 · alice +10 for bob's 'Arithmetic gate'
+· 🔥 alice's 'Knock' ran hot -20
+· 🔥 bob's 'Maze' ran hot -10
+· 🔥 bob's 'Mirror' ran hot -10
 · after round 2: alice 56  bob 37 · alice leads
 $0.0019 this match · $0.0000 of $50 burned
 🏆 winner: alice · alice 56  bob 37

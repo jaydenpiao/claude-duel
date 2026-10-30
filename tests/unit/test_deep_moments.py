@@ -113,3 +113,14 @@ def test_ghost_row_is_hidden_without_ghosts(tmp_path: Path) -> None:
     play(Settings(store_dir=tmp_path, sandbox="subprocess", rules=rules), "plain", InMemoryMetrics(), view)
     view.close()
     assert "GHOSTS" not in _text(view, 100)
+
+
+def test_arena_logs_each_terrain_draw_and_heat_line(deep: tuple[Tap, MatchState]) -> None:
+    tap, _ = deep
+    drawn = [e for e in tap.events if e.type == ev.TERRAIN_DRAWN]
+    heat = [line for e in tap.events if e.type == ev.ROUND_SCORED for line in e.data.get("heat", {}).values() if line]
+    seen = "\n".join(tap.frames)
+    assert drawn
+    assert all(f"terrain r{e.data['round']}:" in seen for e in drawn)
+    assert heat
+    assert all(f"ran hot -{line}" in seen for line in heat)
