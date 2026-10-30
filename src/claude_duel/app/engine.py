@@ -60,6 +60,14 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
+def junk_inputs(payload: str) -> list[str]:
+    """SV-3: fixed, free inputs that must not reveal the flag (besides empty input): degenerate acceptance fails."""
+    p = payload.strip()
+    tweak = (("b" if p[0] == "a" else "a") + p[1:]) if p else ""
+    probes = [" ", "a", "0", "\n", "A" * len(p), tweak, p[: len(p) // 2], p[len(p) // 2 + 1 :]]
+    return list(dict.fromkeys(x for x in probes if x.strip() and x.strip() != p))
+
+
 def _decoy(state: MatchState, cid: str, use: str) -> str:
     """A flag-shaped stand-in for challenge cid, never its real flag (SV-1: solver runs, second validation)."""
     return flag_of(state.secret, f"{cid}:{use}-decoy", state.round)
@@ -517,6 +525,9 @@ class MatchEngine:
         empty = self._run_challenge(spec.source, "", flag, state, "validate")
         if flag in empty.stdout:
             return "trivial: empty input reveals flag"
+        for probe in junk_inputs(spec.reference_payload):
+            if flag in self._run_challenge(spec.source, probe, flag, state, "validate").stdout:
+                return f"trivial: junk input {probe[:20]!r} reveals flag"
         return None
 
     # -- stage 3: attack --------------------------------------------------

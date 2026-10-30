@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.app.engine import junk_inputs
 from claude_duel.domain.flags import derive_flag, flag_of, shares_fragment
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -64,3 +67,24 @@ def test_no_flag_fragment_reaches_the_log(make_engine, new_state, event_log) -> 
     body = "".join(e.model_dump_json() for e in event_log.read(state.match_id))
     for epoch in range(len(state.build_errors.get(ch.id, [])) + 1):
         assert not shares_fragment(body.replace("DUEL{<redacted>}", ""), flag_of(state.secret, ch.id, epoch))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import sys\nif sys.stdin.read():\n    print(FLAG)\n",
+        "import sys\nif len(sys.stdin.read().strip()) > 0:\n    print(FLAG)\n",
+        "import sys\nif len(sys.stdin.read().strip()) == 7:\n    print(FLAG)\n",
+    ],
+)
+def test_degenerate_acceptance_is_rejected(make_engine, new_state, source: str) -> None:  # type: ignore[no-untyped-def]
+    state, ch = _bob(make_engine, new_state, source=source, reference_payload="0000003")
+    assert not state.validations[ch.id].valid
+    assert any("trivial" in e for e in state.build_errors.get(ch.id, [])) or "trivial" in (
+        state.validations[ch.id].reason or ""
+    )
+
+
+def test_junk_inputs_skip_the_answer() -> None:
+    assert "0000003" not in junk_inputs("0000003")
+    assert {"a", "0", "AAAAAAA", "a000003"} <= set(junk_inputs("0000003"))
