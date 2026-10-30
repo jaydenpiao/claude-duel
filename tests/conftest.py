@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.docker_sandbox import docker_probe
@@ -19,6 +20,10 @@ from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimit
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import EventObserver, LLMProvider
 from tests.helpers import any_source
+
+# No per-example deadline: a loaded CI box made property tests flaky (DeadlineExceeded), not slow code.
+settings.register_profile("duel", deadline=None)
+settings.load_profile("duel")
 
 AGENTS = (AgentSpec(name="alice", skill=2), AgentSpec(name="bob", skill=5))
 

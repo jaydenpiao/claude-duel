@@ -9,4 +9,4 @@ labels: bug
 
 **repro** (command, config, match id; never paste keys)
 
-**source**: architect / security / quality / product-scout / game-designer / gtm / jayden / lead
+**source**: who found it (reviewer, user, maintainer)

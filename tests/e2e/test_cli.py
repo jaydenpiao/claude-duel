@@ -34,6 +34,8 @@ def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert "alice (fake-1) vs bob (fake-1)" in out
     assert "winner: " in out
     assert out.rstrip().endswith("replay verified ✓")
+    assert "of $33 cap" in out  # #195: the spend line shows the enforced cap, never the key limit
+    assert "$50" not in out
     assert main(["resume", "e2e", "--format", "json"]) == 0  # resuming a complete match is a no-op
     summary = json.loads(capsys.readouterr().out)
     assert (summary["match_id"], summary["stage"], summary["round"]) == ("e2e", "complete", 2)
@@ -70,11 +72,25 @@ def test_errors(env: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path) -
 def test_budget_abort_then_resume(
     env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "5")
+    monkeypatch.setenv("DUEL_RUN_MAX_CALLS", "5")  # run caps stay a resumable failure (ADR 0014)
     assert main(["run", "--match-id", "cap"]) == 2
     assert "budget exceeded" in capsys.readouterr().err
-    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "500")
+    monkeypatch.setenv("DUEL_RUN_MAX_CALLS", "500")
     assert main(["resume", "cap"]) == 0
+
+
+def test_match_cap_is_terminal_and_resume_is_a_no_op(
+    env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "5")
+    assert main(["run", "--match-id", "cap"]) == 3
+    assert "match capped: match_calls 5/5 by " in capsys.readouterr().err
+    logs = sorted(env.rglob("cap.events.jsonl"))
+    before = [p.read_bytes() for p in logs]
+    monkeypatch.setenv("DUEL_MATCH_MAX_CALLS", "500")  # raising the cap does not reopen a capped match
+    assert main(["resume", "cap"]) == 3
+    assert [p.read_bytes() for p in logs] == before
+    assert logs
 
 
 OPENAI = (AgentSpec(name="a", provider="openai"), AgentSpec(name="b"))
@@ -135,4 +151,5 @@ def test_live_openai_tiny_match(
     print(out)
     assert code == 0
     assert "replay verified ✓" in out
-    assert "of $50 burned" in out
+    assert "of $33 cap" in out  # the enforced lifetime cap, not the key limit ($50)
+    assert "$50" not in out

@@ -28,6 +28,8 @@ from claude_duel.app.container import (
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
+from claude_duel.app.experiment import footer as experiment_footer
+from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import write as write_export
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
@@ -37,7 +39,7 @@ from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
-from claude_duel.domain.models import MatchState
+from claude_duel.domain.models import MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
@@ -101,8 +103,16 @@ def _parser() -> argparse.ArgumentParser:
     db_p = sub.add_parser("db", help="results database administration")
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
-    exp = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
-    exp.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    out_p = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
+    out_p.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
+    exp_sub = exp.add_subparsers(dest="experiment", required=True)
+    stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
+    stakes.add_argument("--prereg", type=Path, required=True, help="pre-registration written before any spend")
+    stakes.add_argument("--seeds", type=int, default=1, help="seeds; each runs once per framing")
+    stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
+    stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
+    stakes.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
     return p
@@ -128,7 +138,7 @@ def _summary(state: MatchState) -> str:
 def _observer(settings: Settings, mid: str, args: argparse.Namespace) -> Commentary | ArenaView | None:
     if args.format != "text":
         return None
-    limit, lifetime = settings.budget.key_limit_usd, build_ledger(settings).total_usd
+    limit, lifetime = settings.budget.lifetime_max_usd, build_ledger(settings).total_usd
     if args.view == "arena" or (args.view == "auto" and sys.stdout.isatty()):
         return ArenaView(Console(), mid, limit, lifetime, pace=max(args.pace, 0.0))
     return Commentary(sys.stdout, mid, limit, lifetime)
@@ -144,12 +154,17 @@ def _run(settings: Settings, match_id: str | None, args: argparse.Namespace) -> 
         if isinstance(observer, ArenaView):
             observer.close()
         log(_LOG, logging.INFO, "metrics", match_id=mid, **metrics.summary())
+    done = 0
+    if state.capped is not None:  # ADR 0014: terminal and void; resuming it changes nothing
+        hit = state.capped
+        print(f"match capped: {hit.limit} {hit.spent:g}/{hit.cap:g} by {hit.breaching_agent} (void)", file=sys.stderr)
+        done = 3
     if observer is None:
         print(_summary(state))
-        return 0
+        return done
     report = replay(build_store(settings).load(mid), build_event_log(settings).read(mid))
     print(f"replay verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
-    return 0 if report.consistent else 1
+    return done if report.consistent else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -181,6 +196,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "export": lambda: _export(settings, args.out),
         "db": lambda: _migrate(settings),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
+        "experiment": lambda: _experiment(settings, args),
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
@@ -192,6 +208,24 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _experiment(settings: Settings, args: argparse.Namespace) -> int:
+    if args.override_reason and args.run_max_usd is None:
+        raise ConfigError("--override-reason needs --run-max-usd")
+    result = run_stakes(settings, args.prereg, args.seeds, InMemoryMetrics(), args.run_max_usd, args.override_reason)
+    if args.format == "json":
+        print(json.dumps(result))
+        return 0
+    for m in result["matches"]:
+        print(f"{m['match_id']}  {m['seed']}  {m['framing']:<11} {m['stage']}")
+    if result["stopped"]:
+        print(f"stopped: {result['stopped']}")
+    b = result["budget"]
+    print(f"{result['run_id']}: {len(result['matches'])} matches, ${b['run_usd']:.4f} of ${b['run_max_usd']:.2f}")
+    if line := experiment_footer(result):
+        print(line)
+    return 0
 
 
 def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
@@ -243,15 +277,18 @@ def _series_json(series_id: str, state: SeriesState, verified: bool) -> dict[str
         "best_of": state.rule.games,
         "wins": state.wins(),
         "winner": state.winner(),
+        "void": state.void(),
         "games": [g.model_dump() for g in state.games],
         "verified": verified,
     }
 
 
 def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> list[str]:
-    lines = [f"game {g.game_no} ({g.match_id}): {g.winner or 'draw'} · {g.scores}" for g in state.games]
+    lines = [
+        f"game {g.game_no} ({g.match_id}): {'void' if g.void else g.winner or 'draw'} · {g.scores}" for g in state.games
+    ]
     winner = state.winner()
-    result = "undecided" if not state.done() else f"winner: {winner}" if winner else "drawn"
+    result = "undecided" if not state.done() else "void" if state.void() else f"winner: {winner}" if winner else "drawn"
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
@@ -268,6 +305,9 @@ def _ratings(settings: Settings, boot: int, fmt: str) -> int:
             log(_LOG, logging.WARNING, "ratings: skipped unreadable match log", match_id=mid, error=str(exc))
     if skipped:
         print(f"ratings: {len(skipped)} log(s) skipped: {', '.join(skipped)}", file=sys.stderr)
+    capped = sum(s.stage is Stage.CAPPED for s in states)
+    if capped:  # ADR 0014: a capped match is void and never rated
+        print(f"ratings: {capped} capped match(es) excluded", file=sys.stderr)
     table = ratings(results(states), boot=boot)
     if fmt == "json":
         print(json.dumps([dataclasses.asdict(r) for r in table]))
