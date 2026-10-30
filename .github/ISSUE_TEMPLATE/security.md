@@ -1,6 +1,6 @@
 ---
 name: security finding
-about: sandbox escape, secret leak or other security issue (repo is private; never paste real keys)
+about: sandbox escape, secret leak or other security issue (never paste real keys; prefer reporting through the Security tab)
 labels: security
 ---
 **finding and severity** (critical / high / medium / low)
@@ -11,4 +11,4 @@ labels: security
 
 **suggested fix**
 
-**source**: security / architect / lead
+**source**: who found it (reviewer, user, maintainer)
