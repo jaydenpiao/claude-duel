@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
-
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import (
     build_budget,
@@ -17,11 +15,11 @@ from claude_duel.app.container import (
 )
 from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
 from claude_duel.app.series import play_series
+from claude_duel.app.session import open_match
 from claude_duel.config import Settings
 from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
-from claude_duel.domain.errors import MatchNotFoundError
-from claude_duel.domain.models import AgentSpec, Challenge, MatchState
+from claude_duel.domain.models import AgentSpec, Challenge
 from claude_duel.domain.series import game_seed
 from claude_duel.ports import Metrics
 
@@ -131,18 +129,14 @@ def _attack_pool(
         mid = f"{state.tournament_id}-pool-{spec.name}".replace("_", "-")
         agents = pin_agents(settings.model_copy(update={"agents": (spec, AgentSpec(name=tr.POOL))}))
         with store.lock(mid):
-            try:
-                match = store.load(mid)
-            except MatchNotFoundError:
-                match = MatchState(
-                    match_id=mid,
-                    secret=secrets.token_hex(32),
-                    seed=tr.tiebreak(state.seed, spec.name)[:16],
-                    agents=agents,
-                    rules=settings.rules,
-                    limits=settings.limits,
-                )
-                store.save(match)
+            match = open_match(
+                store,
+                settings,
+                mid,
+                agents=agents,
+                seed=tr.tiebreak(state.seed, spec.name)[:16],
+                warn_drift=False,
+            )
             engine = build_engine(settings, metrics, store, match.agents, budget=budget)
             mine = [c for c in pool if c.author != spec.name]
             match = engine.attack_pool(match, mine)

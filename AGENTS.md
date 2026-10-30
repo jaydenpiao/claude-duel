@@ -4,9 +4,9 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 
 ## Architecture (hexagonal, ADR 0001)
 - `src/claude_duel/domain/`: pure models, state machine, scoring, flag derivation, static policy. No I/O. See [domain/AGENTS.md](src/claude_duel/domain/AGENTS.md).
-- `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `EventLog`, `Metrics`.
-- `src/claude_duel/adapters/`: `providers/` (fake, openai, anthropic, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger), `metrics/` (jsonl). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
-- `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `session.py`, `observers.py`, `bench.py` (benchmark slice harness, fake agents only), `series.py` (best-of-N series), `tournament.py` (round robin and Swiss), `driver.py` (shared series/tournament helpers), `allowance.py` (per-agent wallets), `estimate.py` (offline worst-case cost), `framings.py` (system-prompt framing text), `experiment.py` (stakes experiment, audited run-cap override), `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
+- `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `EventLog`, `Metrics`, `ResultsStore`, `PublicSource`.
+- `src/claude_duel/adapters/`: `providers/` (fake, openai, anthropic, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger, Postgres results DB), `metrics/` (jsonl). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
+- `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `session.py`, `observers.py`, `bench.py` (benchmark slice harness, fake agents only), `series.py` (best-of-N series), `tournament.py` (round robin and Swiss), `driver.py` (shared series/tournament helpers), `allowance.py` (per-agent wallets), `estimate.py` (offline worst-case cost), `framings.py` (system-prompt framing text), `experiment.py` (stakes experiment, audited run-cap override), `sync.py` + `export.py` (results DB and static public export, ADR 0012), `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
 - `presentation/commentary.py`: `Commentary`, the default `duel run`/`resume` output. An `EventObserver` that folds events with `domain/events.apply` and prints header, round banners, plain-sentence lines, scoreboard, redacted snippets (`flags.scrub`), winner and the `$X of $50 burned` line. Presentation only: never mutates the match. Snapshot: `tests/snapshots/`.
 - `presentation/arena.py`: `ArenaView`, the live animated view (rich `Live`, 4 fps): HP-style score meters, a tug-of-war lead bar, per-round sparklines, a spinner on the current action (`attack_started` shows `bob attacking ...'s 'X'... try 2/4` while the attempt is in flight), ✓ capture / 🛡 defense flashes, a 5-line ticker, the burn line and a winner banner. `frame(model, width)` is pure and snapshot-tested; it never wraps, so any width renders. Default for `duel run`/`resume` when stdout is a TTY; `--view arena|commentary` forces one, `--pace S` slows it for demos. Both renderers subclass `presentation/common.py:MatchFold` and share its helpers (`board`, `spend`, `result`, `attempt_view`, ...); put new shared text there, never copy it. NO_COLOR is honoured by rich.
 - `presentation/card.py`: `duel card ID [--out PATH]` writes a static SVG summary for posting (models, score, rounds, spend, `replay verified` + a 16-hex `log_digest` of the event log). `card_svg` is pure and snapshot-tested; all text goes through `scrub` and is XML-escaped. For a PNG, convert the SVG (e.g. `rsvg-convert` or headless Chrome).
@@ -39,9 +39,10 @@ ruff check . && ruff format --check . && mypy src && python scripts/check_docs.p
 ## CI (self-hosted runner)
 
 Workflows run on `runs-on: [self-hosted, box]` (job names unchanged), a maintainer-operated runner for this private
-repo only. Jobs run as an unprivileged user with no API keys. The real-Docker sandbox tests skip when the daemon
-can't enforce cgroup limits (`docker_probe`); run them locally against a rootful daemon. Fork PR workflows stay
-disabled. Operating notes live outside the repo.
+repo only. Jobs run as an unprivileged user with no API keys. CI sets `DUEL_REQUIRE_DOCKER=1`, so the real-Docker
+sandbox tests must run there and never skip; locally they skip when the daemon can't enforce cgroup limits
+(`docker_probe`). Every job has a 30-minute timeout, and a new push to a PR cancels that PR's older ci and security
+runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
