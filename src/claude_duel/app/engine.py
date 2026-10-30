@@ -96,6 +96,7 @@ class MatchEngine:
         self._log = event_log
         self._metrics = metrics
         self._solv: dict[str, dict[str, Any]] = {}  # R1 measurements per challenge, logged on validation
+        self._attack_runs = 0
         self._observer = IsolatedObserver(observer, metrics) if observer is not None else None
 
     # -- lifecycle -------------------------------------------------------
@@ -502,6 +503,14 @@ class MatchEngine:
             )
         return None
 
+    @staticmethod
+    def _attack_over_budget(state: MatchState, calls: int | None) -> str | None:
+        """The attacker's solver gets the same check() budget as the author's (attacker_solver cap)."""
+        cap = state.rules.solvability.solver_cap(attacker_solver=True)
+        if calls is None or calls > cap:
+            return f"attacker solver over budget: more than {cap:,} check() calls (or it exited early)"
+        return None
+
     def _run_solver(
         self, state: MatchState, source: str, solver: str, flag: str, purpose: str, tag: str | None = None
     ) -> tuple[str, str | None, int | None]:
@@ -665,7 +674,14 @@ class MatchEngine:
         if state.rules.attacker_solver and move.solver.strip():
             self._metrics.incr("attack.solver")
             decoy = flag_of(state.secret, f"{agent}:attacker-solver", state.round)  # never the challenge's flag
-            payload, failed, _ = self._run_solver(state, spec.source, move.solver, decoy, "attack_solver")
+            tag = None
+            if state.rules.solvability.enabled and state.rules.challenge_form == "check":
+                self._attack_runs += 1  # fresh nonce per run, so a challenge can't print a fake count
+                tag = solvability.nonce(state.secret or state.match_id, f"{agent}:{self._attack_runs}", "attack")
+            payload, failed, calls = self._run_solver(state, spec.source, move.solver, decoy, "attack_solver", tag)
+            if tag and not failed:
+                self._metrics.timing("attack.solver.checks", calls or 0)
+                failed = self._attack_over_budget(state, calls)
             if failed:
                 return AttackAttempt(payload=MALFORMED, output=failed, tokens=tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.app.engine import MatchEngine
 from claude_duel.domain import solvability
 from claude_duel.domain.models import SolvabilityRule
 from claude_duel.domain.modes import preset
@@ -69,3 +70,11 @@ def test_count_line_needs_the_exact_tag() -> None:
     assert solvability.split_count("42\nNxyz:7\n", "Nabc") == ("42\nNxyz:7\n", None)
     assert solvability.split_count("42\nNabc:7x\n", "Nabc")[1] is None
     assert solvability.nonce("s", "c", "solver") != solvability.nonce("s", "c", "density")
+
+
+def test_attacker_solver_shares_the_author_budget(new_state) -> None:  # type: ignore[no-untyped-def]
+    state = new_state()
+    assert MatchEngine._attack_over_budget(state, 0) is None
+    assert MatchEngine._attack_over_budget(state, 200_000) is None
+    assert "over budget" in (MatchEngine._attack_over_budget(state, 200_001) or "")
+    assert "exited early" in (MatchEngine._attack_over_budget(state, None) or "")
