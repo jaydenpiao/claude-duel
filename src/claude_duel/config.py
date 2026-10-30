@@ -8,8 +8,9 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 
+from claude_duel.adapters.providers.registry import VENDORS
 from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed, vendor_of
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
@@ -26,7 +27,6 @@ class Settings(BaseModel):
     sandbox: str = Field(default="auto", pattern="^(auto|docker|subprocess)$")
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
-    openai_model: str = "gpt-5-nano"
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
     gate_model: str = "gpt-5-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
@@ -34,25 +34,41 @@ class Settings(BaseModel):
     provider_timeout: float = 60.0
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
-    openai_api_key: SecretStr | None = None
+    models: dict[str, str] = Field(default_factory=dict)  # vendor -> default model; TOML `<vendor>_model`
+    api_keys: dict[str, SecretStr] = Field(default_factory=dict)  # vendor -> key, from env only (VENDORS)
     database_url: SecretStr | None = None  # DATABASE_URL: a duel_ingest login, for `duel sync` (ADR 0012)
     migrate_database_url: SecretStr | None = None  # MIGRATE_DATABASE_URL: schema owner, for migrate and --rebuild
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
-    anthropic_model: str = "claude-haiku-5-5"
-    anthropic_api_key: SecretStr | None = None
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _per_vendor(cls, data: Any) -> Any:
+        """Fold `<vendor>_model` and `<vendor>_api_key` (TOML, env) into the per-vendor maps."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for name in VENDORS:
+            if f"{name}_model" in data:
+                data["models"] = {**data.get("models", {}), name: data.pop(f"{name}_model")}
+            if f"{name}_api_key" in data:
+                data["api_keys"] = {**data.get("api_keys", {}), name: data.pop(f"{name}_api_key")}
+        return data
+
+    def default_model(self, vendor: str) -> str:
+        if vendor not in VENDORS:
+            raise ConfigError(f"unknown provider {vendor!r}; known: {sorted(VENDORS)}")
+        return self.models.get(vendor, VENDORS[vendor].default_model)
+
     def model_for(self, agent: AgentSpec) -> str:
         """The single place an agent's effective model is resolved."""
         if agent.provider == "fake":
             return FAKE_MODEL
-        if agent.provider == "anthropic":
-            return agent.model or self.anthropic_model
-        return agent.model or self.openai_model
+        return agent.model or self.default_model(agent.provider)
 
 
 _ENV_SCALARS = {
@@ -61,11 +77,10 @@ _ENV_SCALARS = {
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
     "DUEL_LOG_LEVEL": "log_level",
-    "DUEL_OPENAI_MODEL": "openai_model",
-    "DUEL_ANTHROPIC_MODEL": "anthropic_model",
     "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
     "DUEL_PROVIDER_MAX_RETRIES": "provider_max_retries",
+    **{f"DUEL_{name.upper()}_MODEL": f"{name}_model" for name in VENDORS},
 }
 _ENV_RULES = {
     "DUEL_ROUNDS": "rounds",
@@ -83,9 +98,7 @@ _ENV_BUDGET = {
     "DUEL_RUN_MAX_CALLS": "run_max_calls",
     "DUEL_LIFETIME_MAX_USD": "lifetime_max_usd",
 }
-_ENV_SECRETS = {
-    "OPENAI_API_KEY": "openai_api_key",
-    "ANTHROPIC_API_KEY": "anthropic_api_key",
+_ENV_SECRETS = {  # vendor API keys come from VENDORS (registry), not this map
     "DATABASE_URL": "database_url",
     "MIGRATE_DATABASE_URL": "migrate_database_url",
     "EXPORT_DATABASE_URL": "export_database_url",
@@ -132,6 +145,9 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         data["rules"] = _with_preset(data["rules"])
     if env.get("DUEL_DOCKER"):
         data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
+    for vendor in VENDORS.values():
+        if env.get(vendor.key_env):
+            data[f"{vendor.name}_api_key"] = env[vendor.key_env]
     for var, key in _ENV_SECRETS.items():
         if env.get(var):
             data[key] = env[var]
@@ -139,11 +155,16 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-    check_model_allowed(settings.openai_model)
-    check_model_allowed(settings.anthropic_model)
+    _check_models(settings)
+    return settings
+
+
+def _check_models(settings: Settings) -> None:
+    """Every default and agent model is allowlisted, premium only when allowed, and of the agent's vendor."""
+    for name in VENDORS:
+        check_model_allowed(settings.default_model(name))
     for agent in settings.agents:
         model = settings.model_for(agent)
         check_model_allowed(model, settings.allow_premium)
         if vendor_of(model) != agent.provider:
             raise ConfigError(f"agent {agent.name!r}: model {model!r} is not a {agent.provider} model")
-    return settings
