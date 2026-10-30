@@ -237,3 +237,10 @@ def test_verify_reruns_ghost_runs_and_catches_a_flipped_hit(make_engine, new_sta
     assert verify_ghosts(state, events, sandbox) == [
         f"ghost run #{events[i].seq}: {events[i].data['ghost_id']} -> {events[i].data['target']} does not reproduce"
     ]
+
+
+def test_ghost_capture_with_zero_attempts_is_priced_as_one_try() -> None:
+    facts = _forged(hits={"c0": "g"})
+    one_try = solve_award(spec(), 1, 1, ScoringRule())
+    assert SCORERS["classic"](facts, ScoringRule())["b"] == one_try  # not one_try + 1 for attempts=0
+    assert SCORERS["ledger"](facts, ScoringRule())["b"] == ghosts.ghost_award(one_try)

@@ -84,9 +84,9 @@ def _captures(
         v = validations.get(ch.id)
         if ch.spec is None or v is None or not v.valid or atk is None or not atk.solved:
             continue
-        classic_paid = solve_award(ch.spec, round_no, atk.attempts, rule)
+        classic_paid = solve_award(ch.spec, round_no, max(1, atk.attempts), rule)  # ghosts log attempts=0
         if atk.ghost is not None:
-            out[ch.id] = (atk.attacker, classic_paid, ghost_award(solve_award(ch.spec, round_no, 1, rule)))
+            out[ch.id] = (atk.attacker, classic_paid, ghost_award(classic_paid))
         elif atk.stake:
             out[ch.id] = (atk.attacker, classic_paid, stake_award(classic_paid, atk.tokens_used, atk.stake))
     return out
@@ -123,7 +123,7 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             continue
         atk = facts.attacks.get(ch.id)
         if atk is not None and atk.solved:
-            scores[atk.attacker] += solve_award(ch.spec, facts.round_no, atk.attempts, rule)
+            scores[atk.attacker] += solve_award(ch.spec, facts.round_no, max(1, atk.attempts), rule)
         else:
             award = defense_award(ch.spec, facts.round_no, rule)
             scores[ch.author] += award // 2 if ch.probe_solved else award
