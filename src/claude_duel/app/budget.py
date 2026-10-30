@@ -7,12 +7,13 @@ processes can each overshoot the lifetime cap by at most one in-flight call.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from claude_duel.adapters.providers.registry import VENDORS
-from claude_duel.domain.errors import BudgetExceededError, ConfigError
+from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
@@ -64,7 +65,7 @@ class BudgetLimits(BaseModel):
     match_max_usd: float = Field(default=0.25, gt=0)
     run_max_calls: int = Field(default=200, ge=1)
     run_max_usd: float = Field(default=0.50, gt=0)
-    lifetime_max_usd: float = Field(default=40.0, gt=0)
+    lifetime_max_usd: float = Field(default=33.0, gt=0)
     key_limit_usd: float = Field(default=50.0, gt=0, description="provider key's hard limit; shown in output")
 
     @model_validator(mode="after")
@@ -74,9 +75,49 @@ class BudgetLimits(BaseModel):
         return self
 
 
+RUN_OVERRIDE_CEILING_USD = 2.00  # hard top for ``--run-max-usd``; code-defined, not configurable
+
+
+class RunOverride(BaseModel):
+    """A per-invocation raise of ``run_max_usd`` (``duel experiment``); defaults never change."""
+
+    model_config = ConfigDict(frozen=True)
+    field: str = "run_max_usd"
+    default: float
+    value: float
+    reason: str
+    ceiling: float = RUN_OVERRIDE_CEILING_USD
+
+
+def make_override(limits: BudgetLimits, field: str, value: float, reason: str, spent: float) -> RunOverride:
+    """Check every guard rail; raise ``ConfigError`` before any call is made."""
+    if field != "run_max_usd":
+        raise ConfigError(f"budget override: only run_max_usd may be overridden, not {field!r}")
+    if not reason.strip():
+        raise ConfigError("budget override: --override-reason is required")
+    if not math.isfinite(value):  # NaN would pass every comparison below and disable the run cap
+        raise ConfigError(f"budget override: {value!r} is not a finite amount")
+    if value > RUN_OVERRIDE_CEILING_USD:
+        raise ConfigError(f"budget override: {value:.2f} exceeds the ceiling {RUN_OVERRIDE_CEILING_USD:.2f}")
+    if value < limits.run_max_usd:
+        raise ConfigError(f"budget override: {value:.2f} is below the default {limits.run_max_usd:.2f}")
+    if spent + value > limits.lifetime_max_usd:
+        raise ConfigError(
+            f"budget override: lifetime spent ${spent:.2f} + {value:.2f} exceeds ${limits.lifetime_max_usd:.2f}"
+        )
+    return RunOverride(field=field, default=limits.run_max_usd, value=value, reason=reason.strip())
+
+
 class CostBudget:
-    def __init__(self, limits: BudgetLimits, ledger: SpendLedger, prices: Mapping[str, tuple[float, float]]) -> None:
+    def __init__(
+        self,
+        limits: BudgetLimits,
+        ledger: SpendLedger,
+        prices: Mapping[str, tuple[float, float]],
+        override: RunOverride | None = None,
+    ) -> None:
         self.limits = limits
+        self.override = override
         self._ledger = ledger
         self._prices = prices
         self.run_calls = 0
@@ -96,10 +137,14 @@ class CostBudget:
     def check(self, state: MatchState) -> None:
         """Raise before a call that would start above any cap."""
         u, lim = state.usage, self.limits
-        breaches = [
-            (u.calls >= lim.match_max_calls, f"match calls {u.calls}/{lim.match_max_calls}"),
-            (u.tokens >= lim.match_max_tokens, f"match tokens {u.tokens}/{lim.match_max_tokens}"),
-            (u.usd >= lim.match_max_usd, f"match cost ${u.usd:.4f}/${lim.match_max_usd}"),
+        for limit, spent, cap in (
+            ("match_calls", u.calls, lim.match_max_calls),
+            ("match_tokens", u.tokens, lim.match_max_tokens),
+            ("match_usd", u.usd, lim.match_max_usd),
+        ):
+            if spent >= cap:
+                raise MatchCapError(limit, spent, cap)  # terminal CAPPED, never resumable (ADR 0014)
+        breaches = [  # run and lifetime caps stay resumable failures
             (self.run_calls >= lim.run_max_calls, f"run calls {self.run_calls}/{lim.run_max_calls}"),
             (self.run_usd >= lim.run_max_usd, f"run cost ${self.run_usd:.4f}/${lim.run_max_usd}"),
         ]

@@ -28,7 +28,7 @@ class Vendor:
 VENDORS: dict[str, Vendor] = {
     v.name: v
     for v in (
-        Vendor("openai", "gpt-", "OPENAI_API_KEY", "gpt-4.1-nano", lambda k, m, t: OpenAIProvider(k, m, timeout=t)),
+        Vendor("openai", "gpt-", "OPENAI_API_KEY", "gpt-5-nano", lambda k, m, t: OpenAIProvider(k, m, timeout=t)),
         Vendor(
             "anthropic",
             "claude-",

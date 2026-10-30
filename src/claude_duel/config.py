@@ -28,7 +28,7 @@ class Settings(BaseModel):
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
-    gate_model: str = "gpt-4.1-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
+    gate_model: str = "gpt-5-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
     tournament: TournamentRule | None = None  # [tournament] entrants for `duel tournament` (#39)
     provider_timeout: float = 60.0
