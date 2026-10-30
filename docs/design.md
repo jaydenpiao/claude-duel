@@ -14,7 +14,7 @@
 Each unit has a key (`build:r1:alice:0`, `attack:r1:bob:<challenge>`). The engine skips units already recorded and checkpoints after each one, so resume never repeats paid model calls for finished work. Every change is an event in the hash-chained `<id>.events.jsonl` (ADR 0004), including each attack attempt, so a crash mid-attack resumes at the next attempt.
 
 ## Flags
-`flag = DUEL{hmac_sha256(match_secret, challenge_id)[:32]}`. The secret is generated per match and stored only in the state file (never logged).
+`flag = DUEL{hmac_sha256(match_secret, challenge_id)[:32]}`. The secret is generated per match and stored only in its own 0600 `<id>.secret` file (never logged; never in the state file).
 
 ## Scoring (per round r, multiplier m=r)
 - scorer `rules.scoring.kind` (registry `scoring.SCORERS`, ADR 0007); `classic`:
