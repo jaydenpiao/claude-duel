@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Security (SV-4): `hash()` is banned, the sandbox fixes str hashing (PYTHONHASHSEED=0; `-s -P -S` instead of `-I` so the fixed env is honoured), and the reference must print the same output on 3 runs.
 - Security (SV-3): fixed junk inputs (space, "a", "0", newline, same-length filler, the answer with one char changed, its halves) must not reveal the flag, so degenerate acceptance is rejected for free.
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.

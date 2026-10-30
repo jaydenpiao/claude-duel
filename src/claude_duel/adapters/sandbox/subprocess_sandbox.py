@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Callable
 
 from claude_duel.adapters.sandbox.common import execute
-from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
+from claude_duel.adapters.sandbox.runner import HASH_ENV, PYTHON_FLAGS, frame
 from claude_duel.domain.errors import SandboxRefusedError
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
@@ -45,6 +45,6 @@ class SubprocessSandbox:
                 [self._python, *PYTHON_FLAGS],
                 frame(source, flag, stdin, rlimits(limits)),
                 limits,
-                env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+                env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", **HASH_ENV},
                 cwd=tmp,
             )

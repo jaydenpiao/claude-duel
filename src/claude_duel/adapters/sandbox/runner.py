@@ -44,7 +44,10 @@ RUNNER = (
     "    print(f'error: {type(_e).__name__} at line {_t.tb_lineno}')\n"
     "    sys.exit(1)\n"
 )
-PYTHON_FLAGS = ("-I", "-S", "-c", RUNNER)
+# -s -P -S is -I without -E: the sandboxes pass a fixed environment, and -E would ignore HASH_ENV (SV-4).
+PYTHON_FLAGS = ("-s", "-P", "-S", "-c", RUNNER)
+# Fixed str hashing, so set/dict order (and anything built on it) is the same on every run.
+HASH_ENV = {"PYTHONHASHSEED": "0"}
 
 
 def frame(source: str, flag: str, stdin: str, rlimits: Mapping[str, int] | None = None) -> str:

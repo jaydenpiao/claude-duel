@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Sequence
 
 from claude_duel.adapters.sandbox.common import execute
-from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
+from claude_duel.adapters.sandbox.runner import HASH_ENV, PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
 
@@ -111,6 +111,7 @@ class DockerSandbox:
             "--log-driver", "none",
             "--stop-timeout", "1",
             self._image,
+            "env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", *(f"{k}={v}" for k, v in HASH_ENV.items()),
             "timeout", "--kill-after=1", str(limits.wall_seconds), "python", *PYTHON_FLAGS,
         ]  # fmt: skip
 

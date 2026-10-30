@@ -26,14 +26,14 @@ BANNED_NAMES = frozenset(
     {
         "eval", "exec", "compile", "open", "breakpoint", "globals", "locals", "vars", "dir",
         "getattr", "setattr", "delattr", "hasattr", "input", "help", "memoryview",
-        "exit", "quit", "type", "object", "super", "classmethod", "staticmethod",
+        "exit", "quit", "hash", "type", "object", "super", "classmethod", "staticmethod",
     }
 )  # fmt: skip
 # Builtins the runner gives challenge code; everything else (incl. the real __import__) is absent at runtime.
 SAFE_BUILTINS = frozenset(
     {
         "abs", "all", "any", "bin", "bool", "bytearray", "bytes", "chr", "dict", "divmod", "enumerate",
-        "filter", "float", "frozenset", "hash", "hex", "int", "isinstance", "iter", "len", "list", "map",
+        "filter", "float", "frozenset", "hex", "int", "isinstance", "iter", "len", "list", "map",
         "max", "min", "next", "oct", "ord", "pow", "print", "range", "repr", "reversed", "round", "set",
         "slice", "sorted", "str", "sum", "tuple", "zip",
         "Exception", "ValueError", "TypeError", "KeyError", "IndexError", "ZeroDivisionError",
