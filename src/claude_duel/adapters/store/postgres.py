@@ -1,6 +1,7 @@
 """Postgres transport for the results index (ADR 0012): psycopg connection, ``PgExecutor`` and the public export.
 
-The SQL itself lives in ``results_sql`` (shared with ``neon_http``). Connection URLs come only from the environment
+The SQL itself lives in ``results_sql``. In production the URL points at cloud-sql-proxy on loopback (IAM auth, no
+password; ``postgres_url.iam_url``). Connection URLs come only from the environment
 and are never logged or put in an error message. ``migrate`` and ``--rebuild`` need the schema owner
 (``MIGRATE_DATABASE_URL``); routine ``duel sync`` should run as a ``duel_ingest`` login (``DATABASE_URL``), which
 cannot delete or truncate. ``PublicReader`` refuses any role that can write.
@@ -18,7 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from claude_duel.adapters.store import results_sql
-from claude_duel.adapters.store.postgres_url import require_tls
+from claude_duel.adapters.store.postgres_url import iam_url, require_tls
 from claude_duel.adapters.store.results_sql import Row, SqlResults, Stmt
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 
@@ -31,7 +32,7 @@ Conn = psycopg.Connection[dict[str, Any]]
 def connect(url: str) -> Conn:
     require_tls(url)
     try:
-        return psycopg.connect(url, row_factory=dict_row, autocommit=True, connect_timeout=15)
+        return psycopg.connect(iam_url(url), row_factory=dict_row, autocommit=True, connect_timeout=15)
     except psycopg.Error as exc:  # the message can name host and user; keep it out of output
         raise ConfigError(f"cannot connect to the results database ({type(exc).__name__})") from None
 

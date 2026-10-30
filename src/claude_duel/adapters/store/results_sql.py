@@ -1,7 +1,7 @@
-"""The results index in SQL, shared by every SQL transport (ADR 0012): ``postgres`` (psycopg) and ``neon-http``.
+"""The results index in SQL, (ADR 0012), run by the ``postgres`` (psycopg) transport.
 
 No driver imports and no I/O of its own: an ``Executor`` runs the statements. Upsert keys, migrations, role checks
-and the ``ResultsStore`` logic live here once, so both adapters behave identically (``tests/contract``).
+and the ``ResultsStore`` logic live here once, so the memory and SQL stores behave identically (``tests/contract``).
 Placeholders are ``%s``; values are plain Python (dicts and lists are JSON) and each executor adapts them.
 """
 

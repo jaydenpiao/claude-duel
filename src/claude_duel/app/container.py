@@ -188,13 +188,7 @@ def _owner_url(settings: Settings) -> str:
 
 
 def results_executor(settings: Settings, url: str) -> Executor:
-    """The SQL transport chosen by ``DUEL_RESULTS_BACKEND``; drivers are imported only when chosen."""
-    if settings.results_backend == "neon-http":
-        from claude_duel.adapters.store.neon_http import NeonHttpExecutor  # noqa: PLC0415 - optional transport
-        from claude_duel.adapters.store.postgres_url import require_tls  # noqa: PLC0415
-
-        require_tls(url)
-        return NeonHttpExecutor(url, settings.neon_http_endpoint)
+    """psycopg to the results database (cloud-sql-proxy on loopback in production); imported only when used."""
     from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415 - psycopg only when used
 
     return PgExecutor(connect(url))

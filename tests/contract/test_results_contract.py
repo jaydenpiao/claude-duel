@@ -1,7 +1,6 @@
-"""One ``ResultsStore`` contract for every transport: memory, postgres (psycopg) and neon-http (ADR 0012).
+"""One ``ResultsStore`` contract for every store: memory and postgres (psycopg) (ADR 0012).
 
-postgres needs DUEL_TEST_DATABASE_URL (a throwaway superuser URL); neon-http additionally needs
-DUEL_TEST_NEON_HTTP_ENDPOINT, a local Neon HTTP proxy in front of that same server (never a real Neon project).
+postgres needs DUEL_TEST_DATABASE_URL (a throwaway superuser URL).
 Each SQL case gets a fresh database migrated by a non-superuser owner.
 """
 
@@ -10,7 +9,6 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, nullcontext
 
 import pytest
 
@@ -20,16 +18,14 @@ from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.results_sql import Executor, SqlResults
 from claude_duel.app.engine import MatchEngine
 from claude_duel.app.sync import ELO_ORDER, rows, sync
-from claude_duel.domain.errors import ConfigError, ResultsDbError
+from claude_duel.domain.errors import ResultsDbError
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts
 from claude_duel.ports import ResultsStore
 from tests.memory_results import MemoryResults
 
 ADMIN = os.environ.get("DUEL_TEST_DATABASE_URL", "")
-NEON = os.environ.get("DUEL_TEST_NEON_HTTP_ENDPOINT", "")
 PW = "owner-test-only"  # the e2e owner: it created the cluster-wide duel_* roles
-NEON_HOST = "db.localtest.me:5432"  # the local proxy forwards this to DUEL_TEST_DATABASE_URL's server
 
 
 def _fresh_db() -> tuple[str, str]:
@@ -55,10 +51,6 @@ def _drop(name: str) -> None:
     params=[
         "memory",
         pytest.param("postgres", marks=pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set")),
-        pytest.param(
-            "neon-http",
-            marks=pytest.mark.skipif(not (ADMIN and NEON), reason="DUEL_TEST_NEON_HTTP_ENDPOINT not set"),
-        ),
     ]
 )
 def backend(request: pytest.FixtureRequest) -> Iterator[tuple[str, ResultsStore, Executor | None]]:
@@ -67,19 +59,12 @@ def backend(request: pytest.FixtureRequest) -> Iterator[tuple[str, ResultsStore,
         return
     name, url = _fresh_db()
     try:
-        if request.param == "postgres":
-            from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415
+        from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415
 
-            with connect(url) as conn:
-                ex: Executor = PgExecutor(conn)
-                results_sql.migrate(ex)
-                yield "postgres", SqlResults(ex), ex
-        else:
-            from claude_duel.adapters.store.neon_http import NeonHttpExecutor  # noqa: PLC0415
-
-            neon = NeonHttpExecutor(f"postgres://duel_test_owner:{PW}@{NEON_HOST}/{name}", NEON)
-            assert results_sql.migrate(neon)  # migrations run over HTTP too
-            yield "neon-http", SqlResults(neon), neon
+        with connect(url) as conn:
+            ex: Executor = PgExecutor(conn)
+            results_sql.migrate(ex)
+            yield "postgres", SqlResults(ex), ex
     finally:
         _drop(name)
 
@@ -154,14 +139,9 @@ def test_sync_end_to_end(
 
 
 def test_rebuild(backend: tuple[str, ResultsStore, Executor | None], projections: dict[str, MatchProjection]) -> None:
-    kind, db, _ = backend
+    _, db, _ = backend
     db.ingest(projections["m1"])
-    ctx: AbstractContextManager[object] = (
-        pytest.raises(ConfigError, match="needs DUEL_RESULTS_BACKEND=postgres")
-        if kind == "neon-http"
-        else nullcontext()
-    )
-    with ctx, db.rebuilding():
+    with db.rebuilding():
         db.ingest(projections["m1"])
     assert db.stored("m1").hashes  # the append-only history survives either way
 

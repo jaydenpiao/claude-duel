@@ -52,11 +52,11 @@ queryable index, and a future public page needs data that provably holds no flag
   decimal-encoded flags; default EXECUTE is revoked from PUBLIC and any SECURITY DEFINER function in `duel`/`public_v`
   blocks sync and export; CI Postgres is pinned by digest with a random per-job password.
 
-## Amendment: neon-http transport (2026-10-22)
+## Amendment: Cloud SQL transport (2026-10-29)
 
-- The results SQL moved to `results_sql.py` behind a small `Executor` protocol; `postgres` (psycopg) and
-  `neon-http` (`DUEL_RESULTS_BACKEND=neon-http`) are both transports for it, and `tests/contract` runs one
-  suite against memory, postgres and (with `DUEL_TEST_NEON_HTTP_ENDPOINT`, a local proxy) neon-http.
-- Neon runs a `{"queries": [...]}` batch as one transaction, so `ingest` and `migrate` stay atomic: `migrate`
-  sends the advisory lock, the bookkeeping row and each split statement as one batch.
-- No transaction spans requests, so `duel sync --rebuild` and `duel export` stay postgres-only.
+- The results SQL lives in `results_sql.py` behind a small `Executor` protocol, run by the `postgres` (psycopg)
+  transport; `tests/contract` runs one suite against memory and postgres. The Neon SQL-over-HTTPS transport
+  was dropped: the index moved to Cloud SQL for PostgreSQL.
+- The box connects through `cloud-sql-proxy --auto-iam-authn` on `127.0.0.1:5433` (TLS and IAM handled by the
+  proxy; loopback is exempt from `require_tls`). `DATABASE_URL` uses the IAM user and no password, e.g.
+  `postgresql://duel-sql-proxy@<project>.iam@127.0.0.1:5433/duel`; `iam_url` escapes the inner `@` for libpq.

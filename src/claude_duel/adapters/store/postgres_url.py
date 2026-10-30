@@ -1,16 +1,33 @@
-"""Connection-string checks shared by the results transports, with no driver import."""
+"""Connection-string checks for the results database, with no driver import."""
 
 from __future__ import annotations
 
 import os
 import shlex
 from collections.abc import Mapping
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from claude_duel.domain.errors import ConfigError
 
 _LOCAL_HOSTS = frozenset({"", "localhost", "127.0.0.1", "::1"})
 _TLS_MODES = frozenset({"require", "verify-ca", "verify-full"})
+
+
+def iam_url(url: str) -> str:
+    """Percent-encode the ``@`` inside a Cloud SQL IAM user, so libpq reads the host after the last ``@``.
+
+    ``postgresql://duel-sql-proxy@<project>.iam@127.0.0.1:5433/duel`` (cloud-sql-proxy ``--auto-iam-authn``, no
+    password) becomes ``postgresql://duel-sql-proxy%40<project>.iam@127.0.0.1:5433/duel``. Other URLs pass through.
+    """
+    if not url.startswith(("postgres://", "postgresql://")):
+        return url
+    scheme, _, rest = url.partition("://")
+    netloc, slash, tail = rest.partition("/")
+    userinfo, at, host = netloc.rpartition("@")
+    if not at or "@" not in userinfo:
+        return url
+    user, colon, password = userinfo.partition(":")
+    return f"{scheme}://{quote(user, safe='%')}{colon}{password}@{host}{slash}{tail}"
 
 
 def _params(url: str) -> dict[str, str]:
