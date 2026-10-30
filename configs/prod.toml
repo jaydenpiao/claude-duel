@@ -4,4 +4,4 @@ openai_model = "gpt-5-nano"
 [budget]
 match_max_usd = 1.00
 run_max_usd = 2.00
-lifetime_max_usd = 40.0
+lifetime_max_usd = 33.0
