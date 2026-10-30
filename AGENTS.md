@@ -44,21 +44,21 @@ can't enforce cgroup limits (`docker_probe`); run them locally against a rootful
 disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
-- dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
+- dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
 - PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).
 - Workflows: actions pinned to commit SHAs (Dependabot bumps them), top-level `permissions: {}` with per-job grants, `persist-credentials: false`. Keep it that way.
 - Prod: push tag `vX.Y.Z` -> `release.yml` Trivy-scans, then pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
 
 ## Cost rules
 - Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
-- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
+- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$33`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
 - `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
 
 ## Security invariants
 - Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only over stdin (runner header) and exposed to challenge code as the global `FLAG`; never on argv or in env. Never logged, never in events, never persisted (the match `secret` is, only in its own 0600 `<id>.secret` file; `MatchState.secret` is excluded from every dump and repr, so state files, summaries and exports never carry it).
 - Prompts are checked with `assert_no_flag`; sandbox output shown to attackers is `redact()`ed. Both catch the flag and its derived forms (reversed, hex, base64/32, any case, spaced or split, 16-char halves). `domain/flags.py:scrub` is the only redactor for anything shown or logged (flags plus `sk-`, `api_key=`, `authorization:` and 32+ hex); never add another.
 - Challenge source passes `domain/policy.py` (AST allowlist: pure modules, `sys.stdin`/`sys.stdout`/`sys.exit` only, module names only as `mod.attr`, no submodule access (`re.enum`, `json.codecs`), no `_` names (a bare `_` is fine), no introspection attributes (`gi_*`, `f_*`, `co_*`, `cr_*`, `tb_*`, `mro`), no strings containing `__`, no `format`/`format_map`/`vformat`/`Formatter` (fields built at runtime would getattr dunders), no `class` statements, no star/relative imports, banned builtins, size cap, no flag-shaped literals, accepting input not in the source in an obvious encoding; ADR 0006) before running. An optional author `solver` passes the same policy and runs in the same sandbox. At runtime the runner gives challenge code only `policy.SAFE_BUILTINS`, an `__import__` limited to pure-module stand-ins (no submodules) and a `sys` stand-in with only `stdin`/`stdout`/`exit`. A crash prints only `error: <Type> at line N`, never the message (it could quote FLAG).
-- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output, 32 pids, 0.5 CPUs. Real-model matches run only in Docker and fail closed without it (ADR 0003); the subprocess sandbox is for the fake provider only and raises `SandboxRefusedError` for any source its `source_allowed` rejects (the container passes `fake.is_template`; only tests pass `tests/helpers.any_source`). Set `DUEL_DOCKER="sudo docker"` if the socket needs sudo.
+- Sandbox limits from `SandboxLimits`: 2s wall, 1s CPU, 128 MB, 4 KB output, 32 pids, 0.5 CPUs. Real-model matches run only in Docker and fail closed without it (ADR 0003); the subprocess sandbox is for the fake provider only and raises `SandboxRefusedError` for any source its `source_allowed` rejects (the container passes `fake.is_template`; only tests pass `tests/helpers.any_source`). Set `DUEL_DOCKER="sudo docker"` if the socket needs sudo; `DUEL_REQUIRE_DOCKER=1` (set in CI) makes the Docker tests fail instead of skip when no daemon that enforces limits is reachable.
 
 ## Coding standards
 - No duplicated logic; shared helpers live once (e.g. `sandbox/common.py:execute`).

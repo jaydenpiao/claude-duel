@@ -5,6 +5,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
+- Series ids from entrant indexes, so look-alike names never share a series log.
+- Flag-form detection covers split and shifted encodings in the redactor.
+- Published image digests: release builds never reuse a branch-seeded base or layer cache.
+- Difficulty-gate probe is exempt from per-agent wallets.
+- Tournament entrant models pinned in `tournament_created`.
+- CI requires real-Docker sandbox tests (`DUEL_REQUIRE_DOCKER=1`).
 ### Changed
 - Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
   for imports of escape modules such as `os` or `subprocess`.

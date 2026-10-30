@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
+from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -99,7 +100,34 @@ def efficiency_award(full: int, tokens_used: int, rule: ScoringRule) -> int:
     return max(1, full - rule.max_penalty * tokens_used // rule.reference_tokens)
 
 
-SCORERS: dict[str, Scorer] = {"classic": classic, "efficiency": efficiency, "timed": timed}
+def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
+    """Sealed Ledger (design-core-logic.md 4.3): classic, but a capture is discounted by the share of its stake used.
+
+    A stake of 0 means the attacker skipped the challenge, so it scores as a defense; a recorded capture on a
+    0-stake challenge, or one with no stake, is a corrupt or tampered log and raises. Discount is 0..50%, never
+    below 1, so defense >= capture (ADR 0006) still holds.
+    """
+    for a in facts.attacks.values():
+        if a.solved and a.stake is None:
+            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
+        if a.solved and a.stake == 0:
+            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
+    scores = classic(facts, rule)
+    for ch in facts.challenges:
+        atk = facts.attacks.get(ch.id)
+        v = facts.validations.get(ch.id)
+        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
+            full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
+            scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    return scores
+
+
+def stake_award(full: int, used: int, stake: int) -> int:
+    """A capture's value: ``full`` less up to half, by the share of ``stake`` used; always in [1, full]."""
+    return max(1, full - full * min(used, stake) // (2 * stake))
+
+
+SCORERS: dict[str, Scorer] = {"classic": classic, "efficiency": efficiency, "timed": timed, "ledger": ledger}
 
 
 def solve_award(spec: ChallengeSpec, round_no: int, attempts: int, rule: ScoringRule) -> int:

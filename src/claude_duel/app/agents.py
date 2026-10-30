@@ -33,6 +33,7 @@ M = TypeVar("M", bound=BaseModel)
 class AttackMove(BaseModel):
     model_config = ConfigDict(extra="ignore")
     payload: str = Field(max_length=4096)
+    solver: str = Field(default="", max_length=8192)  # only read when Rules.attacker_solver is on
 
 
 EXAMPLE_CHALLENGE = {
@@ -269,6 +270,7 @@ def attack_prompt(
     memory: str = "",
     scratchpad: bool = False,
     retry_hint: bool = False,
+    solver: bool = False,
 ) -> str:
     lines = [
         "TASK: ATTACK",
@@ -287,8 +289,19 @@ def attack_prompt(
         lines.append(RETRY_HINT)
     lines += memory_lines(memory, scratchpad)
     lines.append("Find the stdin payload that makes the program print the flag.")
-    lines.append('Return JSON: {"payload": "<stdin>"}')
+    if solver:
+        lines.append(SOLVER_HINT)
+        lines.append('Return JSON: {"payload": "<stdin>", "solver": "<python or empty>"}')
+    else:
+        lines.append('Return JSON: {"payload": "<stdin>"}')
     return "\n".join(lines)
+
+
+SOLVER_HINT = (
+    'You may instead send "solver": a Python program (same sandbox and limits as challenges, 4x the time, empty '
+    "stdin, a throwaway flag) whose stdout becomes your payload. Use it to search or compute. Leave it empty to "
+    'send "payload" as is.'
+)
 
 
 SCRATCHPAD_HINT = (
@@ -364,6 +377,7 @@ ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
         }
     ),
     "attack": _strict({"payload": _TEXT, "notes": _TEXT}),
+    "attack_solver": _strict({"payload": _TEXT, "solver": _TEXT, "notes": _TEXT}),  # Rules.attacker_solver
 }
 """Strict structured-output schemas (all keys required, no extras), identical for every vendor; the parsers
 above still validate lengths and ranges, which vendor schema modes do not enforce."""
