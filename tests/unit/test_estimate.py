@@ -10,7 +10,7 @@ from claude_duel.cli import main
 from claude_duel.domain.models import Rules, WalletRule
 from claude_duel.domain.modes import MODES, preset
 
-MODEL = "gpt-4.1-nano"
+MODEL = "gpt-4o-mini"
 
 
 def _blended(model: str) -> float:

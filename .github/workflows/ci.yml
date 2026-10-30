@@ -4,10 +4,14 @@ on:
     branches: [main]
   pull_request:
 permissions: {}
+concurrency:  # a new push to a PR cancels its older run; main runs are never cancelled
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository  # no fork PRs on self-hosted
     runs-on: [self-hosted, box]
+    timeout-minutes: 30  # a lost runner fails fast instead of holding the queue for 6h
     permissions:
       contents: read
     strategy:

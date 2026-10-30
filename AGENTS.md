@@ -39,9 +39,10 @@ ruff check . && ruff format --check . && mypy src && python scripts/check_docs.p
 ## CI (self-hosted runner)
 
 Workflows run on `runs-on: [self-hosted, box]` (job names unchanged), a maintainer-operated runner for this private
-repo only. Jobs run as an unprivileged user with no API keys. The real-Docker sandbox tests skip when the daemon
-can't enforce cgroup limits (`docker_probe`); run them locally against a rootful daemon. Fork PR workflows stay
-disabled. Operating notes live outside the repo.
+repo only. Jobs run as an unprivileged user with no API keys. CI sets `DUEL_REQUIRE_DOCKER=1`, so the real-Docker
+sandbox tests must run there and never skip; locally they skip when the daemon can't enforce cgroup limits
+(`docker_probe`). Every job has a 30-minute timeout, and a new push to a PR cancels that PR's older ci and security
+runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
