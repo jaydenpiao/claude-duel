@@ -152,6 +152,8 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
             scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    # heat line: the keystone bet and the novelty penalty stay independent.
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)

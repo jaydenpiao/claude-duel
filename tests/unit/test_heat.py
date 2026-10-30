@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import platform
+
+from hypothesis import given
+from hypothesis import strategies as st
+
 from claude_duel.app.agents import build_prompt
+from claude_duel.app.replay import _python_warning
+from claude_duel.domain import events as ev
 from claude_duel.domain.heat import heat, heat_lines, penalty, similarity, tokens
-from claude_duel.domain.models import Attack, Challenge, LedgerRule, Validation
+from claude_duel.domain.models import Attack, Challenge, Event, LedgerRule, Validation
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import defense_award, round_heat, score_round
 from tests.unit.test_domain import spec
@@ -124,3 +131,31 @@ def test_forge_prompt_states_the_heat_rule() -> None:
     assert f">= {LED.heat_threshold_pct}% similar" in text
     assert f"up to {LED.heat_max_pct}%" in text
     assert "HEAT" not in build_prompt("a", 1, 0, preset("classic"), None)
+
+
+def test_a_no_op_insert_does_not_dodge_heat() -> None:
+    padded = LOOP.replace("    total = 0\n", "    total = 0\n    pass\n    _ = None\n")
+    assert similarity(LOOP, padded) >= LED.heat_threshold_pct
+
+
+@given(st.integers(0, 10_000), st.integers(0, 100), st.integers(1, 100), st.integers(0, 100))
+def test_penalty_is_bounded_by_the_cap(defense: int, h: int, thr: int, cap: int) -> None:
+    rule = LedgerRule(heat_threshold_pct=thr, heat_max_pct=cap)
+    p = penalty(defense, h, rule)
+    assert 0 <= p <= defense * cap // 100
+    if h <= thr:
+        assert p == 0
+
+
+@given(st.sampled_from([LOOP, RENAMED, OTHER]), st.sampled_from([LOOP, RENAMED, OTHER]), st.integers(1, 9))
+def test_heat_lines_never_exceed_the_cap(src1: str, src2: str, d: int) -> None:
+    chs, vals, atks = _round(src1, src2)
+    lines = heat_lines(chs, vals, atks, 2, LED, lambda ch: d * 10)
+    assert all(0 <= x <= d * 10 * LED.heat_max_pct // 100 for x in lines.values())
+
+
+def test_replay_warns_on_a_python_minor_mismatch() -> None:
+    created = Event(seq=1, type=ev.MATCH_CREATED, trace_id="t", data={"python": "3.0.0"})
+    assert _python_warning([created])
+    same = created.model_copy(update={"data": {"python": platform.python_version()}})
+    assert _python_warning([same]) == []
