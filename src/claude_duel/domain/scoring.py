@@ -186,6 +186,8 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
     ).values():
         scores[attacker] -= full - paid
+    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    # heat line: the keystone bet and the novelty penalty stay independent.
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
