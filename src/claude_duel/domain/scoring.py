@@ -57,14 +57,30 @@ def capture_points(
     """Ledger: what each staked capture of the round paid its attacker, by challenge id (logged, never folded)."""
     if rules.ledger is None:
         return {}
-    points = {}
-    for ch in sorted((c for c in challenges if c.round == round_no), key=lambda c: c.id):
+    by_cid = {a.challenge_id: a for a in attacks.values()}
+    mine = [c for c in challenges if c.round == round_no]
+    return {
+        cid: paid for cid, (_, _, paid) in sorted(_captures(mine, validations, by_cid, round_no, rules.scoring).items())
+    }
+
+
+def _captures(
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    attacks: Mapping[str, Attack],
+    round_no: int,
+    rule: ScoringRule,
+) -> dict[str, tuple[str, int, int]]:
+    """Staked captures: challenge id -> (attacker, full solve award, what the stake paid). The one source for both
+    the ledger scorer's discount and the logged ``points``."""
+    out = {}
+    for ch in challenges:
+        atk = attacks.get(ch.id)
         v = validations.get(ch.id)
-        atk = next((a for a in attacks.values() if a.challenge_id == ch.id), None)
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
-            full = solve_award(ch.spec, round_no, atk.attempts, rules.scoring)
-            points[ch.id] = stake_award(full, atk.tokens_used, atk.stake)
-    return points
+            full = solve_award(ch.spec, round_no, atk.attempts, rule)
+            out[ch.id] = (atk.attacker, full, stake_award(full, atk.tokens_used, atk.stake))
+    return out
 
 
 def round_heat(
@@ -166,12 +182,10 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
     scores = classic(facts, rule)
     _cool(facts, rule, scores)
-    for ch in facts.challenges:
-        atk = facts.attacks.get(ch.id)
-        v = facts.validations.get(ch.id)
-        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
-            full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
-            scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    for attacker, full, paid in _captures(
+        facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
+    ).values():
+        scores[attacker] -= full - paid
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
