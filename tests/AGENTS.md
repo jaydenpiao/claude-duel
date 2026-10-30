@@ -5,6 +5,7 @@ Root: [AGENTS.md](../AGENTS.md).
 - `unit/`: domain (incl. hypothesis), infra (sandbox, store, ledger), providers (httpx mocked).
 - `unit/test_sandbox_security.py`: one regression test per security-review exploit (policy bypasses, environ/argv flag exposure, forks, orphans, output floods).
 - `helpers.py`: `any_source`, the test-only `SubprocessSandbox` allowance for exploit tests.
+- `memory_results.py`: `MemoryResults`, the in-memory `ResultsStore` fake (runs, first-seen, rejects, rebuild rollback) used by `tests/integration/test_sync.py`.
 - `integration/test_docker_sandbox.py`: per-run container prefix (no cross-run interference); `_raw` runs unrestricted probes in the exact container argv to test the boundary below the runner. `@pytest.mark.docker`, real daemon via the `docker_cmd` fixture (`DUEL_DOCKER`, `docker`, or `sudo -n docker`); skipped when unreachable.
 - `integration/test_engine.py`: full matches with `FakeProvider` + `SubprocessSandbox`, crash/resume, budgets.
 - `integration/test_session.py`: lock before load, stale lock reclaim, resume with the saved config.

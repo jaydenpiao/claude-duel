@@ -55,7 +55,7 @@ def _state(mid: str, a: AgentSpec, b: AgentSpec, scores: dict[str, int], stage: 
 
 def test_results_skip_unfinished_and_self_play() -> None:
     a, b = AgentSpec(name="alice", skill=2), AgentSpec(name="bob", skill=3)
-    real = AgentSpec(name="carol", provider="openai", model="gpt-4.1-nano")
+    real = AgentSpec(name="carol", provider="openai", model="gpt-4o-mini")
     states = [
         _state("m2", a, b, {"alice": 1, "bob": 0}),
         _state("m1", b, real, {"bob": 2, "carol": 2}),
@@ -64,7 +64,7 @@ def test_results_skip_unfinished_and_self_play() -> None:
     ]
     rs = results(states)
     assert [(r.match_id, r.score_a) for r in rs] == [("m1", 0.5), ("m2", 1.0)]
-    assert entrant(real) == "openai:gpt-4.1-nano"
+    assert entrant(real) == "openai:gpt-4o-mini"
     assert entrant(a) == "fake:fake@skill2"
 
 
