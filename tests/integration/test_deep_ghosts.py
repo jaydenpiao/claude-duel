@@ -10,6 +10,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import ghosts, terrain
@@ -29,6 +31,7 @@ from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import SCORERS, RoundFacts, capture_points, defense_award, solve_award
 from claude_duel.domain.stakes import settle_stakes
 from claude_duel.ports import Completion, CompletionRequest
+from tests.helpers import any_source
 from tests.integration.test_ledger_match import _log_rows
 from tests.unit.test_domain import spec
 
@@ -221,3 +224,34 @@ def test_ghost_replays_the_source_terrain_so_a_new_terrain_still_hits(new_state,
     state.terrains["c0"] = ground
     [ghost] = ghosts.ghosts_before(state, 2)
     assert ghost.payload == terrain.apply(ground, "open sesame")  # the stdin that captured, under any later terrain
+
+
+def test_verify_reruns_ghost_runs_and_catches_a_flipped_hit(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    state = make_engine().run(_deep(new_state))
+    events = event_log.read("d1")
+    sandbox = SubprocessSandbox(any_source)
+    assert _runs(event_log)
+    assert verify_ghosts(state, events, sandbox) == []
+    i = next(i for i, e in enumerate(events) if e.type == ev.GHOST_RUN)
+    events[i] = events[i].model_copy(update={"data": {**events[i].data, "hit": not events[i].data["hit"]}})
+    assert verify_ghosts(state, events, sandbox) == [
+        f"ghost run #{events[i].seq}: tampered: "
+        f"{events[i].data['ghost_id']} -> {events[i].data['target']} does not reproduce"
+    ]
+
+
+def test_verify_recomputes_the_schedule_and_flags_a_missing_planned_run(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    state = make_engine().run(_deep(new_state))
+    events = event_log.read("d1")
+    sandbox = SubprocessSandbox(any_source)
+    e = next(e for e in events if e.type == ev.GHOST_RUN)
+    key = ghosts.run_key(int(e.data["round"]), e.data["ghost_id"], e.data["target"])
+    dropped = [x for x in events if x is not e]
+    assert f"ghost run {key}: tampered: planned run missing from the log" in verify_ghosts(state, dropped, sandbox)
+
+
+def test_ghost_capture_with_zero_attempts_is_priced_as_one_try() -> None:
+    facts = _forged(hits={"c0": "g"})
+    one_try = solve_award(spec(), 1, 1, ScoringRule())
+    assert SCORERS["classic"](facts, ScoringRule())["b"] == one_try  # not one_try + 1 for attempts=0
+    assert SCORERS["ledger"](facts, ScoringRule())["b"] == ghosts.ghost_award(one_try)

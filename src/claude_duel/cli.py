@@ -17,10 +17,11 @@ from rich.console import Console
 
 from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
-from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
+from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store, make_sandbox
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -93,6 +94,7 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
+    replay_p.add_argument("--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)")
     return p
 
 
@@ -175,14 +177,19 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
+    report = replay(snapshot, events)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
-    return 0 if report.consistent else 1
+    if not args.verify:
+        return 0 if report.consistent else 1
+    bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
+    print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
+    return 0 if report.consistent and not bad else 1
 
 
 def _experiment(settings: Settings, args: argparse.Namespace) -> int:
