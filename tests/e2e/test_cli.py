@@ -98,7 +98,7 @@ FAKE = (AgentSpec(name="a"), AgentSpec(name="b"))
 
 
 def test_container_wiring(env: Path) -> None:
-    s = Settings(openai_api_key=SecretStr("sk-x"))
+    s = Settings(api_keys={"openai": SecretStr("sk-x")})
     assert isinstance(make_provider(OPENAI[0], s, NullMetrics()), RetryingProvider)
 
 
