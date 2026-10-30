@@ -17,3 +17,9 @@ def test_retired_gpt_4_1_nano_is_not_allowed() -> None:
     assert "gpt-4.1-nano" not in DEFAULT_PRICES
     with pytest.raises(ConfigError):
         check_model_allowed("gpt-4.1-nano")
+
+
+def test_chat_models_are_all_allowed() -> None:
+    from claude_duel.ports import CHAT_MODELS  # noqa: PLC0415
+
+    assert CHAT_MODELS.issubset(DEFAULT_PRICES)
