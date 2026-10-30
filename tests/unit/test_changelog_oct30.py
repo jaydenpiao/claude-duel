@@ -1,4 +1,4 @@
-"""CHANGELOG covers the Oct 29-30 merges (quality review L7)."""
+"""CHANGELOG covers the Oct 29-30 merges."""
 
 from pathlib import Path
 
