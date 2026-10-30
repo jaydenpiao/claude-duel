@@ -36,6 +36,9 @@ class Settings(BaseModel):
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     models: dict[str, str] = Field(default_factory=dict)  # vendor -> default model; TOML `<vendor>_model`
     api_keys: dict[str, SecretStr] = Field(default_factory=dict)  # vendor -> key, from env only (VENDORS)
+    database_url: SecretStr | None = None  # DATABASE_URL: a duel_ingest login, for `duel sync` (ADR 0012)
+    migrate_database_url: SecretStr | None = None  # MIGRATE_DATABASE_URL: schema owner, for migrate and --rebuild
+    export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
     docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
@@ -95,6 +98,11 @@ _ENV_BUDGET = {
     "DUEL_RUN_MAX_CALLS": "run_max_calls",
     "DUEL_LIFETIME_MAX_USD": "lifetime_max_usd",
 }
+_ENV_SECRETS = {  # vendor API keys come from VENDORS (registry), not this map
+    "DATABASE_URL": "database_url",
+    "MIGRATE_DATABASE_URL": "migrate_database_url",
+    "EXPORT_DATABASE_URL": "export_database_url",
+}
 _ENV_SECTIONS = {"rules": _ENV_RULES, "budget": _ENV_BUDGET}
 ENV_VARS = (*_ENV_SCALARS, *_ENV_RULES, *_ENV_BUDGET, "DUEL_DOCKER")  # every DUEL_* knob; README must list all
 
@@ -140,6 +148,9 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
     for vendor in VENDORS.values():
         if env.get(vendor.key_env):
             data[f"{vendor.name}_api_key"] = env[vendor.key_env]
+    for var, key in _ENV_SECRETS.items():
+        if env.get(var):
+            data[key] = env[var]
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:
