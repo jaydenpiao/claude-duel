@@ -35,6 +35,9 @@ class Settings(BaseModel):
     provider_max_retries: int = 4
     provider_call_deadline: float = Field(default=120.0, gt=0)  # seconds per call, retries included
     openai_api_key: SecretStr | None = None
+    database_url: SecretStr | None = None  # DATABASE_URL: a duel_ingest login, for `duel sync` (ADR 0012)
+    migrate_database_url: SecretStr | None = None  # MIGRATE_DATABASE_URL: schema owner, for migrate and --rebuild
+    export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     anthropic_model: str = "claude-haiku-5-5"
     anthropic_api_key: SecretStr | None = None
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
@@ -80,6 +83,13 @@ _ENV_BUDGET = {
     "DUEL_RUN_MAX_CALLS": "run_max_calls",
     "DUEL_LIFETIME_MAX_USD": "lifetime_max_usd",
 }
+_ENV_SECRETS = {
+    "OPENAI_API_KEY": "openai_api_key",
+    "ANTHROPIC_API_KEY": "anthropic_api_key",
+    "DATABASE_URL": "database_url",
+    "MIGRATE_DATABASE_URL": "migrate_database_url",
+    "EXPORT_DATABASE_URL": "export_database_url",
+}
 _ENV_SECTIONS = {"rules": _ENV_RULES, "budget": _ENV_BUDGET}
 ENV_VARS = (*_ENV_SCALARS, *_ENV_RULES, *_ENV_BUDGET, "DUEL_DOCKER")  # every DUEL_* knob; README must list all
 
@@ -122,9 +132,9 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         data["rules"] = _with_preset(data["rules"])
     if env.get("DUEL_DOCKER"):
         data["docker_command"] = shlex.split(env["DUEL_DOCKER"])
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+    for var, key in _ENV_SECRETS.items():
         if env.get(var):
-            data[var.lower()] = env[var]
+            data[key] = env[var]
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:
