@@ -235,8 +235,19 @@ def test_verify_reruns_ghost_runs_and_catches_a_flipped_hit(make_engine, new_sta
     i = next(i for i, e in enumerate(events) if e.type == ev.GHOST_RUN)
     events[i] = events[i].model_copy(update={"data": {**events[i].data, "hit": not events[i].data["hit"]}})
     assert verify_ghosts(state, events, sandbox) == [
-        f"ghost run #{events[i].seq}: {events[i].data['ghost_id']} -> {events[i].data['target']} does not reproduce"
+        f"ghost run #{events[i].seq}: tampered: "
+        f"{events[i].data['ghost_id']} -> {events[i].data['target']} does not reproduce"
     ]
+
+
+def test_verify_recomputes_the_schedule_and_flags_a_missing_planned_run(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    state = make_engine().run(_deep(new_state))
+    events = event_log.read("d1")
+    sandbox = SubprocessSandbox(any_source)
+    e = next(e for e in events if e.type == ev.GHOST_RUN)
+    key = ghosts.run_key(int(e.data["round"]), e.data["ghost_id"], e.data["target"])
+    dropped = [x for x in events if x is not e]
+    assert f"ghost run {key}: tampered: planned run missing from the log" in verify_ghosts(state, dropped, sandbox)
 
 
 def test_ghost_capture_with_zero_attempts_is_priced_as_one_try() -> None:
