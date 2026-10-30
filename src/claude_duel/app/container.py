@@ -20,7 +20,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.adapters.store.results_sql import Executor, SqlResults, migrate, refuse_superuser, require_current
+from claude_duel.adapters.store.results_sql import Executor, SqlResults, migrate, refuse_superuser, refuse_table_owner, require_current
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, RunOverride, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
@@ -202,6 +202,8 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
     ex = results_executor(settings, _owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
     refuse_superuser(ex)
     require_current(ex)
+    if not owner:
+        refuse_table_owner(ex)
     return SqlResults(ex)
 
 

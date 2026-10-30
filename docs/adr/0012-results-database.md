@@ -31,10 +31,14 @@ queryable index, and a future public page needs data that provably holds no flag
 - Postgres tests run when `DUEL_TEST_DATABASE_URL` points at a throwaway server; CI starts
   `postgres:17-alpine` in Docker for them. `test_sync_export_never_leaks_a_secret` reads the secrets
   in the test only and asserts no secret or derived flag appears in the export or `duel.events`.
-- Cloud SQL setup (operator): the box reaches the instance only through
-  `cloud-sql-proxy --auto-iam-authn` on `127.0.0.1:5433`, as a service account with `roles/cloudsql.client`; IAM
-  database auth means no DB password. `DATABASE_URL=postgresql://<sa>@<project>.iam@127.0.0.1:5433/duel`. Run
-  `duel db migrate` as the owner, then grant the exporter login. Keep every URL and key out of the repo and CI.
+- Cloud SQL setup (operator): one IAM principal per role, never one login for all. An ingest service account is
+  an IAM DB user that is only a member of `duel_ingest` (`DATABASE_URL`); an exporter service account is only in
+  `duel_reader` (`EXPORT_DATABASE_URL`); the schema owner is used only for `duel db migrate` and `--rebuild`,
+  through a short-lived proxy (or `gcloud sql connect`) that is stopped afterwards. Each
+  `cloud-sql-proxy --auto-iam-authn` listens on a Unix socket (`--unix-socket`) in a 0700 directory owned by the
+  operator, never on TCP loopback and never as the CI runner's uid, so other local processes can't borrow its
+  login. Routine `duel sync` refuses a role that owns a `duel` table (`refuse_table_owner`), and the export refuses
+  any write or owner role. Keep every URL and key out of the repo and CI.
 - Transport: `PostgresResults` uses psycopg to the local proxy, which dials Google with IAM + TLS.
 
 
@@ -57,6 +61,7 @@ queryable index, and a future public page needs data that provably holds no flag
 - The results SQL lives in `results_sql.py` behind a small `Executor` protocol, run by the `postgres` (psycopg)
   transport; `tests/contract` runs one suite against memory and postgres. The Neon SQL-over-HTTPS transport
   was dropped: the index moved to Cloud SQL for PostgreSQL.
-- The box connects through `cloud-sql-proxy --auto-iam-authn` on `127.0.0.1:5433` (TLS and IAM handled by the
-  proxy; loopback is exempt from `require_tls`). `DATABASE_URL` uses the IAM user and no password, e.g.
-  `postgresql://duel-sql-proxy@<project>.iam@127.0.0.1:5433/duel`; `iam_url` escapes the inner `@` for libpq.
+- The box connects through `cloud-sql-proxy --auto-iam-authn --unix-socket <dir>` (a 0700 directory; TLS and IAM
+  handled by the proxy; socket hosts are exempt from `require_tls`). `DATABASE_URL` uses the ingest IAM user and no
+  password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; `iam_url` escapes the
+  inner `@` for libpq.
