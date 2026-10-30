@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `duel backup` refuses a bucket without public access prevention enforced, and also scans for octal, binary, base85 and base64/zlib-encoded flags before upload.
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
 - Flag-form detection covers split and shifted encodings in the redactor.
