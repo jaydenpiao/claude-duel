@@ -329,6 +329,8 @@ def allocate_prompt(
 
 def parse_allocation(text: str) -> list[object]:
     return parse(text, AllocationMove).stakes
+
+
 SOLVER_HINT = (
     'You may instead send "solver": a Python program (same sandbox and limits as challenges, 4x the time, empty '
     "stdin, a throwaway flag) whose stdout becomes your payload. Use it to search or compute. Leave it empty to "
