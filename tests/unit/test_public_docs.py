@@ -12,7 +12,8 @@ def test_codeowners_names_maintainer() -> None:
 def test_security_policy_uses_github_reporting() -> None:
     text = (ROOT / "SECURITY.md").read_text()
     assert "Report a vulnerability" in text
-    assert "private" not in text.lower()
+    assert "@jaydenpiao" in text  # fallback contact that works while the repo is private
+    assert "no upload" in text
 
 
 def test_no_internal_board_or_agent_roles() -> None:
