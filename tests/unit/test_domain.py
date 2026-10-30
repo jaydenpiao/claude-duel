@@ -205,8 +205,9 @@ def test_match_stats_rates() -> None:
 _OUTCOME = st.sampled_from(["invalid", "forfeit", "held", "captured"])
 
 
-def _facts(outcomes: list[tuple[str, int, int]], round_no: int) -> RoundFacts:
-    challenges, validations, attacks = [], {}, {}
+def _facts(outcomes: list[tuple[str, int, int]], round_no: int, ghost: bool = False) -> RoundFacts:
+    """``ghost``: captures are deep-layer ghost captures (stake 0, matched by a logged ghost_run hit)."""
+    challenges, validations, attacks, hits = [], {}, {}, {}
     for i, (outcome, difficulty, attempts) in enumerate(outcomes):
         cid, author = f"c{i}", "ab"[i % 2]
         ch = Challenge(
@@ -219,35 +220,47 @@ def _facts(outcomes: list[tuple[str, int, int]], round_no: int) -> RoundFacts:
                 challenge_id=cid, attacker="ba"[i % 2], solved=outcome == "captured", attempts=attempts,
                 tokens_used=1, reason="r", stake=1000,
             )  # fmt: skip
-    return RoundFacts(round_no, ("a", "b"), tuple(challenges), validations, attacks)
+            if ghost and outcome == "captured":
+                hits[cid] = f"g{i}"
+                attacks[cid] = attacks[cid].model_copy(update={"stake": 0, "ghost": f"g{i}", "attempts": 0})
+    return RoundFacts(round_no, ("a", "b"), tuple(challenges), validations, attacks, ghost_hits=hits)
 
 
-@pytest.mark.parametrize("kind", sorted(SCORERS))
+@pytest.mark.parametrize(("kind", "ghost"), [(k, False) for k in sorted(SCORERS)] + [("ledger", True)])
 class TestScorerInvariants:
     """ADR 0007: every registered scorer satisfies these."""
 
     @given(st.lists(st.tuples(_OUTCOME, st.integers(1, 3), st.integers(1, 20)), max_size=6), st.integers(1, 5))
-    def test_keys_and_order_invariance(self, kind: str, outcomes: list[tuple[str, int, int]], round_no: int) -> None:
-        facts = _facts(outcomes, round_no)
+    def test_keys_and_order_invariance(
+        self, kind: str, ghost: bool, outcomes: list[tuple[str, int, int]], round_no: int
+    ) -> None:
+        facts = _facts(outcomes, round_no, ghost)
         delta = SCORERS[kind](facts, ScoringRule())
         assert set(delta) == {"a", "b"}
         shuffled = RoundFacts(
-            round_no, ("b", "a"), facts.challenges, dict(reversed(facts.validations.items())), facts.attacks
+            round_no,
+            ("b", "a"),
+            facts.challenges,
+            dict(reversed(facts.validations.items())),
+            facts.attacks,
+            ghost_hits=facts.ghost_hits,
         )
         assert SCORERS[kind](shuffled, ScoringRule()) == delta
 
     @given(st.integers(1, 3), st.integers(1, 5), st.integers(1, 50))
-    def test_defense_at_least_capture(self, kind: str, difficulty: int, round_no: int, attempts: int) -> None:
-        held = SCORERS[kind](_facts([("held", difficulty, attempts)], round_no), ScoringRule())["a"]
-        captured = SCORERS[kind](_facts([("captured", difficulty, attempts)], round_no), ScoringRule())["b"]
+    def test_defense_at_least_capture(
+        self, kind: str, ghost: bool, difficulty: int, round_no: int, attempts: int
+    ) -> None:
+        held = SCORERS[kind](_facts([("held", difficulty, attempts)], round_no, ghost), ScoringRule())["a"]
+        captured = SCORERS[kind](_facts([("captured", difficulty, attempts)], round_no, ghost), ScoringRule())["b"]
         assert held >= captured
 
     @given(st.sampled_from(["held", "captured"]), st.integers(1, 3), st.integers(1, 5), st.integers(0, 100))
     def test_heat_is_a_separate_bounded_defender_line(
-        self, kind: str, outcome: str, difficulty: int, round_no: int, pct: int
+        self, kind: str, ghost: bool, outcome: str, difficulty: int, round_no: int, pct: int
     ) -> None:
         """ADR 0006 addendum: a heat line never touches awards, never credits the opponent, stays within its cap."""
-        facts = _facts([(outcome, difficulty, 3)], round_no)
+        facts = _facts([(outcome, difficulty, 3)], round_no, ghost)
         cap = defense_award(spec(difficulty=difficulty), round_no, ScoringRule()) * 50 // 100
         line = cap * pct // 100
         plain = SCORERS[kind](facts, ScoringRule())
@@ -256,8 +269,8 @@ class TestScorerInvariants:
         assert plain["a"] - line <= hot["a"] <= plain["a"]
 
     @given(st.sampled_from(["invalid", "forfeit"]), st.integers(1, 5))
-    def test_invalid_never_pays_author(self, kind: str, outcome: str, round_no: int) -> None:
-        assert SCORERS[kind](_facts([(outcome, 1, 1)], round_no), ScoringRule())["a"] <= 0
+    def test_invalid_never_pays_author(self, kind: str, ghost: bool, outcome: str, round_no: int) -> None:
+        assert SCORERS[kind](_facts([(outcome, 1, 1)], round_no, ghost), ScoringRule())["a"] <= 0
 
 
 def test_legacy_top_level_scoring_fields_move_under_scoring() -> None:
@@ -281,7 +294,7 @@ class TestModes:
 
     def test_unknown_mode_lists_known(self) -> None:
         with pytest.raises(
-            ConfigError, match="known: blitz, capped, checked, classic, efficiency, gated, ledger, quick"
+            ConfigError, match="known: blitz, capped, checked, classic, efficiency, gated, ledger, ledger_deep, quick"
         ):
             load_settings(None, env={"DUEL_MODE": "nope"})
 

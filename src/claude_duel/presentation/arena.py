@@ -20,6 +20,7 @@ from rich.text import Text
 
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
+from claude_duel.domain.moments import moment_of
 from claude_duel.presentation.common import (
     MatchFold,
     agent_cost,
@@ -92,6 +93,7 @@ class ArenaModel:
     ticker: list[str] = field(default_factory=list)
     spend: str = ""
     banner: str = ""
+    ghosts: str = ""  # deep layer: "GHOSTS" row, "" when ghosts are off
 
     def log(self, line: str) -> None:
         self.ticker = [*self.ticker, line][-TICKER_LINES:]
@@ -140,6 +142,8 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         for i, p in enumerate(m.players)
         if p.cost
     )
+    if m.ghosts:
+        parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
     parts.append(now)
     if m.flash:
         parts.append(Text(m.flash, style="bold", no_wrap=True, overflow="ellipsis"))
@@ -148,6 +152,15 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
     if m.banner:
         parts.append(Text(f"🏆 {m.banner}", style="bold reverse", no_wrap=True, overflow="ellipsis"))
     return Group(*parts)
+
+
+def ghost_row(s: MatchState) -> str:
+    """This round's ghost runs and strikes, or "" when the deep layer's ghosts are off."""
+    if s.rules.deep is None or not s.rules.deep.ghosts:
+        return ""
+    now = [hit for key, hit in s.ghost_runs.items() if key.split(":", 1)[0] == str(s.round)]
+    total = sum(s.ghost_runs.values())
+    return f"r{s.round}: {len(now)}/{s.rules.deep.max_ghost_runs} runs · {sum(now)} strikes · {total} in match"
 
 
 class ArenaView(MatchFold):
@@ -200,6 +213,7 @@ class ArenaView(MatchFold):
             p.score = s.scores.get(p.name, 0)
             p.cost = agent_cost(s, p.name)
         m.spend = spend(s, self._lifetime(), self._key_limit)
+        m.ghosts = ghost_row(s)
 
     def _created(self, s: MatchState, e: Event) -> None:
         self.model.players = [Player(a.name, a.model or "default") for a in s.agents]
@@ -261,6 +275,16 @@ class ArenaView(MatchFold):
             self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
+
+    def _ghost_ran(self, s: MatchState, e: Event) -> None:
+        m = moment_of(e)
+        if m is None:
+            return
+        ch = s.challenges[m.subject]
+        attacker = m.by.rpartition(":")[2]
+        title = scrub(ch.spec.title) if ch.spec else ""
+        self.model.flash = f"👻 {attacker}'s ghost struck {ch.author}'s {title!r} (no call)"
+        self.model.log(self.model.flash)
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self.model.log("resuming where the match stopped")
