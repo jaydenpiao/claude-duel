@@ -80,6 +80,7 @@ def _parse(resp: httpx.Response) -> Completion:
             output_tokens=int(usage.get("output_tokens", 0)),
             reasoning_tokens=int((usage.get("output_tokens_details") or {}).get("thinking_tokens", 0)),
             truncated=data.get("stop_reason") == "max_tokens",
+            reasoning_summary=" ".join(b.get("thinking", "") for b in data["content"] if b.get("type") == "thinking"),
         )
     except (ValueError, KeyError, TypeError) as exc:
         raise TransientProviderError("anthropic returned an unexpected body") from exc
