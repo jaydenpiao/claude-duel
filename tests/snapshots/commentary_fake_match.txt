@@ -47,7 +47,7 @@ alice attacks 'Maze' (try 3/4)… no flag
 alice attacks 'Maze' (try 4/4)… no flag
   → defended (attempts exhausted), bob +10
 scoreboard after round 1: alice 40  bob 19
-spend: $0.0000 this match · $0.0031 of $50 burned
+spend: $0.0000 this match · $0.0031 of $33 cap
   alice: in 2,656 · out 255 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
   bob: in 2,810 · out 268 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
@@ -96,12 +96,12 @@ alice attacks 'Maze' (try 3/4)… no flag
 alice attacks 'Maze' (try 4/4)… no flag
   → defended (attempts exhausted), bob +20
 scoreboard after round 2: alice 120  bob 58
-spend: $0.0000 this match · $0.0031 of $50 burned
+spend: $0.0000 this match · $0.0031 of $33 cap
   alice: in 5,312 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
   bob: in 5,620 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
 ────────────────────────────────────────────────
 winner: alice · alice 120  bob 58
-30 model calls · in 10,932 · out 1,046 tokens · $0.0000 this match · $0.0031 of $50 burned
+30 model calls · in 10,932 · out 1,046 tokens · $0.0000 this match · $0.0031 of $33 cap
   alice: in 5,312 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
   bob: in 5,620 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense

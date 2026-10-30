@@ -12,11 +12,42 @@ from claude_duel.app.container import build_engine, build_store, pin_agents
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
 from claude_duel.domain.errors import MatchNotFoundError
-from claude_duel.domain.models import MatchState
+from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, Metrics
+from claude_duel.ports import EventObserver, MatchStore, Metrics
 
 _LOG = logging.getLogger(__name__)
+
+
+def open_match(
+    store: MatchStore,
+    settings: Settings,
+    match_id: str,
+    *,
+    agents: tuple[AgentSpec, ...] | None = None,
+    seed: str | None = None,
+    warn_drift: bool = True,
+) -> MatchState:
+    """Load or create a match. New matches pin ``framing_text`` from the current framing rule."""
+    try:
+        state = store.load(match_id)
+    except MatchNotFoundError:
+        state = MatchState(
+            match_id=match_id,
+            secret=secrets.token_hex(32),
+            framing_text=framing_text(settings.rules.framing),
+            seed=seed if seed is not None else (settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16]),
+            agents=agents if agents is not None else pin_agents(settings),
+            rules=settings.rules,
+            limits=settings.limits,
+        )
+        store.save(state)
+        if (why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)) is not None:
+            log(_LOG, logging.WARNING, why, match_id=match_id)
+    else:
+        if warn_drift:
+            _warn_on_drift(settings, state)
+    return state
 
 
 def play(
@@ -33,25 +64,7 @@ def play(
     """
     store = build_store(settings)
     with store.lock(match_id):
-        try:
-            state = store.load(match_id)
-        except MatchNotFoundError:
-            state = MatchState(
-                match_id=match_id,
-                secret=secrets.token_hex(32),
-                framing_text=framing_text(settings.rules.framing),
-                seed=settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16],
-                agents=pin_agents(settings),
-                rules=settings.rules,
-                limits=settings.limits,
-            )
-            store.save(state)
-            if (
-                why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)
-            ) is not None:
-                log(_LOG, logging.WARNING, why, match_id=match_id)
-        else:
-            _warn_on_drift(settings, state)
+        state = open_match(store, settings, match_id)
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)

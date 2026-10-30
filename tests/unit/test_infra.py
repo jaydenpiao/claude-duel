@@ -171,4 +171,4 @@ def test_gate_probe_is_cheap_model_or_weak_fake() -> None:
     fake = (AgentSpec(name="alice"), AgentSpec(name="bob"))
     assert gate_agent(Settings(), fake).skill == 0
     real = (AgentSpec(name="alice", provider="openai"), fake[1])
-    assert gate_agent(Settings(gate_model="gpt-4.1-nano"), real).model == "gpt-4.1-nano"
+    assert gate_agent(Settings(gate_model="gpt-4o-mini"), real).model == "gpt-4o-mini"
