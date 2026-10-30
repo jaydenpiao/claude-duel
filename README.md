@@ -32,7 +32,7 @@ duel export [--out public.json]     # static public JSON via the read-only expor
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
-To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`; `gpt-4.1-nano` was shut down 2026-10-23).
+To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`).
 
 ## Architecture
 ```mermaid
@@ -113,7 +113,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 `OPENAI_API_KEY`, `DATABASE_URL` (a `duel_ingest` login for `duel sync`; must use `sslmode=require` or stricter for a non-local host; superuser/BYPASSRLS roles are refused), `MIGRATE_DATABASE_URL` (the schema owner, for `duel db migrate` and `duel sync --rebuild`; falls back to `DATABASE_URL`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed. In production `DATABASE_URL` points at `cloud-sql-proxy --auto-iam-authn` on a Unix socket in a 0700 directory, as the ingest IAM user with no password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; each role has its own IAM principal (ADR 0012).
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
-`gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
+`gpt-5-nano` (0.05/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
 `gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
 Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `gpt-6-astra` (10/50). Prices pinned 2026-10-22 from https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing.
 

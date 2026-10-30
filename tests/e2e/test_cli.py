@@ -98,7 +98,7 @@ FAKE = (AgentSpec(name="a"), AgentSpec(name="b"))
 
 
 def test_container_wiring(env: Path) -> None:
-    s = Settings(openai_api_key=SecretStr("sk-x"))
+    s = Settings(api_keys={"openai": SecretStr("sk-x")})
     assert isinstance(make_provider(OPENAI[0], s, NullMetrics()), RetryingProvider)
 
 
@@ -141,7 +141,7 @@ def test_live_openai_tiny_match(
     monkeypatch.setenv("DUEL_SANDBOX", "docker")  # real models only run in Docker
     cfg = tmp_path / "live.toml"
     cfg.write_text(
-        'openai_model = "gpt-4.1-nano"\n'
+        'openai_model = "gpt-4o-mini"\n'
         '[[agents]]\nname = "alice"\nprovider = "openai"\n[[agents]]\nname = "bob"\nprovider = "openai"\n'
         "[rules]\nrounds = 1\nchallenges_per_round = 1\nmax_attempts = 2\nattack_token_budget = 6000\n"
         "[budget]\nmatch_max_usd = 0.05\nrun_max_usd = 0.05\nmatch_max_calls = 12\n"
