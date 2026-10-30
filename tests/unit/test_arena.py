@@ -122,3 +122,16 @@ def test_attack_started_animates_and_old_logs_replay(tmp_path: Path) -> None:
         ev.apply(folded, e)
     assert folded.scores == state.scores
     assert folded.attempts == state.attempts
+
+
+def test_replay_rewatches_in_arena(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUEL_SANDBOX", "subprocess")
+    assert cli.main(["run", "--match-id", "r", "--format", "json"]) == 0
+    capsys.readouterr()
+    assert cli.main(["replay", "r", "--view", "arena", "--pace", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "🏆 winner:" in out
+    assert "replay consistent=True" in out

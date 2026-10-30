@@ -39,7 +39,7 @@ from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
-from claude_duel.domain.models import MatchState, Stage
+from claude_duel.domain.models import Event, MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
@@ -71,6 +71,7 @@ def _parser() -> argparse.ArgumentParser:
             default="auto",
             help="text output style; auto: arena on a terminal, commentary otherwise",
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
@@ -115,6 +116,7 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--format", choices=("text", "json"), default="text")
     replay_p = sub.choices["replay"]
     replay_p.add_argument("--transcript", action="store_true")
+    replay_p.add_argument("--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)")
     return p
 
 
@@ -200,7 +202,10 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    events = build_event_log(settings).read(args.match_id)
+    if args.view == "arena":
+        _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
+    report = replay(build_store(settings).load(args.match_id), events)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
@@ -208,6 +213,15 @@ def _dispatch(args: argparse.Namespace) -> int:
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:
+    view = ArenaView(Console(), mid, settings.budget.lifetime_max_usd, build_ledger(settings).total_usd, pace=pace)
+    try:
+        for e in events:
+            view(e)
+    finally:
+        view.close()
 
 
 def _experiment(settings: Settings, args: argparse.Namespace) -> int:
