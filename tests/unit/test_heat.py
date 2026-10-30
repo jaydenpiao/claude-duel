@@ -143,7 +143,7 @@ def test_penalty_is_bounded_by_the_cap(defense: int, h: int, thr: int, cap: int)
     rule = LedgerRule(heat_threshold_pct=thr, heat_max_pct=cap)
     p = penalty(defense, h, rule)
     assert 0 <= p <= defense * cap // 100
-    if h <= thr:
+    if h < thr or h == thr < 100:  # 0 below and at the threshold (a 100% threshold charges the cap at 100%)
         assert p == 0
 
 
