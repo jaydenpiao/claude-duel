@@ -141,7 +141,7 @@ def test_live_openai_tiny_match(
     monkeypatch.setenv("DUEL_SANDBOX", "docker")  # real models only run in Docker
     cfg = tmp_path / "live.toml"
     cfg.write_text(
-        'openai_model = "gpt-4.1-nano"\n'
+        'openai_model = "gpt-4o-mini"\n'
         '[[agents]]\nname = "alice"\nprovider = "openai"\n[[agents]]\nname = "bob"\nprovider = "openai"\n'
         "[rules]\nrounds = 1\nchallenges_per_round = 1\nmax_attempts = 2\nattack_token_budget = 6000\n"
         "[budget]\nmatch_max_usd = 0.05\nrun_max_usd = 0.05\nmatch_max_calls = 12\n"
