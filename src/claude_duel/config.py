@@ -45,6 +45,7 @@ class Settings(BaseModel):
     docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
+    replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)
 
     def model_for(self, agent: AgentSpec) -> str:
         """The single place an agent's effective model is resolved."""
@@ -60,6 +61,7 @@ _ENV_SCALARS = {
     "DUEL_METRICS": "metrics",
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
+    "DUEL_REPLAY_BUCKET": "replay_bucket",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_OPENAI_MODEL": "openai_model",
     "DUEL_ANTHROPIC_MODEL": "anthropic_model",
