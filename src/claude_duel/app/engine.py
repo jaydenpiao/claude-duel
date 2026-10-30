@@ -52,6 +52,8 @@ GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
+# SV-5: without attacker_solver, attackers get 1x runs, so the author's solver must fit 1x (plus sandbox start).
+SOLVER_GRACE_SECONDS = 1.0
 REF_RUNS = 3  # SV-4: the reference must print the same thing on every run, or attackers lose to luck
 REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
@@ -463,9 +465,17 @@ class MatchEngine:
         if not spec.solver:
             return spec, None
         decoy = _decoy(state, cid, "solver")  # SV-1: never the real flag, so the payload can't be derived from it
+        started = time.monotonic()
         payload, reason = self._run_solver(state, spec.source, spec.solver, decoy, "solve_reference")
+        took = time.monotonic() - started
+        self._metrics.timing("solver.seconds", took)
         if reason:
             return spec, reason
+        if not state.rules.attacker_solver and took > state.limits.wall_seconds + SOLVER_GRACE_SECONDS:
+            return spec, (
+                f"solver too slow: {took:.1f}s, over the {state.limits.wall_seconds:g}s an attacker run gets "
+                "(attackers can't run a search, so the answer must be reachable by reasoning)"
+            )
         return spec.model_copy(update={"reference_payload": payload}), None
 
     def _run_solver(
