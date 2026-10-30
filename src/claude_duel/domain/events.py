@@ -16,6 +16,7 @@ from claude_duel.domain.models import (
     AgentSpec,
     Attack,
     AttackAttempt,
+    CapHit,
     Challenge,
     Event,
     Finding,
@@ -33,6 +34,7 @@ MATCH_CREATED = "match_created"
 STAGE_CHANGED = "stage_changed"
 MATCH_FAILED = "match_failed"
 MATCH_RECOVERED = "match_recovered"
+MATCH_CAPPED = "match_capped"
 CALL_CHARGED = "call_charged"
 BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
@@ -43,6 +45,7 @@ CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
+BUDGET_OVERRIDDEN = "budget_overridden"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -86,6 +89,10 @@ class StageChanged(_Payload):
 
 class MatchFailed(_Payload):
     reason: str
+
+
+class MatchCapped(_Payload):
+    hit: CapHit
 
 
 class MatchRecovered(_Payload):
@@ -134,6 +141,16 @@ class ChallengeAttacked(_Payload):
     attack: Attack
 
 
+class BudgetOverridden(_Payload):
+    """Audit record of a run-cap override (design-stakes-modes.md). It changes no match state."""
+
+    field: str
+    default: float
+    value: float
+    reason: str
+    ceiling: float
+
+
 class NoteRecorded(_Payload):
     """An agent's private scratchpad note (memory kind ``summary+scratchpad``), already flag-redacted."""
 
@@ -168,12 +185,18 @@ def _failed(state: MatchState, p: MatchFailed) -> None:
     state.failure = p.reason
 
 
+def _capped(state: MatchState, p: MatchCapped) -> None:
+    transition(state, Stage.CAPPED)
+    state.capped = p.hit
+
+
 def _recovered(state: MatchState, p: MatchRecovered) -> None:
     recover(state)
 
 
 def _charged(state: MatchState, p: CallCharged) -> None:
     state.usage.calls += 1
+    state.last_agent = p.agent
     state.usage.tokens += p.tokens
     state.usage.usd += p.usd
     state.usage.elapsed_ms += p.elapsed_ms
@@ -214,6 +237,10 @@ def _attacked(state: MatchState, p: ChallengeAttacked) -> None:
     state.attacks[p.key] = p.attack
 
 
+def _overridden(state: MatchState, p: BudgetOverridden) -> None:
+    del state, p  # audit only
+
+
 def _noted(state: MatchState, p: NoteRecorded) -> None:
     state.notes.setdefault(p.agent, {})[p.round] = p.text  # last note of the round wins
 
@@ -228,6 +255,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     STAGE_CHANGED: (StageChanged, _stage),
     MATCH_FAILED: (MatchFailed, _failed),
     MATCH_RECOVERED: (MatchRecovered, _recovered),
+    MATCH_CAPPED: (MatchCapped, _capped),
     CALL_CHARGED: (CallCharged, _charged),
     BUILD_REJECTED: (BuildRejected, _rejected),
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
@@ -238,6 +266,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     ROUND_SCORED: (RoundScored, _scored),
     FINDING_FLAGGED: (FindingFlagged, _flagged),
     NOTE_RECORDED: (NoteRecorded, _noted),
+    BUDGET_OVERRIDDEN: (BudgetOverridden, _overridden),
 }
 
 
