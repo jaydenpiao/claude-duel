@@ -9,6 +9,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 
 ### Added
+- Arena, commentary and match card label each side by its model name (with (A)/(B) when both sides run the same model) instead of agent names.
 - `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
