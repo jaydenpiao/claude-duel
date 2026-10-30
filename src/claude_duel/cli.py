@@ -116,7 +116,7 @@ def _summary(state: MatchState) -> str:
 def _observer(settings: Settings, mid: str, args: argparse.Namespace) -> Commentary | ArenaView | None:
     if args.format != "text":
         return None
-    limit, lifetime = settings.budget.key_limit_usd, build_ledger(settings).total_usd
+    limit, lifetime = settings.budget.lifetime_max_usd, build_ledger(settings).total_usd
     if args.view == "arena" or (args.view == "auto" and sys.stdout.isatty()):
         return ArenaView(Console(), mid, limit, lifetime, pace=max(args.pace, 0.0))
     return Commentary(sys.stdout, mid, limit, lifetime)

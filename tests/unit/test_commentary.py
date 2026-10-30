@@ -22,7 +22,7 @@ SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "commentary_fake_match.t
 
 
 def _commentary(out: io.StringIO, match_id: str = "snap") -> Commentary:
-    return Commentary(out, match_id, 50.0, lambda: 0.0031)
+    return Commentary(out, match_id, 33.0, lambda: 0.0031)
 
 
 def test_full_match_snapshot(tmp_path: Path) -> None:
@@ -87,7 +87,7 @@ def test_draw() -> None:
     text = _render(events)
     assert "draw: alice 0  bob 0" in text
     assert "scoreboard after round 1: alice 0  bob 0" in text
-    assert "spend: $0.0000 this match · $0.0031 of $50 burned" in text
+    assert "spend: $0.0000 this match · $0.0031 of $33 cap" in text
 
 
 def test_ledger_ceiling_cannot_exceed_key_limit() -> None:

@@ -34,6 +34,8 @@ def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert "alice (fake-1) vs bob (fake-1)" in out
     assert "winner: " in out
     assert out.rstrip().endswith("replay verified ✓")
+    assert "of $33 cap" in out  # #195: the spend line shows the enforced cap, never the key limit
+    assert "$50" not in out
     assert main(["resume", "e2e", "--format", "json"]) == 0  # resuming a complete match is a no-op
     summary = json.loads(capsys.readouterr().out)
     assert (summary["match_id"], summary["stage"], summary["round"]) == ("e2e", "complete", 2)
@@ -149,4 +151,5 @@ def test_live_openai_tiny_match(
     print(out)
     assert code == 0
     assert "replay verified ✓" in out
-    assert "of $50 burned" in out
+    assert "of $33 cap" in out  # the enforced lifetime cap, not the key limit ($50)
+    assert "$50" not in out
