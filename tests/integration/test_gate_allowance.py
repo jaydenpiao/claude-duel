@@ -1,4 +1,4 @@
-"""Arch round 3 #8: the difficulty-gate probe is exempt from per-agent wallets, so it never forfeits an author."""
+"""The difficulty-gate probe is exempt from per-agent wallets, so it never forfeits an author (#121)."""
 
 from __future__ import annotations
 
