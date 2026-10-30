@@ -17,7 +17,7 @@ SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "card.svg"
 def _data(**kw: object) -> CardData:
     base: dict[str, object] = {
         "match_id": "snap",
-        "players": [("alice", "gpt-4.1-nano", 96), ("bob", "gpt-4.1-mini", -5)],
+        "players": [("alice", "gpt-4o-mini", 96), ("bob", "gpt-4.1-mini", -5)],
         "rounds": "2/2 rounds · complete",
         "headline": "winner: alice · alice 96  bob -5",
         "costs": ["in 1,200 · out 300 (think 0) · $0.0020 · $0.0010/capture · —/defense", "in 900 · out 200"],
