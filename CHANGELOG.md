@@ -22,6 +22,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
 - Hypothesis runs without a per-example deadline in CI.
+- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
+- Shared driver helpers for match, series and tournament drivers.
+- Public-facing repo docs (security policy, code owners, issue templates).
+- Review-code gate is case-insensitive and covers `docs/`.
 
 ## [0.1.0]
 First public release.
