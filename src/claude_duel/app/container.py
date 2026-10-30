@@ -26,6 +26,7 @@ from claude_duel.adapters.store.postgres import (
     connect,
     migrate,
     refuse_superuser,
+    refuse_table_owner,
     require_current,
 )
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, RunOverride, check_model_allowed
@@ -202,6 +203,8 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
     conn = connect(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
     refuse_superuser(conn)
     require_current(conn)
+    if not owner:
+        refuse_table_owner(conn)
     return PostgresResults(conn)
 
 

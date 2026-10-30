@@ -98,6 +98,16 @@ def refuse_superuser(conn: Conn) -> None:
         raise ConfigError("refusing to sync as a superuser or BYPASSRLS role: use a duel_ingest or owner login")
 
 
+def refuse_table_owner(conn: Conn) -> None:
+    """Routine ``duel sync`` must not run as a role that owns a ``duel`` table (it could truncate or drop it);
+    the owner is for ``duel db migrate`` and ``--rebuild`` only."""
+    row = conn.execute(
+        "select exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner"
+    ).fetchone()
+    if row is None or row["owner"]:
+        raise ConfigError("refusing to sync as a duel table owner: use a duel_ingest login (owner only for --rebuild)")
+
+
 def refuse_definer_functions(conn: Conn) -> None:
     """Refuse a SECURITY DEFINER function in ``duel`` or ``public_v``: it would bypass RLS and column grants."""
     row = conn.execute(
