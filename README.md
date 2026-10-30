@@ -29,7 +29,7 @@ duel resume demo                    # continue a crashed or aborted match
 duel db migrate                     # apply results-DB migrations (MIGRATE_DATABASE_URL, owner; forward-only)
 duel sync [--rebuild]               # load verified event logs into the results DB (DATABASE_URL, ADR 0012)
 duel export [--out public.json]     # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
-duel backup [--bucket gs://…]       # copy event logs + state (never *.secret) to `DUEL_REPLAY_BUCKET` via gcloud
+duel backup [--bucket gs://…]       # copy finished matches' logs + state (flag-scanned, never *.secret) to `DUEL_REPLAY_BUCKET` via gcloud
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
