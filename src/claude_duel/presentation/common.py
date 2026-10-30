@@ -122,8 +122,8 @@ def handicap_text(h: Handicap) -> str:
     return ", ".join(x for x in parts if x)
 
 
-def spend(s: MatchState, lifetime_usd: float, key_limit_usd: float) -> str:
-    return f"${s.usage.usd:.4f} this match · ${lifetime_usd:.4f} of ${key_limit_usd:g} burned"
+def spend(s: MatchState, lifetime_usd: float, cap_usd: float) -> str:
+    return f"${s.usage.usd:.4f} this match · ${lifetime_usd:.4f} of ${cap_usd:g} cap"
 
 
 def _per(usd: float, n: int) -> str:
