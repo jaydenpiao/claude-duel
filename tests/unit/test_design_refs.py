@@ -1,4 +1,4 @@
-"""Every design spec named in code, tests or docs ships in docs/design (quality review M8)."""
+"""Every design spec named in code, tests or docs ships in docs/design."""
 
 import re
 from pathlib import Path
