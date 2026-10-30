@@ -15,12 +15,13 @@ from claude_duel.app.container import (
     pin_agents,
     pin_entrants,
 )
-from claude_duel.app.series import SpendCap, check_caps, pinned, play_series
+from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
+from claude_duel.app.series import play_series
 from claude_duel.config import Settings
 from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
 from claude_duel.domain.errors import MatchNotFoundError
-from claude_duel.domain.models import AgentSpec, Challenge, Event, MatchState
+from claude_duel.domain.models import AgentSpec, Challenge, MatchState
 from claude_duel.domain.series import game_seed
 from claude_duel.ports import Metrics
 
@@ -46,25 +47,24 @@ def play_tournament(
 def _play_tournament(
     settings: Settings, tournament_id: str, rule: tr.TournamentRule, metrics: Metrics
 ) -> tr.TournamentState:
-    log = build_tournament_log(settings)
-    events = log.read(tournament_id)
-    if not events:
-        data: dict[str, object] = {
+    event_log = build_tournament_log(settings)
+    events = open_or_create(
+        event_log,
+        tournament_id,
+        schema_version=tr.TOURNAMENT_SCHEMA_VERSION,
+        created_type=tr.TOURNAMENT_CREATED,
+        data={
             "seed": settings.seed or game_seed(tournament_id, 0),
             "rule": rule.model_copy(update={"entrants": pin_entrants(settings, rule.entrants)}).model_dump(mode="json"),
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
-        }
-        events = [
-            Event(v=tr.TOURNAMENT_SCHEMA_VERSION, seq=0, type=tr.TOURNAMENT_CREATED, trace_id=tournament_id, data=data)
-        ]
-        log.append(tournament_id, events[0])
+        },
+    )
     state = tr.fold(tournament_id, events)
     settings = pinned(settings, state.rules, state.limits, tournament_id)
     budget = build_budget(settings)
-    cap = SpendCap(
-        "tournament", f"{tournament_id}-", state.rule.tournament_max_usd
-    )  # in-flight games count  # run caps span the whole tournament
+    # in-flight games count; run caps span the whole tournament
+    cap = SpendCap("tournament", f"{tournament_id}-", state.rule.tournament_max_usd)
     specs = {e.name: e for e in state.rule.entrants}
     while (nxt := state.next_pair()) is not None:
         check_caps(settings, (cap,))
@@ -82,27 +82,26 @@ def _play_tournament(
             pairing = tr.Pairing(
                 round=round_no, a=a, b=b, winner=series.winner(), series_id=sid, usd=series.spent_usd()
             )
-        seq = len(state.pairings) + 1
-        log.append(
+        append(
+            event_log,
             tournament_id,
-            Event(
-                v=tr.TOURNAMENT_SCHEMA_VERSION,
-                seq=seq,
-                type=tr.PAIRING_FINISHED,
-                trace_id=tournament_id,
-                data=pairing.model_dump(),
-            ),
+            schema_version=tr.TOURNAMENT_SCHEMA_VERSION,
+            seq=len(state.pairings) + 1,
+            event_type=tr.PAIRING_FINISHED,
+            data=pairing.model_dump(),
         )
         state.pairings.append(pairing)
     if state.rule.pool and state.pool_points is None:
         state.pool_points = tr.pool_points(
             state.rule.decay, _attack_pool(settings, state, metrics, budget, cap), state.names()
         )
-        data = {"points": state.pool_points}
-        seq = len(state.pairings) + 1
-        log.append(
+        append(
+            event_log,
             tournament_id,
-            Event(v=tr.TOURNAMENT_SCHEMA_VERSION, seq=seq, type=tr.POOL_SCORED, trace_id=tournament_id, data=data),
+            schema_version=tr.TOURNAMENT_SCHEMA_VERSION,
+            seq=len(state.pairings) + 1,
+            event_type=tr.POOL_SCORED,
+            data={"points": state.pool_points},
         )
     return state
 
