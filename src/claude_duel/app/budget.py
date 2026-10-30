@@ -12,6 +12,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from claude_duel.adapters.providers.registry import VENDORS
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
@@ -41,13 +42,12 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
 PREMIUM: frozenset[str] = frozenset(
     {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-5.6-sol", "claude-fable-5-1", "gpt-6-astra"}
 )
-VENDORS = {"claude-": "anthropic", "gpt-": "openai"}
 
 
 def vendor_of(model: str) -> str:
     if model == FAKE_MODEL:
         return "fake"
-    return next((v for prefix, v in VENDORS.items() if model.startswith(prefix)), "unknown")
+    return next((v.name for v in VENDORS.values() if model.startswith(v.model_prefix)), "unknown")
 
 
 def check_model_allowed(model: str, allow_premium: bool = False) -> None:
