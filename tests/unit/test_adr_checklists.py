@@ -1,4 +1,4 @@
-"""Accepted ADRs tick what is built; an open box must say what it waits on (quality review L20)."""
+"""Accepted ADRs tick what is built; an open box must say what it waits on."""
 
 import re
 from pathlib import Path
