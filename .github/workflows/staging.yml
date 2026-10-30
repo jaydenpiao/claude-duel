@@ -7,6 +7,7 @@ permissions: {}
 jobs:
   smoke:
     runs-on: [self-hosted, box]
+    timeout-minutes: 30  # a lost runner fails fast instead of holding the queue for 6h
     permissions:
       contents: read
     environment: staging
