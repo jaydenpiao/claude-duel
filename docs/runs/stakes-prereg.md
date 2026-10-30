@@ -17,7 +17,7 @@ change build validity, capture rate, defense rate or tamper findings for low-tie
 ## Budget (run-specific; defaults are unchanged)
 - `experiment.toml`: `run_max_usd = 2.0`, `match_max_usd = 0.05`.
 - The driver stops before a new seed when experiment spend reaches $1.90. Seeds are only run whole (all 3
-  arms), so stopping early keeps the arms balanced. The lifetime ledger ceiling ($40) still applies.
+  arms), so stopping early keeps the arms balanced. The lifetime ledger ceiling ($33) still applies.
 - The mini slice runs first (5 seeds). The nano block then gets whatever budget is left.
 
 ## Primary metrics (unit: challenge, or attack for capture)

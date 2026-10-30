@@ -48,7 +48,7 @@ def test_bars() -> None:
 
 def test_full_match_snapshot(tmp_path: Path) -> None:
     console = _console()
-    view = ArenaView(console, "snap", 50.0, lambda: 0.0031)
+    view = ArenaView(console, "snap", 33.0, lambda: 0.0031)
     play(Settings(store_dir=tmp_path, sandbox="subprocess", rules=Rules(rounds=2)), "snap", InMemoryMetrics(), view)
     view.close()
     view.close()  # idempotent
