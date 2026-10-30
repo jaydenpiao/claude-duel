@@ -19,8 +19,10 @@ from rich.table import Table
 from rich.text import Text
 
 from claude_duel.domain.flags import scrub
+from claude_duel.domain.heat import heat
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.domain.moments import moment_of
+from claude_duel.domain.stakes import own_challenges
 from claude_duel.presentation.common import (
     MatchFold,
     agent_cost,
@@ -273,10 +275,14 @@ class ArenaView(MatchFold):
                 continue
             title = scrub(ch.spec.title) if ch.spec else "forfeit"
             self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
-        for cid, line in sorted(cast("dict[str, int]", e.data.get("heat", {})).items()):
+        lines = {cid: line for cid, line in cast("dict[str, int]", e.data.get("heat", {})).items() if line}
+        rnd = int(e.data["round"])
+        hot = heat(s.challenges.values(), s.validations, rnd, s.rules.ledger) if lines and s.rules.ledger else {}
+        for cid, line in sorted(lines.items()):  # a 0 line (at the threshold) is not news
             ch = s.challenges.get(cid)
-            if ch is not None and line:
-                self.model.log(f"🔥 {ch.author}'s {scrub(ch.spec.title) if ch.spec else 'forfeit'!r} ran hot -{line}")
+            if ch is not None:
+                pct = f"heat {hot[cid]}% " if cid in hot else "heat "
+                self.model.log(f"🔥 {ch.author}'s {scrub(ch.spec.title) if ch.spec else 'forfeit'!r} {pct}-{line}")
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
 
@@ -292,8 +298,15 @@ class ArenaView(MatchFold):
 
     def _terrain(self, s: MatchState, e: Event) -> None:
         drawn = cast("dict[str, str]", e.data["terrains"])
-        names = sorted({t.partition(":")[0] for t in drawn.values()})
-        self.model.log(f"terrain r{e.data['round']}: {', '.join(names) or 'none'}")
+        rnd = int(e.data["round"])
+        per: dict[str, list[str]] = {}
+        for cid, t in drawn.items():  # every challenge's terrain, by its keystone number: "alice #3 swapcase"
+            ch = s.challenges.get(cid)
+            if ch is not None:
+                n = next(i for i, c in enumerate(own_challenges(s.challenges, rnd, ch.author), 1) if c.id == cid)
+                per.setdefault(ch.author, []).append(f"#{n} {t.partition(':')[0]}")
+        parts = [f"{a} {', '.join(sorted(ts, key=lambda x: int(x[1:].split()[0])))}" for a, ts in sorted(per.items())]
+        self.model.log(f"terrain r{rnd}: {' · '.join(parts) or 'none'}")
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self.model.log("resuming where the match stopped")
