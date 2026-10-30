@@ -23,4 +23,4 @@ Ordering follows the lead's steer: mode abstraction → memory (#19) → time (#
 10b. **Survival task over a seeded challenge corpus under the token clock or wallet**: after 7, 8 and 10.
 11a. **Ladder / battle royale / lives and revives**: with tournaments (11).
 
-Estimated total API spend to build and validate items 2-11 (experiments at n≈20-30 per mode on gpt-4.1-nano): about $5, plus ≤ $2 for the stakes experiment, so ≈ $7 total, well under the $40 lifetime cap and $50 key.
+Estimated total API spend to build and validate items 2-11 (experiments at n≈20-30 per mode on gpt-4.1-nano): about $5, plus ≤ $2 for the stakes experiment, so ≈ $7 total, well under the $33 lifetime cap and $50 key.
