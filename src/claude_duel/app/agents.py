@@ -200,6 +200,8 @@ def _program_rules(rules: Rules, round_no: int) -> list[str]:
 
 
 def _check_rules(rules: Rules, round_no: int) -> list[str]:
+    if rules.variety:  # R2: variety.prompt_lines shows one example from the assigned axis's pool instead
+        return [*check_rules(rules, round_no), _RETURN_KEYS_FAMILY]
     example = json.dumps(CHECK_EXAMPLES[(round_no - 1) % len(CHECK_EXAMPLES)])  # R2: one example, not a menu
     return [
         *check_rules(rules, round_no),
@@ -212,6 +214,7 @@ _RETURN_KEYS = (
     'Return JSON with keys in this order: {"title", "description", "source", "solver", "reference_payload", '
     '"difficulty" (1-3)}.'
 )
+_RETURN_KEYS_FAMILY = _RETURN_KEYS[:-2] + ', "family" (the assigned family id)}.'
 _HINTS = (
     ("banned name: exit", "Do not call exit(): end the solver with print(answer) and break, or let it finish. "),
     ("solver failed (exit -9)", "Your solver printed too much: print only the one accepting input, then break. "),
@@ -380,6 +383,7 @@ ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
             "reference_payload": _TEXT,
             "solver": _TEXT,
             "difficulty": "integer",
+            "family": _TEXT,
             "notes": _TEXT,
         }
     ),

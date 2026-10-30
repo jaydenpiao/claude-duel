@@ -81,6 +81,7 @@ class MatchCreated(_Payload):
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
+    family_bans: dict[str, list[str]] = {}  # R2 cross-match ban, frozen at creation; absent before it
 
 
 class StageChanged(_Payload):
@@ -292,6 +293,7 @@ def created_data(state: MatchState) -> dict[str, object]:
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
         "limits": state.limits.model_dump(mode="json"),
+        **({"family_bans": state.family_bans} if state.family_bans else {}),  # old logs stay byte-identical
     }
 
 
@@ -316,6 +318,7 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         agents=p.agents,
         rules=p.rules,
         limits=p.limits,
+        family_bans=p.family_bans,
     )
 
 

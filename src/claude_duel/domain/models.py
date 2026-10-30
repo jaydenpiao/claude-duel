@@ -208,6 +208,7 @@ class ChallengeSpec(_Frozen):
         description="optional program (same policy, no stdin) whose stdout becomes reference_payload; never shown",
     )
     difficulty: int = Field(ge=1, le=3)
+    family: str = Field(default="", max_length=80, description="R2: the assigned family id the author declares")
 
     @model_validator(mode="before")
     @classmethod
@@ -360,6 +361,7 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+    family_bans: dict[str, list[str]] = Field(default_factory=dict)  # R2: agent -> families from recent matches
 
     def handicap(self, name: str) -> Handicap:
         return next((a.handicap for a in self.agents if a.name == name), Handicap())

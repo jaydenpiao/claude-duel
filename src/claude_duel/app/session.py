@@ -7,10 +7,11 @@ import logging
 import secrets
 
 from claude_duel.app.budget import CostBudget
-from claude_duel.app.container import build_engine, build_store, pin_agents
+from claude_duel.app.container import build_engine, build_event_log, build_store, pin_agents
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
-from claude_duel.domain.errors import MatchNotFoundError
+from claude_duel.domain import variety
+from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
 from claude_duel.ports import EventObserver, MatchStore, Metrics
@@ -40,11 +41,26 @@ def open_match(
             rules=settings.rules,
             limits=settings.limits,
         )
+        if settings.rules.variety:  # R2: frozen into match_created, so replay never rereads the store
+            state.family_bans = variety.history_bans(_history(store, settings, match_id), state.agents)
         store.save(state)
     else:
         if warn_drift:
             _warn_on_drift(settings, state)
     return state
+
+
+def _history(store: MatchStore, settings: Settings, match_id: str) -> list[MatchState]:
+    """Saved matches in this store (secrets never opened); logs that aren't matches are skipped."""
+    out = []
+    for other in build_event_log(settings).ids():
+        if other == match_id:
+            continue
+        try:
+            out.append(store.snapshot(other))
+        except (MatchNotFoundError, EventLogCorruptError, ValueError, OSError):
+            continue
+    return out
 
 
 def play(
