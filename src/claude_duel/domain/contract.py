@@ -9,17 +9,30 @@ import ast
 
 # The flag goes out through the real ``sys.stdout`` (authors may not name ``sys``), never through ``print``,
 # which author code could rebind to transform its own flag.
-WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    sys.stdout.write(FLAG + '\\n')\n"
-_LEGACY_WRAPPERS = ("\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    print(FLAG)\n",)
+# R5: the arena's published 32-bit integer mixer, so "seeded" designs need no hashlib (banned in this form).
+# Defined after the author's code: call mix() inside functions, not at top level.
+MIX_DEF = (
+    "def mix(x):\n"
+    "    x = int(x) & 0xFFFFFFFF\n"
+    "    x = ((x ^ (x >> 16)) * 0x45D9F3B) & 0xFFFFFFFF\n"
+    "    x = ((x ^ (x >> 16)) * 0x45D9F3B) & 0xFFFFFFFF\n"
+    "    return x ^ (x >> 16)\n"
+)
+_PRE_MIX_WRAPPER = "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    sys.stdout.write(FLAG + '\\n')\n"
+WRAPPER = "\n\n" + MIX_DEF + _PRE_MIX_WRAPPER
+_LEGACY_WRAPPERS = (
+    _PRE_MIX_WRAPPER,
+    "\n\nimport sys\nif check(sys.stdin.read().strip()) is True:\n    print(FLAG)\n",
+)
 _IO_NAMES = frozenset({"FLAG", "sys"})
-_PROTECTED = frozenset({"print", "check"})  # may not be rebound (check only by its one top-level def)
+_PROTECTED = frozenset({"print", "check", "mix"})  # may not be rebound (check only by its one top-level def)
 
 
 # Attack-time wrapper (#100): a failed try says whether check() returned False or a non-bool. An exception
 # is already reported by the sandbox runner as type and line. Never a value check() computed, so the answer
 # doesn't leak. Like WRAPPER, it writes through sys.stdout, never a rebindable print.
 FEEDBACK_WRAPPER = (
-    "\n\nimport sys\n_ok = check(sys.stdin.read().strip())\n"
+    "\n\n" + MIX_DEF + "\n\nimport sys\n_ok = check(sys.stdin.read().strip())\n"
     "_msg = FLAG if _ok is True else 'check returned False' if _ok is False else 'check returned a non-bool'\n"
     "sys.stdout.write(_msg + '\\n')\n"
 )
@@ -94,6 +107,11 @@ def compose(source: str) -> tuple[str, str | None]:
     return (own, reason) if reason else (own + WRAPPER, None)
 
 
+def with_mix(source: str) -> str:
+    """The author's definitions plus the arena's ``mix`` (no I/O wrapper)."""
+    return definitions(source).rstrip() + "\n\n" + MIX_DEF
+
+
 def solver_program(source: str, solver: str) -> str:
-    """The author's definitions followed by the solver, so the solver may call ``check``."""
-    return definitions(source).rstrip() + "\n\n" + solver
+    """The author's definitions (and ``mix``) followed by the solver, so the solver may call ``check``."""
+    return with_mix(source) + "\n\n" + solver

@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Check form: the arena defines a published 32-bit integer mixer mix(x) for authors and solvers (hashlib stays banned); it can't be rebound (R5 follow-up).
 - Checked mode: an attacker's solver gets the same check() budget as the author's (200,000 calls); over it, the attempt counts as malformed (R1/R3 follow-up).
 - Checked mode assigns each challenge slot a family from a seeded taxonomy (combinatorial witness, tiny language, bot game, cipher, simulation, encoding, lock puzzle). Both agents share the axis but get different families; no family repeats and at most one lock puzzle per match. Prompts show one example and drop the fixed family anchors and the brute-force solver template (design rec R2).
 - Preset `checked`: `attacker_solver` is on (design rec R3), so attackers can run a sandboxed solver and the solver budget relaxes to 200,000 `check()` calls. Brute-force-only puzzles become free captures.
