@@ -48,6 +48,7 @@ from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
+from claude_duel.presentation.common import labels
 
 _LOG = logging.getLogger(__name__)
 
@@ -205,14 +206,24 @@ def _dispatch(args: argparse.Namespace) -> int:
     events = build_event_log(settings).read(args.match_id)
     if args.view == "arena":
         _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
-    report = replay(build_store(settings).load(args.match_id), events)
+    state = build_store(settings).load(args.match_id)
+    report = replay(state, events)
+    names = labels(state.agents)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
-        f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
+        f"replay consistent={report.consistent} "
+        f" recomputed={_relabel(report.recomputed, names)} recorded={_relabel(report.recorded, names)}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     return 0 if report.consistent else 1
+
+
+def _relabel(scores: object, names: dict[str, str]) -> object:
+    """Key a per-agent score dict by model label instead of internal agent name."""
+    if isinstance(scores, dict):
+        return {names.get(k, k): v for k, v in scores.items()}
+    return scores
 
 
 def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:

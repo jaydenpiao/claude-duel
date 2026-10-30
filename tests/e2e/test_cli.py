@@ -43,6 +43,9 @@ def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert main(["replay", "e2e", "--transcript"]) == 0
     out = capsys.readouterr().out
     assert "replay consistent=True" in out
+    assert "fake-1 (A)" in out.splitlines()[-1]  # scores keyed by model label
+    assert "alice" not in out.splitlines()[-1]
+    assert "bob" not in out.splitlines()[-1]
     assert "round_scored" in out
 
 

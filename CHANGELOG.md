@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 
