@@ -61,8 +61,8 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
-    """A flag-shaped stand-in for challenge cid (never its real flag): SV-1 runs solvers and a second validation on it."""
     """A flag-shaped stand-in for challenge cid, never its real flag (SV-1: solver runs, second validation)."""
+    return flag_of(state.secret, f"{cid}:{use}-decoy", state.round)
 
 
 class MatchEngine:
