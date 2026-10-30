@@ -39,9 +39,10 @@ ruff check . && ruff format --check . && mypy src && python scripts/check_docs.p
 ## CI (self-hosted runner)
 
 Workflows run on `runs-on: [self-hosted, box]` (job names unchanged), a maintainer-operated runner for this private
-repo only. Jobs run as an unprivileged user with no API keys. The real-Docker sandbox tests skip when the daemon
-can't enforce cgroup limits (`docker_probe`); run them locally against a rootful daemon. Fork PR workflows stay
-disabled. Operating notes live outside the repo.
+repo only. Jobs run as an unprivileged user with no API keys. CI sets `DUEL_REQUIRE_DOCKER=1`, so the real-Docker
+sandbox tests must run there and never skip; locally they skip when the daemon can't enforce cgroup limits
+(`docker_probe`). Every job has a 30-minute timeout, and a new push to a PR cancels that PR's older ci and security
+runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
 - dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
@@ -78,6 +79,6 @@ All checks green locally and in CI, coverage >= 90%, new behaviour and failure c
 [add-provider](.agents/skills/add-provider/SKILL.md) · [add-challenge-type](.agents/skills/add-challenge-type/SKILL.md) · [run-smoke-match](.agents/skills/run-smoke-match/SKILL.md) · [cut-release](.agents/skills/cut-release/SKILL.md) · [debug-failed-match](.agents/skills/debug-failed-match/SKILL.md) · [review-checklist](.agents/skills/review-checklist/SKILL.md)
 
 ## Tracking
-- All work lives on the [Claude Duel board](https://github.com/users/jaydenpiao/projects/1) (Status, Priority, Size, Area, Source, Iteration).
-- Bots file GitHub issues with a type label (`bug`, `security`, `feature`, `game-mode`, `tech-debt`, `docs`, `demo`, `research`) plus one `area:*` label, add them to the board, and set Source to themselves. Security items are P0/P1. Link the spec file in the body and search for duplicates first.
+- All work is tracked as GitHub issues.
+- Bots file GitHub issues with a type label (`bug`, `security`, `feature`, `game-mode`, `tech-debt`, `docs`, `demo`, `research`) plus one `area:*` label, and name themselves as the source. Security items are P0/P1. Link the spec file in the body and search for duplicates first.
 - PRs reference their issue with `Closes #N`.

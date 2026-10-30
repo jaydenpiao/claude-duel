@@ -22,7 +22,6 @@ FAKE_MODEL = "fake-1"
 DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     FAKE_MODEL: (0.0, 0.0),
     "gpt-5-nano": (0.05, 0.40),
-    "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-4.1-mini": (0.40, 1.60),
