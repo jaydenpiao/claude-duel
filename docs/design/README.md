@@ -4,3 +4,5 @@ These are design-only specs from the 2026-10-22 design round. They were copied f
 Review specs that issues link to:
 - [product-2026-10-22.md](product-2026-10-22.md): product proposals (difficulty gate, benchmark slice, gVisor, replay card, demos).
 - [architecture-round2.md](architecture-round2.md): architecture review round 2.
+- [design-core-logic.md](design-core-logic.md): Sealed Ledger mode (stakes, keystone, terrain, heat), 2026-10-29.
+- [design-reasoning-models.md](design-reasoning-models.md): gpt-5 family routing and reasoning effort, 2026-10-29.
