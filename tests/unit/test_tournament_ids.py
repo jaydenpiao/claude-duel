@@ -1,4 +1,4 @@
-"""Arch round 3 #4: series ids come from entrant indexes, so look-alike names never share a series log."""
+"""Series ids come from entrant indexes, so look-alike names never share a series log (#119)."""
 
 from __future__ import annotations
 
