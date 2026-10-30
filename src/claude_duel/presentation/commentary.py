@@ -36,10 +36,10 @@ class Commentary(MatchFold):
     ``lifetime_usd`` reads total spend on the key (the shared ledger) for the burn line.
     """
 
-    def __init__(self, out: TextIO, match_id: str, key_limit_usd: float, lifetime_usd: Callable[[], float]) -> None:
+    def __init__(self, out: TextIO, match_id: str, cap_usd: float, lifetime_usd: Callable[[], float]) -> None:
         super().__init__(match_id)
         self._out = out
-        self._key_limit = key_limit_usd
+        self._cap = cap_usd
         self._lifetime = lifetime_usd
 
     # -- lines -----------------------------------------------------------
@@ -120,4 +120,4 @@ class Commentary(MatchFold):
             self._say(f"  {a.name}: {agent_cost(s, a.name)}")
 
     def _spend(self, s: MatchState) -> str:
-        return spend(s, self._lifetime(), self._key_limit)
+        return spend(s, self._lifetime(), self._cap)

@@ -44,14 +44,14 @@ can't enforce cgroup limits (`docker_probe`); run them locally against a rootful
 disabled. Operating notes live outside the repo.
 
 ## Environments and release (ADR 0005)
-- dev/staging/prod differ only by config: all use `gpt-4.1-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $40.
+- dev/staging/prod differ only by config: all use `gpt-5-nano`; match cap $0.25/$0.50/$1.00, run cap $0.50/$1.00/$2.00, lifetime $33.
 - PR: `ci.yml` + `security.yml` (pip-audit, gitleaks, CodeQL, Trivy image/config). Push to main: those + `staging.yml` (docker build, fake-provider smoke match with read-only rootfs and cap-drop ALL).
 - Workflows: actions pinned to commit SHAs (Dependabot bumps them), top-level `permissions: {}` with per-job grants, `persist-credentials: false`. Keep it that way.
 - Prod: push tag `vX.Y.Z` -> `release.yml` Trivy-scans, then pushes `ghcr.io/jaydenpiao/claude-duel:<tag>` + `latest` and creates a GitHub release. Only after the user approves. No hosted deploy yet.
 
 ## Cost rules
 - Only low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Never add flagship models.
-- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$40`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
+- Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$33`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it and is shown in output), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
 - `OPENAI_API_KEY` comes from env only, held as `SecretStr`. Never print, log, commit or put it in CI without asking.
 
 ## Security invariants
@@ -78,6 +78,6 @@ All checks green locally and in CI, coverage >= 90%, new behaviour and failure c
 [add-provider](.agents/skills/add-provider/SKILL.md) · [add-challenge-type](.agents/skills/add-challenge-type/SKILL.md) · [run-smoke-match](.agents/skills/run-smoke-match/SKILL.md) · [cut-release](.agents/skills/cut-release/SKILL.md) · [debug-failed-match](.agents/skills/debug-failed-match/SKILL.md) · [review-checklist](.agents/skills/review-checklist/SKILL.md)
 
 ## Tracking
-- All work lives on the [Claude Duel board](https://github.com/users/jaydenpiao/projects/1) (Status, Priority, Size, Area, Source, Iteration).
-- Bots file GitHub issues with a type label (`bug`, `security`, `feature`, `game-mode`, `tech-debt`, `docs`, `demo`, `research`) plus one `area:*` label, add them to the board, and set Source to themselves. Security items are P0/P1. Link the spec file in the body and search for duplicates first.
+- All work is tracked as GitHub issues.
+- Bots file GitHub issues with a type label (`bug`, `security`, `feature`, `game-mode`, `tech-debt`, `docs`, `demo`, `research`) plus one `area:*` label, and name themselves as the source. Security items are P0/P1. Link the spec file in the body and search for duplicates first.
 - PRs reference their issue with `Closes #N`.

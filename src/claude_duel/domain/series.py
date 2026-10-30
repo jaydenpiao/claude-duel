@@ -3,7 +3,8 @@
 Each game is a normal match. Its seed is ``sha256(series_seed, game_no)`` and sides alternate (the series'
 first agent is ``agents[0]`` in odd games). A game is won on ``final_scores`` (handicap offsets included);
 a tie goes to whoever spent fewer attack tokens, else it is drawn. The series ends once someone has
-``ceil(N/2)`` wins or all N games are played.
+``ceil(N/2)`` wins or all N games are played, or at the first void game (a ``CAPPED`` match under
+``on_cap = "void"``, ADR 0014): its result is then ``void`` and the game is never replayed.
 """
 
 from __future__ import annotations
@@ -13,9 +14,10 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from claude_duel.domain.driver import fold_created
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
-from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits, Stage
 
 SERIES_CREATED, GAME_FINISHED = "series_created", "game_finished"
 SERIES_SCHEMA_VERSION = 1  # Event.v of series events, versioned apart from match events (#139)
@@ -43,6 +45,7 @@ class Game(BaseModel):
     scores: dict[str, int]
     usd: float = 0.0
     sudden_death: str = ""  # match id of the 1-round decider played after a tie ("" when none)
+    void: bool = False  # the match (or its decider) ended CAPPED under on_cap = "void": no winner (ADR 0014)
 
 
 class SeriesState(BaseModel):
@@ -62,12 +65,17 @@ class SeriesState(BaseModel):
                 out[g.winner] += 1
         return out
 
+    def void(self) -> bool:
+        return any(g.void for g in self.games)
+
     def done(self) -> bool:
+        if self.void():
+            return True
         need = self.rule.games // 2 + 1
         return len(self.games) >= self.rule.games or max(self.wins().values()) >= need
 
     def winner(self) -> str | None:
-        if not self.done():
+        if not self.done() or self.void():
             return None
         (a, wa), (b, wb) = self.wins().items()
         return a if wa > wb else b if wb > wa else None
@@ -97,18 +105,35 @@ def game_winner(state: MatchState) -> str | None:
     (a, sa), (b, sb) = sorted(final.items())
     if sa != sb:
         return a if sa > sb else b
+    if state.rules.scoring.kind == "ledger":  # fewer recorded dollars, then fewer tokens (design-core-logic.md 4.3)
+        key = {n: _spend(state, n) for n in (a, b)}
+        if key[a] != key[b]:
+            return a if key[a] < key[b] else b
+        return None
     spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
     if spent[a] != spent[b]:
         return a if spent[a] < spent[b] else b
     return None
 
 
+def _spend(state: MatchState, name: str) -> tuple[int, int]:
+    """(micro-dollars, tokens) recorded in this agent's ``call_charged`` events; never wall time."""
+    u = state.usage_by_agent.get(name)
+    return (round(u.usd * 1_000_000), u.tokens) if u else (0, 0)
+
+
+def is_void(state: MatchState) -> bool:
+    return state.stage is Stage.CAPPED and state.rules.scoring.on_cap == "void"
+
+
 def game_of(game_no: int, state: MatchState, decider: MatchState | None = None) -> Game:
     """The game's record; a tie is settled by ``decider`` (the sudden-death match) when one was played."""
-    winner = game_winner(state)
-    if winner is None and decider is not None:
+    void = any(m is not None and is_void(m) for m in (state, decider))
+    winner = None if void else game_winner(state)
+    if winner is None and decider is not None and not void:
         winner = game_winner(decider)
     return Game(
+        void=void,
         game_no=game_no,
         match_id=state.match_id,
         winner=winner,
@@ -119,12 +144,15 @@ def game_of(game_no: int, state: MatchState, decider: MatchState | None = None) 
 
 
 def fold(series_id: str, events: Iterable[Event]) -> SeriesState:
-    it = iter(events)
-    first = next(it, None)
-    if first is None or first.type != SERIES_CREATED:
-        raise EventLogCorruptError("series log does not start with series_created")
-    check_version(first, SERIES_SCHEMA_VERSION, "series event")
-    state = typed(SeriesState, {"series_id": series_id, **first.data})
+    state, it = fold_created(
+        events,
+        created_type=SERIES_CREATED,
+        schema_version=SERIES_SCHEMA_VERSION,
+        what="series",
+        state_type=SeriesState,
+        id_field="series_id",
+        id_value=series_id,
+    )
     for e in it:
         check_version(e, SERIES_SCHEMA_VERSION, "series event")
         if e.type != GAME_FINISHED:

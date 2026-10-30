@@ -9,4 +9,4 @@ labels: feature
 
 **done when**
 
-**source**: architect / security / quality / product-scout / game-designer / gtm / jayden / lead
+**source**: who found it (reviewer, user, maintainer)

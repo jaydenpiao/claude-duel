@@ -28,7 +28,7 @@ from claude_duel.adapters.store.postgres import (
     refuse_superuser,
     require_current,
 )
-from claude_duel.app.budget import DEFAULT_PRICES, CostBudget, RunOverride, check_model_allowed
+from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, RunOverride, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
@@ -127,7 +127,8 @@ def build_budget(settings: Settings, override: RunOverride | None = None) -> Cos
     configured defaults and every other ``CostBudget`` are untouched."""
     limits = settings.budget
     if override is not None:
-        limits = limits.model_copy(update={override.field: override.value})
+        # model_validate, not model_copy: the field validators must run on the raised value
+        limits = BudgetLimits.model_validate({**limits.model_dump(), override.field: override.value})
     return CostBudget(limits, build_ledger(settings), DEFAULT_PRICES, override)
 
 
