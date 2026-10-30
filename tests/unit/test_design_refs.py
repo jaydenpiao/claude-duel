@@ -16,5 +16,5 @@ def test_design_spec_mentions_resolve() -> None:
         if p.suffix in {".py", ".md"}
         for m in NAME.findall(p.read_text(encoding="utf-8"))
     }
-    assert {m for m, _ in named} >= {"design-core-logic.md", "design-reasoning-models.md"}
+    assert {m for m, _ in named} >= {"design-core-logic.md", "design-reasoning-models.md", "design-deep-layer.md"}
     assert [(m, where) for m, where in sorted(named) if m not in shipped] == []
