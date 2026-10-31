@@ -16,9 +16,9 @@ and replay-verified:
 |---|---|---|---|---|---|---|---|
 | 1 | smoke (pipeline check) | claude-haiku-5-5 | gpt-6-luna | 0.10/0.50 / 0.10/0.50 | 100 | 3 | 0.15 |
 | 2 | premium | claude-opus-5-5 | gpt-6.1-sol | 4/20 / 2/10 | 10 | 10 | 0.85 |
-| 3 | flagship | claude-fable-5-1 | gpt-6-astra | 10/50 / 10/50 | 6 | 20 | 2.75 |
+| 3 | flagship | claude-fable-5-1 | gpt-6-astra | 10/50 / 10/50 | 5 | 17.5 | 2.75 |
 
-Total cap $33, under the $40 lifetime ledger (about $37.7 left). The smoke arm goes first because it is
+Total cap $30.5, within what is left of the $33 lifetime ledger after about $2.3 already spent ($30.7). The smoke arm goes first because it is
 cheap enough to show that the pipeline works end to end (valid builds, the control, replay, the cost lines)
 before any expensive call.
 
@@ -26,7 +26,7 @@ before any expensive call.
 is reported with **$/win** for each vendor (spend divided by matches won) beside the win share, and its
 headline is "per match", never "per dollar". The smoke and flagship arms are price-matched.
 
-**N fits the cap at typical cost** (owner's choice: keep the $33 total, lower N). Typical cost per seed is
+**N fits the cap at typical cost** (owner's choice: lower N, never raise a cap; the flagship arm was cut to N=5 and $17.5 so all three arms fit the ~$30.7 left). Typical cost per seed is
 two matches (cost table below): smoke $0.028, premium $0.828, flagship $2.76. Each N is the largest whole
 number of seeds whose typical cost leaves at least 15% of the cap as headroom:
 
@@ -34,11 +34,11 @@ number of seeds whose typical cost leaves at least 15% of the cap as headroom:
 |---|---|---|---|---|
 | smoke | 100 | 2.76 | 3 | 8% (N=100 kept by the owner) |
 | premium | 10 | 8.28 | 10 | 17% (N=11 would leave 9%) |
-| flagship | 6 | 16.56 | 20 | 17% (N=7 would leave 3%) |
+| flagship | 5 | 13.80 | 17.5 | 21% (N=6 would leave 5%) |
 
 **Per-match caps** (`match_max_usd`) are a safety stop, not a game rule. Each is about 2× the arm's
 typical match: smoke 0.15 (its worst case), premium 0.85 (2 × $0.414), flagship 2.75 (2 × $1.38). An arm's
-headroom over typical cost (smoke $0.24, premium $1.72, flagship $3.44) therefore absorbs at least one capped
+headroom over typical cost (smoke $0.24, premium $1.72, flagship $3.70) therefore absorbs at least one capped
 match without ending the arm early. Before the premium arm, the smoke arm's observed p95 match cost is
 scaled by the price ratio and recorded here. If that figure exceeds the premium or flagship cap, the cap is
 raised before any premium spend, and never after any of that arm's seeds have been seen.
@@ -73,9 +73,9 @@ never resumed, and counts as void (no winner, excluded from ratings). A seed wit
    winner followed the *name* (the fake hashes it), not the seat. With the seats swapped, the same name still won.
 2. **Replay verification.** Every match log must replay to the same state (`series verified ✓`). A mismatch
    voids the match.
-3. **Empty-challenge integrity control** (required before launch, ~$0). A challenge that can never print the
+3. **Empty-challenge integrity control** (required before launch, ~$0; `integrity_control = true` in launch.toml). A challenge that can never print the
    flag is planted. Any capture against it proves an arena leak and voids the run.
-4. **Attacker solver parity** (required before launch). Attackers may run a sandboxed solver with a throwaway
+4. **Attacker solver parity** (required before launch; `attacker_solver = true` in launch.toml). Attackers may run a sandboxed solver with a throwaway
    flag, and its stdout becomes the payload. An A/B with and without the solver, capped at $1, runs on the
    smoke tier first. Without parity, strong vs strong can end with no captures and no signal.
 5. **Symmetric accounting.** Each agent's tokens in, out and thinking, plus $, $/capture and $/defense, are
@@ -102,12 +102,12 @@ At the strictest Holm level, α = 0.0167:
 |---|---|---|---|---|
 | smoke | 100 | ≥ 63/100 | 0.31 / 0.95 / 1.00 / 1.00 | 0.67 |
 | premium | 10 | 10/10 | 0.01 / 0.03 / 0.11 / 0.35 | 0.98 |
-| flagship | 6 | cannot reject (smallest two-sided p = 2/64 = 0.031) | 0 / 0 / 0 / 0 | — |
+| flagship | 5 | cannot reject (smallest two-sided p = 2/32 = 0.0625) | 0 / 0 / 0 / 0 | — |
 
-At α = 0.05 the 80%-power shares are 0.65 (smoke), 0.92 (premium, needs ≥ 9/10) and 0.96 (flagship, needs
-6/6). What this means: only the smoke arm is a real test, and it can detect a moderate edge. **Premium and
-flagship are descriptive.** Premium rejects only on a clean sweep. Flagship cannot reject at the first Holm
-level at all; it could reject only on a 6/6 sweep, and only if the other arms are tested first and rejected.
+At α = 0.05 the 80%-power shares are 0.65 (smoke), 0.92 (premium, needs ≥ 9/10) and none for flagship (N=5 can never reach
+p < 0.05). What this means: only the smoke arm is a real test, and it can detect a moderate edge. **Premium and
+flagship are descriptive.** Premium rejects only on a clean sweep. Flagship cannot reject at any Holm
+level, even on a 5/5 sweep.
 Both are reported with win share, exact 95% CI and $/win, never as a headline significance test. A null
 result there means "no evidence", not "no edge".
 
@@ -124,7 +124,7 @@ Per match: 3 rounds × 2 agents. **Typical** is 12 calls at 1,500 in / 2,000 out
 | opus-5-5 vs gpt-5.6-sol | $0.552 | $6.048 | $5.52 ($60.48) | $16.56 ($181.44) | $55.20 ($604.80) |
 | fable-5-1 vs gpt-6-astra | $1.380 | $15.120 | $13.80 ($151.20) | $41.40 ($453.60) | $138.00 ($1,512.00) |
 
-Budget: the lifetime ledger ceiling is $40 and about $37.7 remains. Worst cases above that are stopped by
+Budget: the lifetime ledger ceiling is $33 and about $30.7 remains (~$2.3 spent). Worst cases above that are stopped by
 run-specific caps (`run_max_usd`, `match_max_usd`), never by raising defaults. The owner's arms and caps are under "Arms" above.
 Premium (opus $4/$20 vs gpt-6.1-sol $2/$10, not in the table above) is about $0.41 typical and $4.54 worst per match.
 

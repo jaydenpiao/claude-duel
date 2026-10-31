@@ -13,6 +13,8 @@ max_attempts = 3
 max_output_tokens = 8000
 reasoning_effort = "low"
 variety = true
+integrity_control = true
+attacker_solver = true
 framing = { kind = "neutral" }
 [budget]
 match_max_usd = 0.75

@@ -11,6 +11,7 @@ from claude_duel.config import load_settings
 
 ROOT = Path(__file__).parent.parent.parent
 CONFIG = ROOT / "docs" / "runs" / "launch.toml"
+SPENT_USD = 2.3  # ledger spend before launch; the arms must fit what is left of the lifetime cap
 
 
 def test_launch_config_matches_prereg() -> None:
@@ -19,6 +20,8 @@ def test_launch_config_matches_prereg() -> None:
     assert (r.mode, r.rounds, r.challenges_per_round, r.max_attempts) == ("checked", 3, 1, 3)
     assert (r.max_output_tokens, r.reasoning_effort, r.variety) == (8000, "low", True)
     assert r.framing.kind == "neutral"
+    assert r.integrity_control  # prereg control 3
+    assert r.attacker_solver  # prereg control 4
     assert [a.name for a in s.agents] == ["a", "b"]  # neutral labels, never vendor names
     assert all(a.handicap == s.agents[0].handicap for a in s.agents)
     doc = (ROOT / "docs" / "runs" / "launch-prereg.md").read_text(encoding="utf-8")
@@ -37,8 +40,7 @@ def _typical_seed_usd(arm: dict[str, Any]) -> float:
 def test_launch_arms_match_prereg_and_fit_the_ledger() -> None:
     arms = tomllib.loads((ROOT / "docs" / "runs" / "launch-arms.toml").read_text(encoding="utf-8"))["arm"]
     assert [a["name"] for a in arms] == ["smoke", "premium", "flagship"]  # pre-registered execution order
-    assert sum(a["run_max_usd"] for a in arms) == 33.0
-    assert sum(a["run_max_usd"] for a in arms) < BudgetLimits().lifetime_max_usd
+    assert sum(a["run_max_usd"] for a in arms) <= BudgetLimits().lifetime_max_usd - SPENT_USD
     doc = (ROOT / "docs" / "runs" / "launch-prereg.md").read_text(encoding="utf-8")
     for order, a in enumerate(arms, 1):
         assert a["anthropic"] in DEFAULT_PRICES
