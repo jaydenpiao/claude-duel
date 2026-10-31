@@ -64,6 +64,11 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
 STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
 
 
+def _decoy(state: MatchState, cid: str, use: str) -> str:
+    """A flag-shaped stand-in for challenge cid, never its real flag (SV-1: solver runs, second validation)."""
+    return flag_of(state.secret, f"{cid}:{use}-decoy", state.round)
+
+
 class MatchEngine:
     def __init__(
         self,
@@ -467,8 +472,8 @@ class MatchEngine:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
         if not spec.solver:
             return spec, None
-        flag = self._flag_for(state, cid)
-        payload, reason = self._run_solver(state, spec.source, spec.solver, flag, "solve_reference")
+        decoy = _decoy(state, cid, "solver")  # SV-1: never the real flag, so the payload can't be derived from it
+        payload, reason = self._run_solver(state, spec.source, spec.solver, decoy, "solve_reference")
         if reason:
             return spec, reason
         return spec.model_copy(update={"reference_payload": payload}), None
@@ -494,7 +499,9 @@ class MatchEngine:
         payload = out.stdout.strip()
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
-            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # the solver may run with the real flag
+            seen = redact(payload, (flag,))[
+                :REF_OUTPUT_CHARS
+            ]  # belt and braces: the solver runs on a decoy flag (SV-1)
             reason = f"solver failed ({status}); it printed {seen!r}"
             assert_no_flag(reason, flag, "solver failure")
             return "", reason
@@ -517,6 +524,9 @@ class MatchEngine:
                 + (f" (exit {ref.exit_code}: it crashed or raised)" if ref.exit_code else "")
                 + (f"; it printed {seen!r}" if seen else "; it printed nothing")
             )
+        second = _decoy(state, cid, "second")
+        if second not in self._run_challenge(spec.source, spec.reference_payload, second, state, "validate").stdout:
+            return "flag-dependent: the reference payload only works for one flag (it must not depend on FLAG)"
         empty = self._run_challenge(spec.source, "", flag, state, "validate")
         if flag in empty.stdout:
             return "trivial: empty input reveals flag"
