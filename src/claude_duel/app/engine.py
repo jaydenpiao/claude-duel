@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import time
 from collections.abc import Mapping
 from typing import Any, cast
@@ -11,7 +12,7 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, solvability, variety
+from claude_duel.domain import contract, findings, memory, policy, solvability, stakes, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, redact, shares_fragment
@@ -61,6 +62,9 @@ REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the refe
 def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     raw = f"{match_id}:{round_no}:{author}:{index}"
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
+
+
+STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
 
 
 def junk_inputs(payload: str) -> list[str]:
@@ -425,18 +429,33 @@ class MatchEngine:
             assert_no_flag(note, f, "note")
         self._checkpoint(state, ev.NOTE_RECORDED, agent=agent, round=state.round, text=note)
 
-    def _complete(self, state: MatchState, agent: str, prompt: str, purpose: Purpose) -> Completion:
+    def _complete(
+        self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
+    ) -> Completion:
         """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
-        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``."""
-        completion = self._call(state, agent, self._request(state, prompt, purpose))
+        A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``.
+        ``left`` (ledger: stake tokens left) fits max_tokens to the stake; no repair call below ``STAKE_FLOOR``."""
+        completion = self._call(state, agent, self._request(state, prompt, purpose, left))
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
-            completion = self._call(state, agent, self._request(state, f"{prompt}\n\n{agents.TRUNCATED_HINT}", purpose))
+            repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
+            rest = None if left is None else left - completion.total_tokens
+            if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
+                return completion
+            completion = self._call(state, agent, self._request(state, repair, purpose, rest))
         return completion
 
-    def _request(self, state: MatchState, prompt: str, purpose: Purpose) -> CompletionRequest:
+    @staticmethod
+    def _fit(state: MatchState, prompt: str, left: int) -> int:
+        """Output tokens that fit in ``left`` after a deterministic input estimate (bytes / 4, rounded up)."""
+        system = agents.system_prompt(state.framing_text)
+        return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
+
+    def _request(self, state: MatchState, prompt: str, purpose: Purpose, left: int | None = None) -> CompletionRequest:
         cap = state.rules.wallet.max_output_tokens
         tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+        if left is not None:
+            tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
             system=agents.system_prompt(state.framing_text),
             prompt=prompt,
@@ -613,6 +632,9 @@ class MatchEngine:
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
+        if state.rules.ledger is not None:
+            for agent in state.agents:
+                self._allocate(state, agent.name)
         for ch in state.round_challenges(state.round):
             if not state.validations[ch.id].valid or ch.spec is None:
                 continue
@@ -620,10 +642,61 @@ class MatchEngine:
             key = f"{ch.id}:{attacker}"
             if key in state.attacks:
                 continue
-            attack = self._solve(state, ch, key, attacker)
+            stake = self._stake(state, ch, attacker)
+            if stake == 0:
+                attack = Attack(
+                    challenge_id=ch.id, attacker=attacker, solved=False, attempts=0, tokens_used=0,
+                    reason="skipped: stake 0", stake=0,
+                )  # fmt: skip
+            else:
+                attack = self._solve(state, ch, key, attacker, stake)
+                if stake is not None:
+                    over = max(0, attack.tokens_used - stake)  # only the input-estimate gap can land here
+                    attack = attack.model_copy(update={"stake": stake, "stake_overshoot": over})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
 
-    def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str) -> Attack:
+    @staticmethod
+    def _targets(state: MatchState, attacker: str) -> list[Challenge]:
+        """The opponent's challenges this round, in stake order (by id)."""
+        author = state.opponent(attacker)
+        return sorted((c for c in state.round_challenges(state.round) if c.author == author), key=lambda c: c.id)
+
+    def _stake(self, state: MatchState, ch: Challenge, attacker: str) -> int | None:
+        stakes = state.stakes.get(f"{state.round}:{attacker}")
+        if stakes is None:
+            return None
+        return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
+
+    def _allocate(self, state: MatchState, attacker: str) -> None:
+        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split."""
+        rule = state.rules.ledger
+        assert rule is not None
+        if f"{state.round}:{attacker}" in state.stakes:
+            return  # idempotent resume
+        targets = self._targets(state, attacker)
+        rows = [
+            (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
+            for c in targets
+        ]
+        prompt = agents.allocate_prompt(
+            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker)
+        )
+        for cid in state.challenges:
+            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+        raw: object = None
+        if allowance.empty(state, attacker) is None:
+            completion = self._complete(state, attacker, prompt, "allocate")
+            try:
+                if not completion.truncated:
+                    raw = agents.parse_allocation(completion.text)
+            except MalformedOutputError:
+                self._metrics.incr("model.malformed", purpose="allocate")
+        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
+        if fallback:
+            self._metrics.incr("ledger.alloc_fallback")
+        self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
+
+    def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
         """Attempts are checkpointed one by one; a resumed attack replays history instead of re-paying."""
         spec = ch.spec
         assert spec is not None, "only valid challenges are attacked"
@@ -635,6 +708,8 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=True, reason="flag captured")
             if len(history) >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
+            if stake is not None and tokens >= stake:
+                return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             if tokens >= state.attack_token_budget(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="token budget exhausted")
             if (empty := allowance.empty(state, attacker)) is not None:
@@ -654,8 +729,11 @@ class MatchEngine:
                 state.rules.attacker_solver,
             )
             assert_no_flag(prompt, flag, "attack prompt")
+            left = None if stake is None else stake - tokens
+            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+                return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
-            completion = self._complete(state, attacker, prompt, "attack")
+            completion = self._complete(state, attacker, prompt, "attack", left)
             self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion)
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))

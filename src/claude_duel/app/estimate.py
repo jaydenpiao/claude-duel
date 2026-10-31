@@ -28,11 +28,15 @@ def estimate(rules: Rules, model: str, limits: BudgetLimits) -> Estimate:
     per_call_tokens = IN_TOKENS + out
     builds = 1 + rules.max_format_retries + (1 if rules.difficulty_gate else 0)
     bonus = rules.early_bonus_attempts
+    allocs = rules.rounds * 2 if rules.ledger is not None else 0
     calls = min(
-        rules.rounds * 2 * rules.challenges_per_round * (builds + rules.max_attempts + bonus),
+        rules.rounds * 2 * rules.challenges_per_round * (builds + rules.max_attempts + bonus) + allocs,
         limits.match_max_calls,
     )
     bounds = [(calls * per_call_tokens, "rules"), (limits.match_max_tokens, "match cap")]
+    if rules.ledger is not None:  # attacks spend at most their stakes; builds and allocations as in "rules"
+        non_attack = rules.rounds * 2 * (rules.challenges_per_round * builds + 1) * per_call_tokens
+        bounds.append((non_attack + rules.rounds * 2 * rules.ledger.attack_tokens, "stakes"))
     if rules.wallet.per_agent_tokens is not None:
         bounds.append((2 * rules.wallet.per_agent_tokens, "wallet"))
     tokens, bound = min(bounds)
