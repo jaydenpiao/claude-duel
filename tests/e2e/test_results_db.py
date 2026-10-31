@@ -19,6 +19,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.postgres import PostgresResults, PublicReader, connect, migrate, require_current
+from claude_duel.app.export import FIELDS
 from claude_duel.cli import main
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 from claude_duel.domain.flags import assert_no_flag, flag_of
@@ -145,6 +146,18 @@ def test_public_reader_refuses_writer_roles(db: dict[str, str]) -> None:
         PublicReader(conn)
     with connect(ADMIN) as conn, pytest.raises(ConfigError):
         PublicReader(conn)
+
+
+def test_public_view_columns_match_export_fields(db: dict[str, str]) -> None:
+    with connect(db["owner"]) as conn:
+        rows = conn.execute(
+            "select table_name, column_name from information_schema.columns"
+            " where table_schema = 'public_v' order by table_name, ordinal_position"
+        ).fetchall()
+    cols: dict[str, list[str]] = {}
+    for r in rows:
+        cols.setdefault(r["table_name"], []).append(r["column_name"])
+    assert {k: set(v) for k, v in cols.items()} == {k: set(v) for k, v in FIELDS.items()}
 
 
 def test_schema_hardening(db: dict[str, str]) -> None:

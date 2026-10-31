@@ -89,22 +89,47 @@ def connect(url: str) -> Conn:
         raise ConfigError(f"cannot connect to the results database ({type(exc).__name__})") from None
 
 
+@dataclasses.dataclass(frozen=True)
+class RoleFacts:
+    """What the connected role can do, from one ``pg_roles`` query (quality L25)."""
+
+    superuser: bool
+    createrole: bool
+    bypassrls: bool
+    writer: bool  # member of duel_writer
+    ingest: bool  # member of duel_ingest
+    owner: bool  # owns a table in schema duel
+    reader: bool  # member of duel_reader
+
+
+_ROLE_FACTS = (
+    "select r.rolsuper as superuser, r.rolcreaterole as createrole, r.rolbypassrls as bypassrls,"
+    " pg_has_role(current_user, 'duel_writer', 'MEMBER') as writer,"
+    " pg_has_role(current_user, 'duel_ingest', 'MEMBER') as ingest,"
+    " exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner,"
+    " pg_has_role(current_user, 'duel_reader', 'MEMBER') as reader"
+    " from pg_roles r where r.rolname = current_user"
+)
+
+
+def role_facts(conn: Conn) -> RoleFacts:
+    row = conn.execute(_ROLE_FACTS).fetchone()
+    if row is None:
+        raise ConfigError("cannot read the current role from pg_roles")
+    return RoleFacts(**{f.name: bool(row[f.name]) for f in dataclasses.fields(RoleFacts)})
+
+
 def refuse_superuser(conn: Conn) -> None:
     """``duel sync`` must not run as a role that ignores row-level security (superuser or BYPASSRLS)."""
-    row = conn.execute(
-        "select rolsuper or rolbypassrls as unsafe from pg_roles where rolname = current_user"
-    ).fetchone()
-    if row is None or row["unsafe"]:
+    facts = role_facts(conn)
+    if facts.superuser or facts.bypassrls:
         raise ConfigError("refusing to sync as a superuser or BYPASSRLS role: use a duel_ingest or owner login")
 
 
 def refuse_table_owner(conn: Conn) -> None:
     """Routine ``duel sync`` must not run as a role that owns a ``duel`` table (it could truncate or drop it);
     the owner is for ``duel db migrate`` and ``--rebuild`` only."""
-    row = conn.execute(
-        "select exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner"
-    ).fetchone()
-    if row is None or row["owner"]:
+    if role_facts(conn).owner:
         raise ConfigError("refusing to sync as a duel table owner: use a duel_ingest login (owner only for --rebuild)")
 
 
@@ -302,15 +327,8 @@ class PublicReader:
     """Reads the ``public_v`` views in a read-only transaction, as a role that can't write or own anything."""
 
     def __init__(self, conn: Conn) -> None:
-        row = conn.execute(
-            "select r.rolsuper or r.rolcreaterole or r.rolbypassrls"
-            " or pg_has_role(current_user, 'duel_writer', 'MEMBER')"
-            " or pg_has_role(current_user, 'duel_ingest', 'MEMBER')"
-            " or exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as unsafe,"
-            " pg_has_role(current_user, 'duel_reader', 'MEMBER') as reader"
-            " from pg_roles r where r.rolname = current_user"
-        ).fetchone()
-        if row is None or row["unsafe"] or not row["reader"]:
+        f = role_facts(conn)
+        if f.superuser or f.createrole or f.bypassrls or f.writer or f.ingest or f.owner or not f.reader:
             raise ConfigError("the export role must be a duel_reader member with no write, owner or admin rights")
         refuse_definer_functions(conn)
         self._conn = conn

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from claude_duel.adapters.store.postgres import refuse_table_owner
+from claude_duel.adapters.store.postgres import refuse_superuser, refuse_table_owner
 from claude_duel.domain.errors import ConfigError
 
 
@@ -20,7 +20,8 @@ class _Conn:
         return self
 
     def fetchone(self) -> dict[str, bool]:
-        return {"owner": self.owner}
+        facts = dict.fromkeys(("superuser", "createrole", "bypassrls", "writer", "ingest", "reader"), False)
+        return {**facts, "owner": self.owner}
 
 
 def test_table_owner_is_refused() -> None:
@@ -32,3 +33,13 @@ def test_table_owner_is_refused() -> None:
 
 def test_ingest_login_passes() -> None:
     refuse_table_owner(_Conn(owner=False))  # type: ignore[arg-type]
+
+
+def test_superuser_is_refused_from_the_same_role_query() -> None:
+    class _Super(_Conn):
+        def fetchone(self) -> dict[str, bool]:
+            return {**super().fetchone(), "superuser": True}
+
+    with pytest.raises(ConfigError, match="superuser"):
+        refuse_superuser(_Super(owner=False))  # type: ignore[arg-type]
+    refuse_superuser(_Conn(owner=True))  # type: ignore[arg-type]
