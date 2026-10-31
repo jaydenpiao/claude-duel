@@ -12,7 +12,7 @@ from pydantic import SecretStr
 
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
-from claude_duel.adapters.providers.registry import VENDORS
+from claude_duel.adapters.providers.registry import FACTORIES
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
@@ -32,6 +32,7 @@ from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
 from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox
 
@@ -48,7 +49,7 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     key = settings.api_keys.get(vendor.name)
     if key is None:
         raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
-    inner = vendor.factory(key, model, timeout)
+    inner = FACTORIES[vendor.name](key, model, timeout)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
