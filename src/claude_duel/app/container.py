@@ -12,17 +12,16 @@ from pydantic import SecretStr
 
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
-from claude_duel.adapters.providers.registry import VENDORS
+from claude_duel.adapters.providers.registry import FACTORIES
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.adapters.store.postgres import (
-    PostgresResults,
-    PublicReader,
-    connect,
+from claude_duel.adapters.store.results_sql import (
+    Executor,
+    SqlResults,
     migrate,
     refuse_superuser,
     refuse_table_owner,
@@ -33,8 +32,9 @@ from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, LLMProvider, Metrics, ResultsStore, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox
 
 _LOG = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     key = settings.api_keys.get(vendor.name)
     if key is None:
         raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
-    inner = vendor.factory(key, model, timeout)
+    inner = FACTORIES[vendor.name](key, model, timeout)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
@@ -190,22 +190,29 @@ def _owner_url(settings: Settings) -> str:
     return _db_url(settings.database_url, "MIGRATE_DATABASE_URL (or DATABASE_URL)")
 
 
+def results_executor(settings: Settings, url: str) -> Executor:
+    """psycopg to the results database (cloud-sql-proxy on loopback in production); imported only when used."""
+    from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415 - psycopg only when used
+
+    return PgExecutor(connect(url))
+
+
 def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
     """Connect with ``DATABASE_URL`` (or the owner's ``MIGRATE_DATABASE_URL`` for ``--rebuild``); never migrates.
 
     Fails clearly if migrations are pending: run ``duel db migrate``.
     """
-    conn = connect(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
-    refuse_superuser(conn)
-    require_current(conn)
+    ex = results_executor(settings, _owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
+    refuse_superuser(ex)
+    require_current(ex)
     if not owner:
-        refuse_table_owner(conn)
-    return PostgresResults(conn)
+        refuse_table_owner(ex)
+    return SqlResults(ex)
 
 
 def migrate_results(settings: Settings) -> list[str]:
     """``duel db migrate``: apply pending migrations as the schema owner. Returns the names applied."""
-    return migrate(connect(_owner_url(settings)))
+    return migrate(results_executor(settings, _owner_url(settings)))
 
 
 def git_sha() -> str | None:
@@ -226,6 +233,8 @@ def git_sha() -> str | None:
     return out.stdout.strip() or None
 
 
-def build_public_reader(settings: Settings) -> PublicReader:
-    """Connect with ``EXPORT_DATABASE_URL``; ``PublicReader`` refuses any role that could write."""
+def build_public_reader(settings: Settings) -> PublicSource:
+    """Connect with ``EXPORT_DATABASE_URL``; ``PublicReader`` refuses any role that could write (postgres only)."""
+    from claude_duel.adapters.store.postgres import PublicReader, connect  # noqa: PLC0415 - psycopg only when used
+
     return PublicReader(connect(_db_url(settings.export_database_url, "EXPORT_DATABASE_URL")))

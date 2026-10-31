@@ -56,3 +56,13 @@ queryable index, and a future public page needs data that provably holds no flag
   SQLSTATE only); free text is omitted from stored events and legacy logs are checked for plain, rot13 and
   decimal-encoded flags; default EXECUTE is revoked from PUBLIC and any SECURITY DEFINER function in `duel`/`public_v`
   blocks sync and export; CI Postgres is pinned by digest with a random per-job password.
+
+## Amendment: Cloud SQL transport (2026-10-29)
+
+- The results SQL lives in `results_sql.py` behind a small `Executor` protocol, run by the `postgres` (psycopg)
+  transport; `tests/contract` runs one suite against memory and postgres. The Neon SQL-over-HTTPS transport
+  was dropped: the index moved to Cloud SQL for PostgreSQL.
+- The box connects through `cloud-sql-proxy --auto-iam-authn --unix-socket <dir>` (a 0700 directory; TLS and IAM
+  handled by the proxy; socket hosts are exempt from `require_tls`). `DATABASE_URL` uses the ingest IAM user and no
+  password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; `iam_url` escapes the
+  inner `@` for libpq.
