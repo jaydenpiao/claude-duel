@@ -12,9 +12,9 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from claude_duel.adapters.providers.registry import VENDORS
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
