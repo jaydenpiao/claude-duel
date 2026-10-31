@@ -28,14 +28,14 @@ def _run(make_engine, new_state, source, solver, **band):  # type: ignore[no-unt
 def test_brute_force_solver_goes_back_to_repair(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
     state, ch = _run(make_engine, new_state, SPARSE, SEARCH)
     assert not state.validations[ch.id].valid
-    assert any("called check() 28,784 times" in e for e in state.build_errors.get(ch.id, []))
+    assert any("31,662 check() calls" in e for e in state.build_errors.get(ch.id, []))
 
 
 def test_bigger_budget_accepts_and_logs_the_count(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
     state, ch = _run(make_engine, new_state, SPARSE, SEARCH, max_solver_checks=200_000)
     v = state.validations[ch.id]
     assert v.valid, v.reason
-    assert v.solver_checks == 28_784
+    assert v.solver_checks == 28_784 + 28_784 // solvability.WORK_PER_CHECK
     assert v.density_ppm == 0
     assert v.log2_space == 16.61
 
@@ -94,9 +94,11 @@ def test_solver_calling_a_helper_is_counted(make_engine, new_state) -> None:  # 
     assert solvability.uncounted_path(HELPER, VIA_HELPER) is None
     state, ch = _run(make_engine, new_state, HELPER, VIA_HELPER)
     assert not state.validations[ch.id].valid
-    assert any("28,784 times" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+    assert any("31,662 check() calls" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
     state, ch = _run(make_engine, new_state, HELPER, VIA_HELPER, max_solver_checks=200_000)
-    assert state.validations[ch.id].solver_checks == 28_784  # check() inside verify() is not counted twice
+    assert (
+        state.validations[ch.id].solver_checks == 28_784 + 2_878
+    )  # check() inside verify() is not counted twice; + loop ticks
 
 
 def test_source_aliasing_check_is_rejected(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
@@ -146,5 +148,32 @@ def test_plain_data_arguments_still_work_and_check_counts_at_any_depth() -> None
     src = SPARSE + "\n\ndef scan(xs):\n    return [x for x in xs if check(x)]\n"
     out, n = _counted_run(src, "print(scan([str(n).zfill(5) for n in range(28780, 28790)]))\n")
     assert out.strip() == "['28783']"
-    assert n == 10
+    assert n == 10 + 10 // solvability.WORK_PER_CHECK  # 10 checks + 10 comprehension ticks
     assert _counted_run(HELPER, "print(verify('28783'), {'a': (1, b'x', None)} and 1)\n")[1] == 1
+
+
+MIXED = "def check(s):\n    return len(s) == 5 and s.isdigit() and mix(int(s)) % 1000003 == mix(28783) % 1000003\n"
+INLINED = (
+    "t = mix(28783) % 1000003\nfor n in range(100000):\n"
+    "    if mix(n) % 1000003 == t:\n        print(str(n).zfill(5))\n        break\n"
+)
+INLINED_MIX = (
+    "def m(x):\n    x = int(x) & 0xFFFFFFFF\n    return x ^ (x >> 16)\n\n"
+    "print([n for n in range(100000) if m(n) == 7][:1])\n"
+)
+LOOPS = "f = lambda x: x\nprint(sum(f(i) for i in range(50)))\nk = 0\nwhile k < 30:\n    k += 1\n"
+
+
+def test_inlining_check_or_mix_still_counts_as_work(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    """A solver that copies check's logic (calling mix itself, or its own copy) never calls check."""
+    for source, solver in ((MIXED, INLINED), (SPARSE, INLINED_MIX)):
+        assert solvability.uncounted_path(source, solver) is None
+        state, ch = _run(make_engine, new_state, source, solver)
+        assert not state.validations[ch.id].valid
+        assert any("brute-force" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+
+
+def test_work_ticks_cover_loops_comprehensions_and_lambdas() -> None:
+    out, n = _counted_run(SPARSE, LOOPS)
+    assert out.strip() == "1225"
+    assert n == (50 + 50 + 30) // solvability.WORK_PER_CHECK
