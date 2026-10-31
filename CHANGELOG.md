@@ -16,6 +16,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Difficulty-gate probe is exempt from per-agent wallets.
 - Tournament entrant models pinned in `tournament_created`.
 - CI requires real-Docker sandbox tests (`DUEL_REQUIRE_DOCKER=1`).
+- `duel experiment`: stakes experiment arms with a run-cap override (finite values only).
+- Match caps: a match-scoped cap hit ends the match `CAPPED` (void, not resumable; ADR 0014).
+- Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
+- gpt-5 family routed via the Responses API with reasoning tokens counted.
+- Integrity control and attacker solver parity (ADR 0015).
+
+### Changed
+- Default model is gpt-5-nano; the code default lifetime cap is $33.
+- Hypothesis runs without a per-example deadline in CI.
+- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
+- Shared driver helpers for match, series and tournament drivers.
+- Public-facing repo docs (security policy, code owners, issue templates).
+- Review-code gate is case-insensitive and covers `docs/`.
 
 ## [0.1.0]
 First public release.
