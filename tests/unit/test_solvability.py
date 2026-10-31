@@ -80,20 +80,20 @@ def test_attacker_solver_shares_the_author_budget(new_state) -> None:  # type: i
     assert "exited early" in (MatchEngine._attack_over_budget(state, None) or "")
 
 
-HELPER = 'def verify(s):\n    return s == "zq"\n\n\ndef check(s):\n    return verify(s)\n'
-VIA_HELPER = (
-    "import string\nfor a in string.ascii_lowercase:\n    for b in string.ascii_lowercase:\n"
-    "        if verify(a + b):\n            print(a + b)\n"
-)
-ALIAS = 'def check(s):\n    return s == "zq"\n\n\ng = check\n'
-VIA_ALIAS = VIA_HELPER.replace("verify(", "g(")
+HELPER = SPARSE.replace("def check(s)", "def verify(s)") + "\n\ndef check(s):\n    return verify(s)\n"
+VIA_HELPER = SEARCH.replace("check(", "verify(")
+ALIAS = SPARSE + "\n\ng = check\n"
+VIA_ALIAS = SEARCH.replace("check(", "g(")
+CLOSURE = SPARSE + "\n\ndef get():\n    return lambda s: check(s)\n"
 
 
-def test_solver_calling_a_helper_is_rejected(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
-    assert "not verify" in (solvability.uncounted_path(HELPER, VIA_HELPER) or "")
+def test_solver_calling_a_helper_is_counted(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    assert solvability.uncounted_path(HELPER, VIA_HELPER) is None
     state, ch = _run(make_engine, new_state, HELPER, VIA_HELPER)
     assert not state.validations[ch.id].valid
-    assert any("not verify" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+    assert any("28,784 times" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+    state, ch = _run(make_engine, new_state, HELPER, VIA_HELPER, max_solver_checks=200_000)
+    assert state.validations[ch.id].solver_checks == 28_784  # check() inside verify() is not counted twice
 
 
 def test_source_aliasing_check_is_rejected(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
@@ -101,6 +101,11 @@ def test_source_aliasing_check_is_rejected(make_engine, new_state) -> None:  # t
     state, ch = _run(make_engine, new_state, ALIAS, VIA_ALIAS)
     assert not state.validations[ch.id].valid
     assert any("aliases check" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+
+
+def test_solver_may_not_alias_or_get_a_closure() -> None:
+    assert "not use check" in (solvability.uncounted_path(SPARSE, "g = check\nprint(g('1'))\n") or "")
+    assert "lambda" in (solvability.uncounted_path(CLOSURE, "f = get()\nprint(f('1'))\n") or "")
 
 
 def test_solver_may_use_check_mix_and_its_own_imports() -> None:

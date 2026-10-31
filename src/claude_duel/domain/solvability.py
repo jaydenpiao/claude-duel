@@ -1,6 +1,6 @@
 """Solvability band for the check form (design rec R1): pure helpers; the engine does the running.
 
-Upper bound: the arena counts how many times the author's solver calls ``check``. A solver that needs more
+Upper bound: the arena counts how many times the author's solver calls ``check`` (or any helper of the source). A solver that needs more
 calls than the rules allow is only reachable by brute force, which a checked-mode attacker (no code) can't do.
 
 Lower bound: the arena runs ``check`` on seeded random inputs shaped like the reference payload. If too many
@@ -14,7 +14,7 @@ import hashlib
 import math
 import string
 
-from claude_duel.domain.contract import with_mix
+from claude_duel.domain.contract import definitions, with_mix
 
 DENSITY_MAX_LENGTH = 64  # longer payloads have a huge space; sampling them says nothing useful
 _ALPHABETS = (
@@ -33,57 +33,82 @@ def nonce(secret: str, cid: str, purpose: str) -> str:
 
 
 def counted(source: str, solver: str, tag: str) -> str:
-    """The solver program with ``check`` counted; the count is written last, after ``tag``."""
+    """The solver program with every call into the author's top-level functions counted (``check`` and helpers
+    alike; calls made inside a counted call are free). The count is written last, after ``tag``."""
     defs = with_mix(source).rstrip()
+    try:
+        tree = ast.parse(definitions(source))
+        funcs = sorted(n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    except SyntaxError:
+        funcs = ["check"]
     hook = (
-        "\n\n_arena_calls = [0]\n_arena_check = check\n"
-        "def check(s):\n    _arena_calls[0] += 1\n    return _arena_check(s)\n"
+        "\n\n_arena_calls = [0]\n_arena_depth = [0]\n"
+        "def _arena_count(f):\n"
+        "    def counted(*a, **k):\n"
+        "        if _arena_depth[0]:\n            return f(*a, **k)\n"
+        "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n"
+        "        try:\n            return f(*a, **k)\n        finally:\n            _arena_depth[0] = 0\n"
+        "    return counted\n" + "".join(f"{name} = _arena_count({name})\n" for name in funcs)
     )
     tail = f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0]) + '\\n')\n"
     return defs + hook + "\n\n" + solver + tail
 
 
-_SOLVER_MAY_LOAD = frozenset({"check", "mix"})
+def _functions(tree: ast.Module) -> set[str]:
+    """Top-level functions and classes: each is a way into the author's code."""
+    return {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
 
 
-def _top_level_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
+def _escapes(tree: ast.AST, names: set[str]) -> list[str]:
+    """Names from ``names`` used other than as a direct call target (``g = check``, ``[verify]``, ``return f``)."""
+    calls = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    return sorted(
+        {
+            n.id
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and n.id in names and isinstance(n.ctx, ast.Load) and id(n) not in calls
+        }
+    )
+
+
+def _returns_function(tree: ast.Module) -> bool:
+    """A lambda outside a function body, or a function that returns or yields a lambda or a nested def."""
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names.update((a.asname or a.name).split(".")[0] for a in node.names)
-        else:
-            names.update(n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
-    return names
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(isinstance(n, ast.Lambda) for n in ast.walk(node)):
+                return True
+            continue
+        nested = {n.name for n in ast.walk(node) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))} - {
+            node.name
+        }
+        for n in ast.walk(node):
+            value = n.value if isinstance(n, (ast.Return, ast.Yield)) else None
+            if isinstance(value, ast.Lambda) or (isinstance(value, ast.Name) and value.id in nested):
+                return True
+    return False
 
 
 def uncounted_path(source: str, solver: str) -> str | None:
-    """Why the solver could reach the author's code without a counted ``check()`` call, or None.
+    """Why the solver could run the author's code without the arena counting it, or None.
 
-    The solver may load only ``check`` and ``mix`` of the source's top-level names, and the source may use
-    ``check`` only by calling it, so no alias (``g = check``) or helper is an uncounted path.
+    ``counted`` counts every call into a top-level function of the source. So the source may use its functions
+    (``check`` included) only by calling them, may not hand out a lambda or nested def, and the solver may only
+    call them, never alias them (``g = check``) or touch a class.
     """
     try:
         src, sol = ast.parse(source), ast.parse(solver)
     except SyntaxError:
         return None  # the policy check reports syntax errors
-    calls = {id(n.func) for n in ast.walk(src) if isinstance(n, ast.Call)}
-    if any(
-        isinstance(n, ast.Name) and n.id == "check" and isinstance(n.ctx, ast.Load) and id(n) not in calls
-        for n in ast.walk(src)
-    ):
-        return "source aliases check(); call it, don't pass it around"
-    loads = {n.id for n in ast.walk(sol) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
-    imported = {
-        (a.asname or a.name).split(".")[0]
-        for n in ast.walk(sol)
-        if isinstance(n, (ast.Import, ast.ImportFrom))
-        for a in n.names
-    }
-    foreign = sorted((loads & _top_level_names(src)) - _SOLVER_MAY_LOAD - imported)
-    if foreign:
-        return f"solver may call only check() and mix() of your code, not {', '.join(foreign)}"
+    funcs = _functions(src)
+    aliased = _escapes(src, funcs)
+    if aliased:
+        return f"source aliases {', '.join(aliased)}; only call your functions"
+    if _returns_function(src):
+        return "source hands out a lambda or nested function; return values, not functions"
+    classes = sorted(n.name for n in src.body if isinstance(n, ast.ClassDef))
+    used = sorted(set(_escapes(sol, funcs)) | {n.id for n in ast.walk(sol) if isinstance(n, ast.Name)} & set(classes))
+    if used:
+        return f"solver may only call check(), mix() and your functions, not use {', '.join(used)}"
     return None
 
 
