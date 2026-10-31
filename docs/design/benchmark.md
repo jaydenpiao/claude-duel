@@ -30,7 +30,7 @@ One JSON object per line:
   sandbox as a match, so bench and duel numbers measure the same skill. Each solve gets a fresh flag.
 - The output is the per-task result (solved, tries, tokens) and each agent's solve rate.
 - **Budget (#104):** every call goes through the match `CostBudget` via `MeteredProvider`, so the
-  match caps (calls, tokens, USD) apply to the whole bench run, alongside the run caps and the $40
+  match caps (calls, tokens, USD) apply to the whole bench run, alongside the run caps and the $33
   lifetime ceiling. Every call is recorded in the shared `ledger.jsonl` under `bench-<id>`. Real
   models only run in Docker, because `make_sandbox` fails closed for them. Set per-run caps in a
   config, for example `[budget] match_max_usd = 0.10`. Fake agents solve only the template tasks the

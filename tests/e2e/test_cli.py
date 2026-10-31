@@ -34,6 +34,8 @@ def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert "alice (fake-1) vs bob (fake-1)" in out
     assert "winner: " in out
     assert out.rstrip().endswith("replay verified ✓")
+    assert "of $33 cap" in out  # #195: the spend line shows the enforced cap, never the key limit
+    assert "$50" not in out
     assert main(["resume", "e2e", "--format", "json"]) == 0  # resuming a complete match is a no-op
     summary = json.loads(capsys.readouterr().out)
     assert (summary["match_id"], summary["stage"], summary["round"]) == ("e2e", "complete", 2)
@@ -96,7 +98,7 @@ FAKE = (AgentSpec(name="a"), AgentSpec(name="b"))
 
 
 def test_container_wiring(env: Path) -> None:
-    s = Settings(openai_api_key=SecretStr("sk-x"))
+    s = Settings(api_keys={"openai": SecretStr("sk-x")})
     assert isinstance(make_provider(OPENAI[0], s, NullMetrics()), RetryingProvider)
 
 
@@ -139,7 +141,7 @@ def test_live_openai_tiny_match(
     monkeypatch.setenv("DUEL_SANDBOX", "docker")  # real models only run in Docker
     cfg = tmp_path / "live.toml"
     cfg.write_text(
-        'openai_model = "gpt-4.1-nano"\n'
+        'openai_model = "gpt-4o-mini"\n'
         '[[agents]]\nname = "alice"\nprovider = "openai"\n[[agents]]\nname = "bob"\nprovider = "openai"\n'
         "[rules]\nrounds = 1\nchallenges_per_round = 1\nmax_attempts = 2\nattack_token_budget = 6000\n"
         "[budget]\nmatch_max_usd = 0.05\nrun_max_usd = 0.05\nmatch_max_calls = 12\n"
@@ -149,4 +151,5 @@ def test_live_openai_tiny_match(
     print(out)
     assert code == 0
     assert "replay verified ✓" in out
-    assert "of $50 burned" in out
+    assert "of $33 cap" in out  # the enforced lifetime cap, not the key limit ($50)
+    assert "$50" not in out
