@@ -10,7 +10,7 @@ from claude_duel.app.engine import CONTROL_SOURCE, MALFORMED, MatchEngine
 from claude_duel.domain.models import SandboxLimits, SolvabilityRule
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest, RunResult, Sandbox
-from tests.unit.test_flag_independence import Builds
+from tests.helpers import Builds
 from tests.unit.test_solvability import SPARSE
 
 MARK = "# attacker-solver"
