@@ -98,14 +98,16 @@ Defaults (`ProphecyRule`): `max_per_round=2`, stakes 1–3 (`prophecy.py:38`), `
 ## 5. Mode and rules abstraction (ADR 0007)
 ```python
 class ProphecyRule(_Frozen):
-    tier: Literal["menu"] = "menu"          # "compose" is phase 5
+    tier: Literal["menu"] = "menu"  # "compose" is phase 5
     max_per_round: int = Field(default=2, ge=1, le=2)
     pool: int = Field(default=6, ge=1, le=20)
     round_cap: int = Field(default=3, ge=1, le=6)
     rates_version: int = 0
-class DeepRule(_Frozen):                    # models.py:126-130
+
+
+class DeepRule(_Frozen):  # models.py:126-130
     ...
-    prophecy: ProphecyRule | None = None    # off by default
+    prophecy: ProphecyRule | None = None  # off by default
 ```
 - A validator requires `deep is not None` (which already implies a ledger) whenever `deep.prophecy` is set.
 - There's **no new preset** and no copy of `ledger_deep` (`modes.py:41`). Turn it on with a rules override (`--rules deep.prophecy={}` or a config file). Calibration uses the same override.
