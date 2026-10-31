@@ -72,8 +72,8 @@ class Settings(BaseModel):
         return agent.model or self.default_model(agent.provider)
 
 
-# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger: #192).
-UNAVAILABLE_SCORING = frozenset({"ledger"})
+# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger was, until #192).
+UNAVAILABLE_SCORING: frozenset[str] = frozenset()
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
@@ -140,8 +140,7 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
 def _check_scoring_available(rules: Rules) -> None:
     if rules.scoring.kind in UNAVAILABLE_SCORING:
         raise ConfigError(
-            f"scoring kind {rules.scoring.kind!r} is not available yet (stakes are not wired into matches"
-            " until #192); use classic, efficiency or timed"
+            f"scoring kind {rules.scoring.kind!r} is not available yet; use classic, efficiency, timed or ledger"
         )
 
 
