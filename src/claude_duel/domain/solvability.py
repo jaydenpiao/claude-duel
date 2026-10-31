@@ -63,8 +63,7 @@ def counted(source: str, solver: str, tag: str) -> str:
         "            raise TypeError('author functions take plain data only')\n"
         "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n        _arena_inner[0] = 0\n"
         "        try:\n            return f(*a, **k)\n        finally:\n            _arena_depth[0] = 0\n"
-        "    return counted\n"
-        + "".join(f"{name} = _arena_count({name}, {name == 'check'})\n" for name in funcs)
+        "    return counted\n" + "".join(f"{name} = _arena_count({name}, {name == 'check'})\n" for name in funcs)
     )
     tail = f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0]) + '\\n')\n"
     return defs + hook + "\n\n" + solver + tail

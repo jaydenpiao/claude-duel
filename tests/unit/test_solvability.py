@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app.engine import MatchEngine
 from claude_duel.domain import solvability
@@ -122,13 +125,10 @@ VIA_PICK = "print(pick([str(n).zfill(5) for n in range(100000)], lambda s: check
 
 
 def _counted_run(source: str, solver: str) -> tuple[str, int | None]:
-    import contextlib
-    import io
-
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         try:
-            exec(solvability.counted(source, solver, "Ntag"), {"__name__": "__main__"})  # noqa: S102
+            exec(solvability.counted(source, solver, "Ntag"), {"__name__": "__main__"})
         except TypeError as e:
             return f"TypeError: {e}", None
     return solvability.split_count(out.getvalue(), "Ntag")
@@ -138,11 +138,13 @@ def test_lazy_or_callable_arguments_cannot_hide_a_brute_force() -> None:
     for source, solver in ((FIRST, VIA_FIRST), (RUN, VIA_RUN), (PICK, VIA_PICK)):
         assert solvability.uncounted_path(source, solver) is None
         out, n = _counted_run(source, solver)
-        assert n is None and "plain data" in out, (solver, out, n)
+        assert n is None, (solver, out)
+        assert "plain data" in out, (solver, out)
 
 
 def test_plain_data_arguments_still_work_and_check_counts_at_any_depth() -> None:
     src = SPARSE + "\n\ndef scan(xs):\n    return [x for x in xs if check(x)]\n"
     out, n = _counted_run(src, "print(scan([str(n).zfill(5) for n in range(28780, 28790)]))\n")
-    assert out.strip() == "['28783']" and n == 10
+    assert out.strip() == "['28783']"
+    assert n == 10
     assert _counted_run(HELPER, "print(verify('28783'), {'a': (1, b'x', None)} and 1)\n")[1] == 1
