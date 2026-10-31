@@ -82,6 +82,12 @@ def check_modules(root: Path = ROOT) -> list[str]:
     protocols = [n.name for n in tree.body if isinstance(n, ast.ClassDef) and any(
         isinstance(b, ast.Name) and b.id == "Protocol" for b in n.bases)]  # fmt: skip
     errors = [f"AGENTS.md: port {p} not named" for p in protocols if f"`{p}`" not in top]
+    app_line = next((ln for ln in top.splitlines() if ln.startswith("- `src/claude_duel/app/`")), "")
+    errors += [
+        f"AGENTS.md: app module {m.name} missing from the app summary"
+        for m in sorted((pkg / "app").glob("*.py"))
+        if m.name != "__init__.py" and f"`{m.name}`" not in app_line
+    ]
     for sub in sorted(p for p in pkg.iterdir() if p.is_dir() and not p.name.startswith("__")):
         doc = sub / "AGENTS.md" if (sub / "AGENTS.md").exists() else root / "AGENTS.md"
         text = doc.read_text(encoding="utf-8")

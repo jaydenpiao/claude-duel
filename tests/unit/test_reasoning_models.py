@@ -34,7 +34,7 @@ RESP = {
 
 
 def test_default_model_goes_to_responses_without_temperature() -> None:
-    model = Settings().openai_model
+    model = Settings().default_model("openai")
     assert model.startswith("gpt-5")
     sent: list[httpx.Request] = []
     _provider(model, RESP, sent).complete(REQ)
@@ -70,7 +70,7 @@ def test_chat_reasoning_tokens_parsed() -> None:
         "usage": {"prompt_tokens": 3, "completion_tokens": 20, "completion_tokens_details": {"reasoning_tokens": 12}},
     }
     sent: list[httpx.Request] = []
-    c = _provider("gpt-4.1-nano", chat, sent).complete(REQ)
+    c = _provider("gpt-4o-mini", chat, sent).complete(REQ)
     assert sent[0].url.path.endswith("/chat/completions")
     assert 0 < c.reasoning_tokens <= c.output_tokens
 

@@ -190,6 +190,16 @@ def refuse_superuser(ex: Executor) -> None:
         raise ConfigError("refusing to sync as a superuser or BYPASSRLS role: use a duel_ingest or owner login")
 
 
+def refuse_table_owner(ex: Executor) -> None:
+    """Routine ``duel sync`` must not run as a role that owns a ``duel`` table (it could truncate or drop it);
+    the owner is for ``duel db migrate`` and ``--rebuild`` only."""
+    rows = ex.query(
+        "select exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner"
+    )
+    if not rows or rows[0]["owner"]:
+        raise ConfigError("refusing to sync as a duel table owner: use a duel_ingest login (owner only for --rebuild)")
+
+
 def _quote(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 

@@ -257,7 +257,7 @@ def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
 
 
 def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
-    chosen = model or settings.openai_model
+    chosen = model or settings.default_model("openai")
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
