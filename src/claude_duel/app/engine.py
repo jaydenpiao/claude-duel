@@ -516,9 +516,11 @@ class MatchEngine:
     ) -> tuple[str, str | None, int | None]:
         """Run a solver (same policy and sandbox, empty stdin, 4x time): (its stdout payload, None) or ("", why)."""
         program, cap = solver, state.rules.max_source_bytes(state.round)
+        rejected = None
         if state.rules.challenge_form == "check":
             program, cap = contract.solver_program(source, solver), 2 * cap
-        rejected = policy.check_source(program, cap)  # the whole program that runs, definitions included
+            rejected = solvability.uncounted_path(contract.definitions(source), solver)
+        rejected = rejected or policy.check_source(program, cap)  # the whole program that runs, definitions included
         if rejected:
             return "", f"solver: {rejected}", None
         if tag is not None:  # arena code added after the policy check: counts check() calls (R1)

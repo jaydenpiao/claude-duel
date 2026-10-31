@@ -78,3 +78,31 @@ def test_attacker_solver_shares_the_author_budget(new_state) -> None:  # type: i
     assert MatchEngine._attack_over_budget(state, 200_000) is None
     assert "over budget" in (MatchEngine._attack_over_budget(state, 200_001) or "")
     assert "exited early" in (MatchEngine._attack_over_budget(state, None) or "")
+
+
+HELPER = 'def verify(s):\n    return s == "zq"\n\n\ndef check(s):\n    return verify(s)\n'
+VIA_HELPER = (
+    "import string\nfor a in string.ascii_lowercase:\n    for b in string.ascii_lowercase:\n"
+    "        if verify(a + b):\n            print(a + b)\n"
+)
+ALIAS = 'def check(s):\n    return s == "zq"\n\n\ng = check\n'
+VIA_ALIAS = VIA_HELPER.replace("verify(", "g(")
+
+
+def test_solver_calling_a_helper_is_rejected(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    assert "not verify" in (solvability.uncounted_path(HELPER, VIA_HELPER) or "")
+    state, ch = _run(make_engine, new_state, HELPER, VIA_HELPER)
+    assert not state.validations[ch.id].valid
+    assert any("not verify" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+
+
+def test_source_aliasing_check_is_rejected(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    assert "aliases check" in (solvability.uncounted_path(ALIAS, VIA_ALIAS) or "")
+    state, ch = _run(make_engine, new_state, ALIAS, VIA_ALIAS)
+    assert not state.validations[ch.id].valid
+    assert any("aliases check" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+
+
+def test_solver_may_use_check_mix_and_its_own_imports() -> None:
+    src = "import string\n\n\ndef check(s):\n    return mix(len(s)) > 0 and s in string.ascii_lowercase\n"
+    assert solvability.uncounted_path(src, "import string\nprint(mix(1), check('a'), string.digits)\n") is None

@@ -9,6 +9,7 @@ pass, guessing wins, so the challenge goes back to repair.
 Both counts are written by arena code after a nonce the author never sees, so the solver can't forge them.
 """
 
+import ast
 import hashlib
 import math
 import string
@@ -40,6 +41,50 @@ def counted(source: str, solver: str, tag: str) -> str:
     )
     tail = f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0]) + '\\n')\n"
     return defs + hook + "\n\n" + solver + tail
+
+
+_SOLVER_MAY_LOAD = frozenset({"check", "mix"})
+
+
+def _top_level_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update((a.asname or a.name).split(".")[0] for a in node.names)
+        else:
+            names.update(n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
+    return names
+
+
+def uncounted_path(source: str, solver: str) -> str | None:
+    """Why the solver could reach the author's code without a counted ``check()`` call, or None.
+
+    The solver may load only ``check`` and ``mix`` of the source's top-level names, and the source may use
+    ``check`` only by calling it, so no alias (``g = check``) or helper is an uncounted path.
+    """
+    try:
+        src, sol = ast.parse(source), ast.parse(solver)
+    except SyntaxError:
+        return None  # the policy check reports syntax errors
+    calls = {id(n.func) for n in ast.walk(src) if isinstance(n, ast.Call)}
+    if any(
+        isinstance(n, ast.Name) and n.id == "check" and isinstance(n.ctx, ast.Load) and id(n) not in calls
+        for n in ast.walk(src)
+    ):
+        return "source aliases check(); call it, don't pass it around"
+    loads = {n.id for n in ast.walk(sol) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    imported = {
+        (a.asname or a.name).split(".")[0]
+        for n in ast.walk(sol)
+        if isinstance(n, (ast.Import, ast.ImportFrom))
+        for a in n.names
+    }
+    foreign = sorted((loads & _top_level_names(src)) - _SOLVER_MAY_LOAD - imported)
+    if foreign:
+        return f"solver may call only check() and mix() of your code, not {', '.join(foreign)}"
+    return None
 
 
 def split_count(stdout: str, tag: str) -> tuple[str, int | None]:
