@@ -108,7 +108,7 @@ def test_backup_refuses_a_bad_bucket_or_a_failed_copy(tmp_path: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _private(monkeypatch: pytest.MonkeyPatch) -> None:
+def _bucket_is_private(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backup_mod, "_describe", lambda _: '{"public_access_prevention": "enforced"}')
 
 
