@@ -6,6 +6,7 @@ The engine records an event and applies it; replay folds the same events from sc
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable, Iterable
 from typing import Any, TypeVar, cast
 
@@ -82,6 +83,7 @@ class _Payload(BaseModel):
 
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
+    python: str = ""  # interpreter version that parsed sources for heat (ast is version-pinned); absent before heat
     framing_text: str = ""  # absent before framings
     created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
@@ -200,6 +202,7 @@ class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
     points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
+    heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
 
 
 class FindingFlagged(_Payload):
@@ -350,6 +353,7 @@ def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
         "seed": state.seed,
+        "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
