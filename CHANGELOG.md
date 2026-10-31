@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `scoring = "ledger"` refused until the arena wiring lands (#208).
+- `gpt-4.1-nano` dropped from the allowlist; gpt-5-nano is the low default (#209).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 
 ### Added
@@ -21,6 +23,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
+- Results index on Cloud SQL: `duel sync`, `duel db migrate` and `duel export` (ADR 0012, #151).
+- Provider registry: vendors declared once, shared HTTP error mapping, Anthropic adapter (ADR 0013, #154).
+- SECURITY.md interim private contact (#215).
 
 ### Changed
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
