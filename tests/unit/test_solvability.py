@@ -7,7 +7,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.domain import solvability
 from claude_duel.domain.models import SolvabilityRule
 from claude_duel.domain.modes import preset
-from tests.unit.test_flag_independence import ONE, Builds
+from tests.helpers import ONE, Builds
 
 SPARSE = "def check(s):\n    return len(s) == 5 and s.isdigit() and int(s) == 28783\n"
 SEARCH = "for n in range(100000):\n    if check(str(n).zfill(5)):\n        print(str(n).zfill(5))\n        break\n"
