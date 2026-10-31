@@ -28,7 +28,7 @@ duel estimate [--mode capped]       # offline worst-case $ per match for each pr
 duel resume demo                    # continue a crashed or aborted match
 duel db migrate                     # apply results-DB migrations (MIGRATE_DATABASE_URL, owner; forward-only)
 duel sync [--rebuild]               # load verified event logs into the results DB (DATABASE_URL, ADR 0012)
-duel export [--out public.json]     # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
+duel export [--out llm-duels-export.json] # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
@@ -110,7 +110,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 | `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
 
-`OPENAI_API_KEY`, `DATABASE_URL` (a `duel_ingest` login for `duel sync`; must use `sslmode=require` or stricter for a non-local host; superuser/BYPASSRLS roles are refused), `MIGRATE_DATABASE_URL` (the schema owner, for `duel db migrate` and `duel sync --rebuild`; falls back to `DATABASE_URL`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed.
+`OPENAI_API_KEY`, `DATABASE_URL` (a `duel_ingest` login for `duel sync`; must use `sslmode=require` or stricter for a non-local host; superuser/BYPASSRLS roles are refused), `MIGRATE_DATABASE_URL` (the schema owner, for `duel db migrate` and `duel sync --rebuild`; falls back to `DATABASE_URL`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed. `sync`, `db migrate` and `export` need the `db` extra (`pip install claude-duel[db]`, psycopg); the base install and image ship without it.
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
