@@ -1,6 +1,7 @@
 """Flag derivation, leak guards and the one shared redactor (``scrub``)."""
 
 import base64
+import codecs
 import hashlib
 import hmac
 import re
@@ -10,6 +11,13 @@ from claude_duel.domain.errors import FlagLeakError
 
 FLAG_PATTERN = re.compile(r"DUEL\{[0-9a-f]{8,64}\}")
 REDACTED = "DUEL{<redacted>}"
+# Flag-shaped text in forms the literal pattern misses, for checks that don't know the flag (``duel sync`` on old
+# logs): rot13 (``QHRY{...}``, hex a-f becomes n-s) and decimal byte lists (``68,85,69,76,123,...``).
+_DEC_SEP = r"[^0-9]{1,3}"
+ENCODED_FLAG_PATTERNS = (
+    re.compile(r"(?i)QHRY\{[0-9n-s]{8,64}\}"),
+    re.compile(_DEC_SEP.join(("68", "85", "69", "76", "123")) + rf"(?:{_DEC_SEP}[0-9]{{2,3}}){{8,65}}"),
+)
 # Key-, token- and secret-shaped text: OpenAI keys, ``api_key=...``/``authorization: ...``, long hex runs.
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
@@ -40,6 +48,7 @@ def _texts(flag: str) -> tuple[list[str], list[str]]:
     inner = _inner(flag)
     parts = [inner[i : i + MIN_PART] for i in range(0, len(inner) - MIN_PART + 1, MIN_PART)]
     loose = [flag, inner, flag[::-1], inner[::-1], flag.encode().hex(), *parts, *(p[::-1] for p in parts)]
+    loose += [codecs.encode(t, "rot13") for t in (flag, inner)]
     strict = [
         enc(raw.encode()).decode().rstrip("=")
         for raw in (flag, inner)
@@ -88,8 +97,8 @@ def _canonical_leak(text: str, flag: str) -> bool:
 
 
 def assert_no_flag(text: str, flag: str, where: str) -> None:
-    """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, case-changed, spaced, split
-    (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes."""
+    """Raise if ``flag`` or a derived form is in text: reversed, hex, base64/32, rot13, case-changed,
+    spaced, split (also with alphanumeric joiners or interleaved filler), shifted, XOR-hex or as decimal codes."""
     if flag in text or _variant_pattern(flag).search(text) or _canonical_leak(text, flag):
         raise FlagLeakError(f"flag would leak via {where}")
 
@@ -99,7 +108,14 @@ def redact(text: str, flags: tuple[str, ...] = ()) -> str:
         text = _variant_pattern(f).sub(REDACTED, text.replace(f, REDACTED))
         if _canonical_leak(text, f):
             return REDACTED  # an encoding with no clean span to cut out; withhold the whole text
-    return FLAG_PATTERN.sub(REDACTED, text)
+    for pat in (FLAG_PATTERN, *ENCODED_FLAG_PATTERNS):
+        text = pat.sub(REDACTED, text)
+    return text
+
+
+def flag_shaped(text: str) -> bool:
+    """Whether text holds anything shaped like a flag, plain or encoded, without knowing the flag."""
+    return any(p.search(text) for p in (FLAG_PATTERN, *ENCODED_FLAG_PATTERNS))
 
 
 def scrub(text: str, flags: tuple[str, ...] = ()) -> str:
