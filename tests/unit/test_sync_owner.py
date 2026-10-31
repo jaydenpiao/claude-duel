@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from claude_duel.adapters.store.postgres import refuse_table_owner
+from claude_duel.adapters.store.results_sql import refuse_table_owner
 from claude_duel.domain.errors import ConfigError
 
 
@@ -15,12 +15,9 @@ class _Conn:
         self.owner = owner
         self.sql = ""
 
-    def execute(self, sql: str, *_: Any) -> _Conn:
+    def query(self, sql: str, *_: Any) -> list[dict[str, bool]]:
         self.sql = sql
-        return self
-
-    def fetchone(self) -> dict[str, bool]:
-        return {"owner": self.owner}
+        return [{"owner": self.owner}]
 
 
 def test_table_owner_is_refused() -> None:
