@@ -1,6 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.models import ClockRule, Rules, ScoringRule, SolvabilityRule, WalletRule
+from claude_duel.domain.models import ClockRule, LedgerRule, MemoryRule, Rules, ScoringRule, SolvabilityRule, WalletRule
 
 MODES: dict[str, Rules] = {
     "classic": Rules(),
@@ -27,6 +27,16 @@ MODES: dict[str, Rules] = {
     "capped": Rules(mode="capped", wallet=WalletRule(per_agent_tokens=30_000)),
     "blitz": Rules(
         mode="blitz", clock=ClockRule(bank_tokens=40_000, increment_tokens=500), scoring=ScoringRule(kind="timed")
+    ),
+    # Sealed Ledger step 2 (design-core-logic.md): stakes + ledger scorer; keystone and terrain come in step 3.
+    "ledger": Rules(
+        mode="ledger",
+        challenges_per_round=3,
+        max_attempts=3,
+        scoring=ScoringRule(kind="ledger"),
+        ledger=LedgerRule(),
+        clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
+        memory=MemoryRule(kind="summary"),
     ),
 }
 
