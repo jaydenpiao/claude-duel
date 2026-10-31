@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
+
 import httpx
 import pytest
 
+from claude_duel import config
 from claude_duel.adapters.providers.anthropic import AnthropicProvider
 from claude_duel.adapters.providers.http import raise_for_status
 from claude_duel.adapters.providers.openai import OpenAIProvider
-from claude_duel.adapters.providers.registry import VENDORS
+from claude_duel.adapters.providers.registry import FACTORIES
+from claude_duel.app import budget
 from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, vendor_of
 from claude_duel.app.container import make_provider
 from claude_duel.config import load_settings
+from claude_duel.domain import vendors
 from claude_duel.domain.errors import (
     ConfigError,
     PermanentProviderError,
@@ -20,6 +26,7 @@ from claude_duel.domain.errors import (
     TransientProviderError,
 )
 from claude_duel.domain.models import AgentSpec
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import InMemoryMetrics
 
 
@@ -90,3 +97,12 @@ def test_make_provider_rejects_unknown_provider_and_missing_key() -> None:
 def test_model_env_override_is_generated_per_vendor() -> None:
     settings = load_settings(None, env={"DUEL_OPENAI_MODEL": "gpt-6-luna", "OPENAI_API_KEY": "k"})
     assert settings.model_for(AgentSpec(name="a", provider="openai")) == "gpt-6-luna"
+
+
+def test_every_vendor_has_a_factory_and_metadata_imports_no_adapter() -> None:
+    assert set(FACTORIES) == set(VENDORS)
+    for mod in (vendors, budget, config):
+        imported = [
+            n.module or "" for n in ast.walk(ast.parse(inspect.getsource(mod))) if isinstance(n, ast.ImportFrom)
+        ]
+        assert not any(m.startswith("claude_duel.adapters") for m in imported), mod.__name__
