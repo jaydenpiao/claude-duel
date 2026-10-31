@@ -13,11 +13,42 @@ from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import heat
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
-from claude_duel.domain.models import MatchState
+from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, Metrics
+from claude_duel.ports import EventObserver, MatchStore, Metrics
 
 _LOG = logging.getLogger(__name__)
+
+
+def open_match(
+    store: MatchStore,
+    settings: Settings,
+    match_id: str,
+    *,
+    agents: tuple[AgentSpec, ...] | None = None,
+    seed: str | None = None,
+    warn_drift: bool = True,
+) -> MatchState:
+    """Load or create a match. New matches pin ``framing_text`` from the current framing rule."""
+    try:
+        state = store.load(match_id)
+    except MatchNotFoundError:
+        state = MatchState(
+            match_id=match_id,
+            secret=secrets.token_hex(32),
+            framing_text=framing_text(settings.rules.framing),
+            seed=seed if seed is not None else (settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16]),
+            agents=agents if agents is not None else pin_agents(settings),
+            rules=settings.rules,
+            limits=settings.limits,
+        )
+        if settings.rules.ledger is not None and settings.rules.ledger.heat_window:
+            state.heat_refs = heat.history_refs(_history(settings, match_id), state.agents)
+        store.save(state)
+    else:
+        if warn_drift:
+            _warn_on_drift(settings, state)
+    return state
 
 
 def play(
@@ -34,23 +65,7 @@ def play(
     """
     store = build_store(settings)
     with store.lock(match_id):
-        try:
-            state = store.load(match_id)
-        except MatchNotFoundError:
-            state = MatchState(
-                match_id=match_id,
-                secret=secrets.token_hex(32),
-                framing_text=framing_text(settings.rules.framing),
-                seed=settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16],
-                agents=pin_agents(settings),
-                rules=settings.rules,
-                limits=settings.limits,
-            )
-            if settings.rules.ledger is not None and settings.rules.ledger.heat_window:
-                state.heat_refs = heat.history_refs(_history(settings, match_id), state.agents)
-            store.save(state)
-        else:
-            _warn_on_drift(settings, state)
+        state = open_match(store, settings, match_id)
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)

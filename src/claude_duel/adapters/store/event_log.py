@@ -41,8 +41,9 @@ class FileEventLog:
         with jsonl.locked(self._path(match_id), exclusive=True) as fd:
             lines, end = jsonl.read_complete(fd)
             jsonl.truncate_torn_tail(fd, end)  # a torn, never-acknowledged write is dropped
-            events, prev = _verify(lines)
-            expected = events[-1].seq + 1 if events else 0
+            chain = _verify(lines)
+            prev = chain[-1][0] if chain else GENESIS
+            expected = len(chain)
             if event.seq != expected:
                 raise EventLogCorruptError(f"event seq {event.seq} != expected {expected}")
             if event.seq == 0 and event.type == "match_created" and "created_seq" not in event.data:
@@ -63,16 +64,20 @@ class FileEventLog:
         return sorted(p.name[: -len(self._suffix)] for p in self._root.glob(f"*{self._suffix}"))
 
     def read(self, match_id: str) -> list[Event]:
+        return [event for _, event in self.chain(match_id)]
+
+    def chain(self, match_id: str) -> list[tuple[str, Event]]:
+        """Verified ``(hash, event)`` pairs in order; ``duel sync`` keys rows on the hash."""
         path = self._path(match_id)
         if not path.exists():
             return []
         with jsonl.locked(path, exclusive=False) as fd:
             lines, _ = jsonl.read_complete(fd)
-        return _verify(lines)[0]
+        return _verify(lines)
 
 
-def _verify(lines: list[bytes]) -> tuple[list[Event], str]:
-    events: list[Event] = []
+def _verify(lines: list[bytes]) -> list[tuple[str, Event]]:
+    chain: list[tuple[str, Event]] = []
     prev = GENESIS
     for n, raw in enumerate(lines):
         try:
@@ -82,6 +87,6 @@ def _verify(lines: list[bytes]) -> tuple[list[Event], str]:
             raise EventLogCorruptError(f"unreadable event line {n}") from exc
         if record.get("prev") != prev or record.get("hash") != _digest(prev, event) or event.seq != n:
             raise EventLogCorruptError(f"hash chain broken at event {n}")
-        events.append(event)
         prev = record["hash"]
-    return events, prev
+        chain.append((prev, event))
+    return chain
