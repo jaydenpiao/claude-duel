@@ -227,6 +227,8 @@ MAX_PARAMS = 65_535  # Postgres bind-parameter limit per statement
 
 def insert_rows(table: str, key: str | None, rows: Sequence[object], prefix: Sequence[object] = ()) -> list[Stmt]:
     """Insert statements for every row, chunked under ``MAX_PARAMS`` (``prefix`` values go first, e.g. a run id)."""
+    if not rows:
+        return []
     cols = columns(rows[0])
     names = [*(["sync_run_id"] if prefix else []), *cols]
     per = MAX_PARAMS // len(names)
