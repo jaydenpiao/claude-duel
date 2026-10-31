@@ -7,7 +7,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.domain import solvability
 from claude_duel.domain.models import SolvabilityRule
 from claude_duel.domain.modes import preset
-from tests.unit.test_flag_independence import ONE, Builds
+from tests.helpers import ONE, Builds
 
 SPARSE = "def check(s):\n    return len(s) == 5 and s.isdigit() and int(s) == 28783\n"
 SEARCH = "for n in range(100000):\n    if check(str(n).zfill(5)):\n        print(str(n).zfill(5))\n        break\n"
@@ -111,3 +111,38 @@ def test_solver_may_not_alias_or_get_a_closure() -> None:
 def test_solver_may_use_check_mix_and_its_own_imports() -> None:
     src = "import string\n\n\ndef check(s):\n    return mix(len(s)) > 0 and s in string.ascii_lowercase\n"
     assert solvability.uncounted_path(src, "import string\nprint(mix(1), check('a'), string.digits)\n") is None
+
+
+FIRST = SPARSE + "\n\ndef first(xs):\n    for x in xs:\n        if x:\n            return x\n    return None\n"
+VIA_FIRST = "print(first(str(n).zfill(5) if check(str(n).zfill(5)) else None for n in range(100000)))\n"
+RUN = SPARSE + "\n\ndef run(f):\n    return f()\n"
+VIA_RUN = "def solve():\n" + "".join("    " + line + "\n" for line in SEARCH.splitlines()) + "print(run(solve))\n"
+PICK = SPARSE + "\n\ndef pick(xs, key):\n    for x in xs:\n        if key(x):\n            return x\n    return None\n"
+VIA_PICK = "print(pick([str(n).zfill(5) for n in range(100000)], lambda s: check(s)))\n"
+
+
+def _counted_run(source: str, solver: str) -> tuple[str, int | None]:
+    import contextlib
+    import io
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        try:
+            exec(solvability.counted(source, solver, "Ntag"), {"__name__": "__main__"})  # noqa: S102
+        except TypeError as e:
+            return f"TypeError: {e}", None
+    return solvability.split_count(out.getvalue(), "Ntag")
+
+
+def test_lazy_or_callable_arguments_cannot_hide_a_brute_force() -> None:
+    for source, solver in ((FIRST, VIA_FIRST), (RUN, VIA_RUN), (PICK, VIA_PICK)):
+        assert solvability.uncounted_path(source, solver) is None
+        out, n = _counted_run(source, solver)
+        assert n is None and "plain data" in out, (solver, out, n)
+
+
+def test_plain_data_arguments_still_work_and_check_counts_at_any_depth() -> None:
+    src = SPARSE + "\n\ndef scan(xs):\n    return [x for x in xs if check(x)]\n"
+    out, n = _counted_run(src, "print(scan([str(n).zfill(5) for n in range(28780, 28790)]))\n")
+    assert out.strip() == "['28783']" and n == 10
+    assert _counted_run(HELPER, "print(verify('28783'), {'a': (1, b'x', None)} and 1)\n")[1] == 1

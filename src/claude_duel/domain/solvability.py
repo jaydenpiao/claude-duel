@@ -35,7 +35,9 @@ def nonce(secret: str, cid: str, purpose: str) -> str:
 
 def counted(source: str, solver: str, tag: str) -> str:
     """The solver program with every call into the author's top-level functions counted (``check`` and helpers
-    alike; calls made inside a counted call are free). The count is written last, after ``tag``."""
+    alike; ``check`` is counted at any depth (the first
+    one inside a counted call is covered by it), helpers only when the solver calls them, and only plain-data
+    arguments may cross into author code). The count is written last, after ``tag``."""
     defs = with_mix(source).rstrip()
     try:
         tree = ast.parse(definitions(source))
@@ -43,13 +45,26 @@ def counted(source: str, solver: str, tag: str) -> str:
     except SyntaxError:
         funcs = ["check"]
     hook = (
-        "\n\n_arena_calls = [0]\n_arena_depth = [0]\n"
-        "def _arena_count(f):\n"
+        "\n\n_arena_calls = [0]\n_arena_depth = [0]\n_arena_inner = [0]\n"
+        "_arena_type = ().__class__.__class__\n"
+        "def _arena_plain(v):\n"
+        "    if v is None or _arena_type(v) in (str, bytes, int, float, bool):\n        return True\n"
+        "    if _arena_type(v) in (list, tuple):\n        return all(_arena_plain(x) for x in v)\n"
+        "    if _arena_type(v) is dict:\n"
+        "        return all(_arena_plain(x) and _arena_plain(y) for x, y in v.items())\n"
+        "    return False\n"
+        "def _arena_count(f, always=False):\n"
         "    def counted(*a, **k):\n"
-        "        if _arena_depth[0]:\n            return f(*a, **k)\n"
-        "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n"
+        "        if _arena_depth[0]:\n"
+        "            if always:\n                _arena_inner[0] += 1\n"
+        "                if _arena_inner[0] > 1:\n                    _arena_calls[0] += 1\n"
+        "            return f(*a, **k)\n"
+        "        if not all(_arena_plain(x) for x in a) or not all(_arena_plain(x) for x in k.values()):\n"
+        "            raise TypeError('author functions take plain data only')\n"
+        "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n        _arena_inner[0] = 0\n"
         "        try:\n            return f(*a, **k)\n        finally:\n            _arena_depth[0] = 0\n"
-        "    return counted\n" + "".join(f"{name} = _arena_count({name})\n" for name in funcs)
+        "    return counted\n"
+        + "".join(f"{name} = _arena_count({name}, {name == 'check'})\n" for name in funcs)
     )
     tail = f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0]) + '\\n')\n"
     return defs + hook + "\n\n" + solver + tail
