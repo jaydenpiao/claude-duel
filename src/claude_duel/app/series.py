@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from claude_duel.app.budget import CostBudget
@@ -10,21 +9,20 @@ from claude_duel.app.container import (
     build_budget,
     build_driver_lock,
     build_event_log,
-    build_ledger,
     build_series_log,
     build_store,
     pin_agents,
 )
+from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings
 from claude_duel.domain import series as sr
-from claude_duel.domain.errors import BudgetExceededError
-from claude_duel.domain.models import Event, Rules, SandboxLimits, Stage
-from claude_duel.observability import log
+from claude_duel.domain.models import Stage
 from claude_duel.ports import EventObserver, Metrics
 
-_LOG = logging.getLogger(__name__)
+# A CAPPED game is terminal (ADR 0014): recorded void (or on partial scores), never resumed or replayed.
+_COUNTED = frozenset({Stage.COMPLETE, Stage.CAPPED})
 
 
 def play_series(
@@ -50,18 +48,20 @@ def _play_series(
     budget: CostBudget | None,
     caps: tuple[SpendCap, ...],
 ) -> sr.SeriesState:
-    log = build_series_log(settings)
-    events = log.read(series_id)
-    if not events:
-        data: dict[str, object] = {
+    event_log = build_series_log(settings)
+    events = open_or_create(
+        event_log,
+        series_id,
+        schema_version=sr.SERIES_SCHEMA_VERSION,
+        created_type=sr.SERIES_CREATED,
+        data={
             "seed": settings.seed or sr.game_seed(series_id, 0),
             "rule": rule.model_dump(mode="json"),
             "agents": [a.model_dump(mode="json") for a in pin_agents(settings)],
             "rules": settings.rules.model_dump(mode="json"),
             "limits": settings.limits.model_dump(mode="json"),
-        }
-        events = [Event(v=sr.SERIES_SCHEMA_VERSION, seq=0, type=sr.SERIES_CREATED, trace_id=series_id, data=data)]
-        log.append(series_id, events[0])
+        },
+    )
     state = sr.fold(series_id, events)
     settings = pinned(settings, state.rules, state.limits, series_id)
     budget = budget or build_budget(settings)  # one run budget across every game of this invocation
@@ -72,48 +72,27 @@ def _play_series(
             update={"agents": sr.game_agents(state.agents, n), "seed": sr.game_seed(state.seed, n)}
         )
         match = play(game_settings, state.game_id(n), metrics, observer, budget)
-        if match.stage is not Stage.COMPLETE:
+        if match.stage not in _COUNTED:
             return state  # failed game: `duel series` again resumes it
         decider = None
-        if state.rule.sudden_death and sr.game_winner(match) is None:
+        if match.stage is Stage.COMPLETE and state.rule.sudden_death and sr.game_winner(match) is None:
             decider_settings = game_settings.model_copy(
                 update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
             )
             decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget)
-            if decider.stage is not Stage.COMPLETE:
+            if decider.stage not in _COUNTED:
                 return state
         game = sr.game_of(n, match, decider)
-        log.append(
+        append(
+            event_log,
             series_id,
-            Event(v=sr.SERIES_SCHEMA_VERSION, seq=n, type=sr.GAME_FINISHED, trace_id=series_id, data=game.model_dump()),
+            schema_version=sr.SERIES_SCHEMA_VERSION,
+            seq=n,
+            event_type=sr.GAME_FINISHED,
+            data=game.model_dump(),
         )
         state.games.append(game)
     return state
-
-
-def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None, log_id: str) -> Settings:
-    """Settings with the rules and limits pinned when the series/tournament was created; warns on config drift."""
-    rules, limits = rules or settings.rules, limits or settings.limits
-    if (rules, limits) != (settings.rules, settings.limits):
-        log(_LOG, logging.WARNING, "config differs from the saved series; resuming with the saved rules", id=log_id)
-    return settings.model_copy(update={"rules": rules, "limits": limits})
-
-
-@dataclass(frozen=True)
-class SpendCap:
-    """a spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
-
-    label: str
-    prefix: str
-    max_usd: float
-
-
-def check_caps(settings: Settings, caps: tuple[SpendCap, ...]) -> None:
-    ledger = build_ledger(settings)
-    for cap in caps:
-        spent = ledger.spent_usd(cap.prefix)
-        if spent >= cap.max_usd:
-            raise BudgetExceededError(f"{cap.label} cost ${spent:.4f}/${cap.max_usd}")
 
 
 @dataclass(frozen=True)

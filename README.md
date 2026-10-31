@@ -26,10 +26,13 @@ duel tournament                     # round robin (<= 6) or Swiss over the confi
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match
 duel estimate [--mode capped]       # offline worst-case $ per match for each preset (no API calls)
 duel resume demo                    # continue a crashed or aborted match
+duel db migrate                     # apply results-DB migrations (MIGRATE_DATABASE_URL, owner; forward-only)
+duel sync [--rebuild]               # load verified event logs into the results DB (DATABASE_URL, ADR 0012)
+duel export [--out public.json]     # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
-To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-4.1-nano`).
+To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`).
 
 ## Architecture
 ```mermaid
@@ -54,11 +57,11 @@ flowchart LR
   OB --> PR[presentation:<br/>arena, commentary]
   EL --> RP[replay + card]
 ```
-Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
+Lifecycle: `pending → build → validate → attack → score → (build | complete)`, and any stage can go to `failed`, which `resume` recovers from. A match-scoped cap (`match_max_usd`/`_tokens`/`_calls`) instead ends the match in the terminal stage `capped`, naming the agent whose call crossed it; `resume` is a no-op, the CLI exits 3, a series with a capped game ends void (or counts its scored rounds with `scoring.on_cap = "partial"`), and ratings exclude it ([ADR 0014](docs/adr/0014-match-caps.md)). Run and lifetime caps still fail resumably (exit 2). See the [design docs](docs/design/README.md), [docs/design.md](docs/design.md), [requirements](docs/requirements.md) and the [ADRs](docs/adr).
 
 ## Cost controls
 - Code-defined allowlist of low-cost models (`app/budget.py:DEFAULT_PRICES`); config cannot add models or change prices.
-- Per-match caps (calls, tokens, USD; $0.25 dev / $0.50 staging / $1.00 prod), per-run caps, and a persistent ledger (`.duel/ledger.jsonl`) with a $40 lifetime ceiling. Once that ceiling is hit, new work is refused.
+- Per-match caps (calls, tokens, USD; $0.25 dev / $0.50 staging / $1.00 prod), per-run caps, and a persistent ledger (`.duel/ledger.jsonl`) with a $33 lifetime ceiling. Once that ceiling is hit, new work is refused.
 - A provider `insufficient_quota` error is never retried. The match fails cleanly and can be resumed later.
 
 ## Threat model
@@ -72,6 +75,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
+| Secrets reaching the results DB or a public page | `duel sync` never opens `*.secret`, stores only an allowlist of event fields (no source, payloads, solver output, notes, flags) run through `scrub`; `duel export` reads only `public_v` views as `duel_exporter` (read-only, no owner/writer rights, refused otherwise), keeps whitelisted columns and scans the result before writing. The database is not exposed publicly in v1 (ADR 0012) |
+
+**Experiments:** `duel experiment stakes --prereg docs/runs/stakes-prereg.md --seeds N` plays paired framing micro-matches (neutral, competitive, survival per seed) under one shared run cap. `--run-max-usd X --override-reason "..."` raises `run_max_usd` for that run only (ceiling $2.00, never below the default, within the lifetime cap); it is logged as a WARNING, recorded as a `budget_overridden` event and a $0 ledger row, and shown in the output. There is no config key or env var for it; see the stakes-modes design spec (design-stakes-modes.md).
 
 **Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. Every call is budget-capped and ledgered like a match; see [docs/design/benchmark.md](docs/design/benchmark.md).
 
@@ -84,9 +90,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_SANDBOX` | `sandbox` (`auto`/`docker`/`subprocess`) | `auto` |
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
-| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-4.1-nano` |
+| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
-| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-4.1-nano` |
+| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-5-nano` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
@@ -99,15 +105,15 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_MATCH_MAX_CALLS` | `[budget] match_max_calls` | 80 |
 | `DUEL_MATCH_MAX_TOKENS` | `[budget] match_max_tokens` | 150000 |
 | `DUEL_RUN_MAX_CALLS` | `[budget] run_max_calls` | 200 |
-| `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 40 |
+| `DUEL_LIFETIME_MAX_USD` | `[budget] lifetime_max_usd` (ledger ceiling, must stay <= the $50 key limit) | 33 |
 | `DUEL_DOCKER` | docker command, e.g. `"sudo docker"` | `docker` |
 | `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 | `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
 
-`OPENAI_API_KEY` is read from the environment only.
+`OPENAI_API_KEY`, `DATABASE_URL` (a `duel_ingest` login for `duel sync`; must use `sslmode=require` or stricter for a non-local host; superuser/BYPASSRLS roles are refused), `MIGRATE_DATABASE_URL` (the schema owner, for `duel db migrate` and `duel sync --rebuild`; falls back to `DATABASE_URL`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed.
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
-`gpt-5-nano` (0.05/0.40), `gpt-4.1-nano` (0.10/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
+`gpt-5-nano` (0.05/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
 `gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
 Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `gpt-6-astra` (10/50). Prices pinned 2026-10-22 from https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing.
 

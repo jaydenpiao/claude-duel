@@ -40,7 +40,7 @@ def test_health_refuses_an_unpinned_image(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_release_build_pulls_fresh_and_skips_cache() -> None:
-    """S4-3: the published image never reuses a base or layer cache a branch job could have seeded."""
+    """The published image never reuses a base or layer cache a branch job could have seeded (#155)."""
     builds = [ln for ln in (ROOT / ".github/workflows/release.yml").read_text().splitlines() if "docker build" in ln]
     assert builds
     assert all("--pull" in ln and "--no-cache" in ln for ln in builds)

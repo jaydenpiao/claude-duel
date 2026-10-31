@@ -119,14 +119,14 @@ def test_crash_recovery_is_idempotent(make_engine, new_state, store, event_log) 
 
 
 def test_budget_breaker_trips(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
-    with pytest.raises(BudgetExceededError, match="match calls"):
-        make_engine(budget=BudgetLimits(match_max_calls=3)).run(new_state())
+    with pytest.raises(BudgetExceededError, match="run calls"):  # run caps fail resumably; match caps cap (ADR 0014)
+        make_engine(budget=BudgetLimits(run_max_calls=3)).run(new_state())
     assert store.load("m1").stage is Stage.FAILED
 
 
 def test_lifetime_ledger_refuses_new_matches(tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
     ledger = FileSpendLedger(tmp_path / "ledger.jsonl")
-    ledger.record("old", "gpt-4.1-nano", 10, 40.0)
+    ledger.record("old", "gpt-4o-mini", 10, 40.0)
     with (tmp_path / "ledger.jsonl").open("a") as fh:
         fh.write('{"torn": ')
     assert FileSpendLedger(tmp_path / "ledger.jsonl").total_usd() == 40.0
@@ -148,11 +148,11 @@ def test_paid_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # type: ig
     ledger = FileSpendLedger(tmp_path / "l.jsonl")
     budget = CostBudget(BudgetLimits(), ledger, DEFAULT_PRICES)
     state = new_state()
-    usd = budget.charge(state.match_id, "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
-    assert usd == pytest.approx(0.10)
-    assert json.loads((tmp_path / "l.jsonl").read_text())["model"] == "gpt-4.1-nano"
+    usd = budget.charge(state.match_id, "gpt-4o-mini", Completion(text="", input_tokens=1_000_000, output_tokens=0))
+    assert usd == pytest.approx(0.15)
+    assert json.loads((tmp_path / "l.jsonl").read_text())["model"] == "gpt-4o-mini"
     run_budget = CostBudget(BudgetLimits(run_max_usd=0.05), ledger, DEFAULT_PRICES)
-    run_budget.charge("x", "gpt-4.1-nano", Completion(text="", input_tokens=1_000_000, output_tokens=0))
+    run_budget.charge("x", "gpt-4o-mini", Completion(text="", input_tokens=1_000_000, output_tokens=0))
     with pytest.raises(BudgetExceededError, match="run cost"):
         run_budget.check(new_state("y"))
 

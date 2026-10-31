@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.docker_sandbox import docker_probe
@@ -19,6 +20,10 @@ from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimit
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import EventObserver, LLMProvider
 from tests.helpers import any_source
+
+# No per-example deadline: a loaded CI box made property tests flaky (DeadlineExceeded), not slow code.
+settings.register_profile("duel", deadline=None)
+settings.load_profile("duel")
 
 AGENTS = (AgentSpec(name="alice", skill=2), AgentSpec(name="bob", skill=5))
 
@@ -97,3 +102,13 @@ def docker_cmd() -> tuple[str, ...]:
     if os.environ.get("DUEL_REQUIRE_DOCKER") == "1":
         pytest.fail("DUEL_REQUIRE_DOCKER=1 but no usable docker: " + "; ".join(reasons), pytrace=False)
     pytest.skip("docker daemon not reachable")
+
+
+_REAL_DB_VARS = ("DATABASE_URL", "MIGRATE_DATABASE_URL", "EXPORT_DATABASE_URL")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A developer's real results-db URLs must never reach a test; tests use DUEL_TEST_DATABASE_URL."""
+    for var in _REAL_DB_VARS:
+        monkeypatch.delenv(var, raising=False)

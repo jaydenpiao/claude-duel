@@ -45,6 +45,14 @@ class BudgetExceededError(DuelError):
     """Arena cost circuit breaker tripped."""
 
 
+class MatchCapError(BudgetExceededError):
+    """A match-scoped cap (calls, tokens or $) was reached: the match ends ``CAPPED`` (ADR 0014)."""
+
+    def __init__(self, limit: str, spent: float, cap: float) -> None:
+        super().__init__(f"budget exceeded: {limit.replace('_', ' ')} {spent:g}/{cap:g}")
+        self.limit, self.spent, self.cap = limit, spent, cap
+
+
 class MalformedOutputError(DuelError):
     """Model output could not be parsed."""
 
@@ -79,3 +87,15 @@ class DeadlineExceededError(DuelError):
 
 class WalletEmptyError(DuelError):
     """An agent's per-match wallet (``rules.wallet``) is spent; its builds forfeit and its attacks stop."""
+
+
+class HistoryRewrittenError(DuelError):
+    """``duel sync`` found an event hash in the results database that its log no longer has; it halts (ADR 0012)."""
+
+
+class ReplayMismatchError(DuelError):
+    """A match's snapshot does not match the replay of its event log (``duel sync`` rejects it)."""
+
+
+class ResultsDbError(DuelError):
+    """A results database operation failed; the message carries the error class and SQLSTATE only."""
