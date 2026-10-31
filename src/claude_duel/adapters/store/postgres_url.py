@@ -52,14 +52,19 @@ def _params(url: str) -> dict[str, str]:
 def require_tls(url: str, env: Mapping[str, str] | None = None) -> None:
     """Refuse a non-local host unless ``sslmode`` is require or stricter (libpq's default ``prefer`` downgrades).
 
-    Loopback hosts and unix sockets (``/path`` hosts) are exempt. Neither the URL nor a parser message is echoed.
+    Loopback hosts and unix sockets (``/path`` hosts) are exempt. ``hostaddr``/PGHOSTADDR, when set, is the address
+    libpq dials, so it is checked instead of ``host``. ``service``, PGSERVICE and PGSERVICEFILE are refused because
+    pg_service.conf could supply a host and sslmode this check never sees. Neither the URL nor a parser message is echoed.
     """
     env = os.environ if env is None else env
     try:
         info = _params(url)
     except ValueError:
         raise ConfigError("the results database URL is malformed") from None
-    hosts = (info.get("host") or env.get("PGHOST", "")).split(",")
+    if info.get("service") or env.get("PGSERVICE") or env.get("PGSERVICEFILE"):
+        raise ConfigError("the results database URL may not use a libpq service (service, PGSERVICE, PGSERVICEFILE)")
+    addr = info.get("hostaddr") or env.get("PGHOSTADDR", "")
+    hosts = (addr or info.get("host") or env.get("PGHOST", "")).split(",")
     remote = [h for h in hosts if h.strip() not in _LOCAL_HOSTS and not h.startswith("/")]
     mode = info.get("sslmode") or env.get("PGSSLMODE", "prefer")
     if remote and mode not in _TLS_MODES:

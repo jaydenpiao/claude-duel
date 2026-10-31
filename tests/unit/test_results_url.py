@@ -64,3 +64,24 @@ def test_config_has_no_neon_transport() -> None:
 
     settings = load_settings(None, {"DUEL_RESULTS_BACKEND": "neon-http"})
     assert not hasattr(settings, "results_backend")
+
+
+@pytest.mark.parametrize(
+    ("url", "env"),
+    [
+        ("postgresql://u@localhost/duel?hostaddr=203.0.113.9&sslmode=disable", {}),
+        ("host=localhost hostaddr=203.0.113.9 dbname=duel sslmode=disable", {}),
+        ("postgresql:///duel?service=prod", {}),
+        ("postgresql://u@localhost/duel", {"PGHOSTADDR": "203.0.113.9"}),
+        ("postgresql://u@localhost/duel", {"PGSERVICE": "prod"}),
+        ("postgresql://u@localhost/duel", {"PGSERVICEFILE": "/tmp/pg_service.conf"}),
+    ],
+)
+def test_hostaddr_and_service_cannot_skip_tls(url: str, env: dict[str, str]) -> None:
+    with pytest.raises(ConfigError):
+        require_tls(url, env)
+
+
+def test_loopback_hostaddr_and_tls_hostaddr_are_fine() -> None:
+    require_tls("postgresql://u@db.example.com/duel?hostaddr=127.0.0.1", {})
+    require_tls("postgresql://u@localhost/duel?hostaddr=203.0.113.9&sslmode=require", {})
