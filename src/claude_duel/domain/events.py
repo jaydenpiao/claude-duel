@@ -46,6 +46,7 @@ ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
 BUDGET_OVERRIDDEN = "budget_overridden"
+STAKES_SET = "stakes_set"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -159,6 +160,15 @@ class NoteRecorded(_Payload):
     text: str
 
 
+class StakesSet(_Payload):
+    """An attacker's settled ledger stakes for one round; ``fallback`` = its answer was invalid (alloc_fallback)."""
+
+    agent: str
+    round: int
+    stakes: tuple[int, ...]
+    fallback: bool = False
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
@@ -245,6 +255,10 @@ def _noted(state: MatchState, p: NoteRecorded) -> None:
     state.notes.setdefault(p.agent, {})[p.round] = p.text  # last note of the round wins
 
 
+def _staked(state: MatchState, p: StakesSet) -> None:
+    state.stakes[f"{p.round}:{p.agent}"] = list(p.stakes)
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -267,6 +281,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     FINDING_FLAGGED: (FindingFlagged, _flagged),
     NOTE_RECORDED: (NoteRecorded, _noted),
     BUDGET_OVERRIDDEN: (BudgetOverridden, _overridden),
+    STAKES_SET: (StakesSet, _staked),
 }
 
 
