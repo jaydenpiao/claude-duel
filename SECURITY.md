@@ -16,7 +16,7 @@ Model-authored challenge code is untrusted. It is checked by an AST allowlist (`
 - All actions pinned to commit SHAs; every workflow defaults to `permissions: {}` and grants per job
 
 ## Branch protection
-`main` requires a PR with all CI and security checks green on an up-to-date branch, linear history, and blocks force pushes and deletion. Admin bypass is technically enabled (`enforce_admins` off) but not allowed by policy.
+GitHub branch protection and rulesets are **not active**: they need GitHub Pro or a public repository, and the API returns 403 for this private repo on the free plan. Nothing on GitHub stops a direct or force push to `main` today. Until that changes the rules are kept by process: every change lands through a PR, squash-merged by a merge script only when the PR is up to date with `main` and all seven checks (`check` on 3.11/3.12/3.13, `audit`, `codeql`, `image`, `secrets`) passed on its head commit; nobody force-pushes `main` or deletes it. CODEOWNERS is advisory for the same reason. When the repository goes public (or the plan changes), enable protection on `main` with those required checks, an up-to-date branch, linear history, code-owner review, no force pushes or deletion, and `enforce_admins` on.
 
 ## Image
 Non-root (uid 10001), code root-owned, pip/setuptools removed. Run with `--read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp --tmpfs /app/.duel:uid=10001,gid=10001,mode=0700` (staging does).
