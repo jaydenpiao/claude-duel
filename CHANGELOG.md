@@ -5,6 +5,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
+
+### Added
+- Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
+- Series ids from entrant indexes, so look-alike names never share a series log.
+- Flag-form detection covers split and shifted encodings in the redactor.
+- Published image digests: release builds never reuse a branch-seeded base or layer cache.
+- Difficulty-gate probe is exempt from per-agent wallets.
+- Tournament entrant models pinned in `tournament_created`.
+- CI requires real-Docker sandbox tests (`DUEL_REQUIRE_DOCKER=1`).
+
 ## [0.1.0]
 First public release.
 

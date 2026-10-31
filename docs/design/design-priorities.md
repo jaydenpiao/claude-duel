@@ -1,3 +1,13 @@
+# Design priorities, round 2 (design check 2026-10-22, 11:10 AM PDT)
+Items 2-11 and 4a/4b/10a of round 1 below are built and merged (see the "Built" notes in each spec, synced from `docs/design/`). Next, in priority order:
+
+1. **Match-cap hit becomes a terminal `CAPPED` outcome + prereg void-seed rule** (design-match-caps.md, ADR 0013 draft). Blocks the launch run: today a match that crosses `match_max_usd` fails and can never resume, which stalls its series, and the launch caps sit far below the prereg's own worst case. $0.
+2. **Elo in recorded play order** (#137, design-match-formats.md addendum). Small, $0, fixes a ratings number that is reported in the launch secondary metrics.
+3. **`LoggedAggregate` generic driver for series and tournament** (#140, same addendum). After [PR 119](https://github.com/jaydenpiao/claude-duel/pull/119) and [PR 120](https://github.com/jaydenpiao/claude-duel/pull/120) land; keeps future formats (deathmatch, ladder, survival) from being copy-pasted drivers.
+4. Still unbuilt from round 1: Bronstein delay and `bank_mult` clock handicaps, survival task (10b), ladder / lives (11a). Not before the launch.
+
+---
+
 # Design priorities (ready-to-build order), 2026-10-22
 **Status: build order APPROVED by lead (2026-10-22, 1:08 AM PDT); work starts once ADR 0006 merges.** Lead decisions folded into the specs: token-based game clocks (latency recorded as a metric only), cross-vendor efficiency scored in $ with tokens shown, a 900 s default match deadline, and wallets under the existing caps (strictest limit wins).
 
@@ -18,9 +28,9 @@ Ordering follows the lead's steer: mode abstraction → memory (#19) → time (#
 
 ### Stakes track (design-stakes-modes.md), slotted in after item 4
 4a. **FramingRule (neutral/competitive/survival) + equal-surface test + tamper detector with `finding_flagged`**: $0, makes framing a measurable A/B variable and adds security telemetry. **Recommended first stakes build.**
-4b. **Pre-registered paired framing experiment (≤ $1.98, nano plus a small mini slice)**: answers whether stakes framing changes validity, capture or rule-breaking. It can detect only effects of roughly 12 points or more.
+4b. **Pre-registered paired framing experiment (≤ $1.98, nano plus a small mini slice; $2 run APPROVED with a run-specific `--run-max-usd` override, defaults unchanged)**: answers whether stakes framing changes validity, capture or rule-breaking. It can detect only effects of roughly 12 points or more.
 10a. **Deathmatch Bo1/Bo3 with elimination status**: after Series (10).
 10b. **Survival task over a seeded challenge corpus under the token clock or wallet**: after 7, 8 and 10.
 11a. **Ladder / battle royale / lives and revives**: with tournaments (11).
 
-Estimated total API spend to build and validate items 2-11 (experiments at n≈20-30 per mode on gpt-4.1-nano): about $5, plus ≤ $2 for the stakes experiment, so ≈ $7 total, well under the $40 lifetime cap and $50 key.
+Estimated total API spend to build and validate items 2-11 (experiments at n≈20-30 per mode on gpt-4.1-nano): about $5, plus ≤ $2 for the stakes experiment, so ≈ $7 total, well under the $33 lifetime cap and $50 key.

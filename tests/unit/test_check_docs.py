@@ -64,8 +64,17 @@ def test_modules(tmp_path: Path) -> None:
     root = _repo(tmp_path, "nothing")
     assert check_docs.check_modules(root) == [
         "AGENTS.md: port Sandbox not named",
+        "AGENTS.md: app module engine.py missing from the app summary",
         "AGENTS.md: module app/engine.py not named",
     ]
+
+
+def test_app_summary_names_every_app_module(tmp_path: Path) -> None:
+    """An app module named only in a sub-AGENTS.md still fails: the root app summary must list it."""
+    root = _repo(tmp_path, "- `src/claude_duel/app/`: `other.py`\n`Sandbox` `engine.py`")
+    assert check_docs.check_modules(root) == ["AGENTS.md: app module engine.py missing from the app summary"]
+    (root / "AGENTS.md").write_text("- `src/claude_duel/app/`: `engine.py`\n`Sandbox`")
+    assert check_docs.check_modules(root) == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
@@ -83,12 +92,24 @@ def test_links(tmp_path: Path) -> None:
 def test_review_codes_rejected(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "tests").mkdir()
-    code, medium = "R3" + "-2", "M" + "2"  # built at runtime so this file passes its own check
-    (tmp_path / "src" / "a.py").write_text(f"x = 1  # {code}: fresh flag\ny = 2  # see #12\n")
-    (tmp_path / "tests" / "b.md").write_text(f"- old ({medium}) note\n")
+    (tmp_path / "docs").mkdir()
+    # built at runtime so this file passes its own check
+    forms = {
+        "src/a.py": "R3" + "-2",
+        "tests/b.md": "M" + "2",
+        "docs/c.md": "Arch round " + "3",
+        "src/d.py": "arch r" + "3 #8",
+        "tests/e.py": "S" + "4-3",
+    }
+    for rel, code in forms.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"note {code} here\n")
     errors = check_docs.check_codes(tmp_path)
-    assert len(errors) == 2
-    assert "a.py:1" in errors[0]
+    assert len(errors) == len(forms)
+    joined = "\n".join(errors)
+    for rel in forms:
+        assert rel in joined
 
 
 def test_unpinned_action_is_caught(tmp_path: Path) -> None:
