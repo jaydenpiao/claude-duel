@@ -99,3 +99,7 @@ class ReplayMismatchError(DuelError):
 
 class ResultsDbError(DuelError):
     """A results database operation failed; the message carries the error class and SQLSTATE only."""
+
+    def __init__(self, message: str, sqlstate: str | None = None) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
