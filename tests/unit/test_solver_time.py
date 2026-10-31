@@ -7,7 +7,8 @@ import time
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.ports import RunResult, SandboxLimits
-from tests.unit.test_flag_independence import LOCK, ONE, Builds
+from tests.helpers import ONE, Builds
+from tests.unit.test_flag_independence import LOCK
 
 SOLVER = "print(str(97 * 10000 + 3).zfill(7))\n"
 
