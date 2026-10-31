@@ -157,7 +157,12 @@ def test_public_view_columns_match_export_fields(db: dict[str, str]) -> None:
     cols: dict[str, list[str]] = {}
     for r in rows:
         cols.setdefault(r["table_name"], []).append(r["column_name"])
-    assert {k: set(v) for k, v in cols.items()} == {k: set(v) for k, v in FIELDS.items()}
+    # FIELDS is the export whitelist: every field must exist in its view, and any view column it drops is listed here
+    dropped = {"leaderboard": {"sync_run_id"}, "rating_history": {"elo_order", "elo_k", "through_match"}}
+    assert set(cols) == set(FIELDS)
+    for view, fields in FIELDS.items():
+        assert set(fields) <= set(cols[view]), view
+        assert set(cols[view]) - set(fields) == dropped.get(view, set()), view
 
 
 def test_schema_hardening(db: dict[str, str]) -> None:
