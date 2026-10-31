@@ -123,6 +123,10 @@ VIA_FIRST = "print(first(str(n).zfill(5) if check(str(n).zfill(5)) else None for
 RUN = SPARSE + "\n\ndef run(f):\n    return f()\n"
 VIA_RUN = "def solve():\n" + "".join("    " + line + "\n" for line in SEARCH.splitlines()) + "print(run(solve))\n"
 PICK = SPARSE + "\n\ndef pick(xs, key):\n    for x in xs:\n        if key(x):\n            return x\n    return None\n"
+BODY = "".join("        " + line + "\n" for line in SEARCH.splitlines())
+VIA_CLOSURE = "def outer():\n    def inner():\n" + BODY + "    return inner\n\n\nprint(run(outer()))\n"
+APPLY = SPARSE + "\n\ndef apply(d):\n    return d['f']()\n"
+VIA_DICT = "def table():\n    def solve():\n" + BODY + "    return {'f': solve}\n\n\nprint(apply(table()))\n"
 VIA_PICK = "print(pick([str(n).zfill(5) for n in range(100000)], lambda s: check(s)))\n"
 
 
@@ -137,7 +141,7 @@ def _counted_run(source: str, solver: str) -> tuple[str, int | None]:
 
 
 def test_lazy_or_callable_arguments_cannot_hide_a_brute_force() -> None:
-    for source, solver in ((FIRST, VIA_FIRST), (RUN, VIA_RUN), (PICK, VIA_PICK)):
+    for source, solver in ((FIRST, VIA_FIRST), (RUN, VIA_RUN), (PICK, VIA_PICK), (RUN, VIA_CLOSURE), (APPLY, VIA_DICT)):
         assert solvability.uncounted_path(source, solver) is None
         out, n = _counted_run(source, solver)
         assert n is None, (solver, out)
