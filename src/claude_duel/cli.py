@@ -176,6 +176,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd in handlers:
         return handlers[args.cmd]()
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
