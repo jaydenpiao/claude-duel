@@ -112,7 +112,7 @@ def test_store_assigns_created_seq(tmp_path: Path) -> None:
 
 
 def test_bootstrap_ci_ignores_resamples_without_the_entrant() -> None:
-    """Arch round 3 #10: a rarely seen strong entrant's CI is not dragged to 1500 by resamples that miss it."""
+    """#138: a rarely seen strong entrant's CI is not dragged to 1500 by resamples that miss it."""
     rs = [*_round_robin(20), Result("zz-1", "solo", "s1", 1.0), Result("zz-2", "solo", "s2", 1.0)]
     solo = next(r for r in ratings(rs, boot=200) if r.entrant == "solo")
     assert solo.bt > ELO_START

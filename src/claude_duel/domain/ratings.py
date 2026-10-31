@@ -134,7 +134,7 @@ def ratings(rs: list[Result], boot: int = 200, seed: int = 0) -> list[Rating]:
     samples: dict[str, list[float]] = {n: [] for n in point}
     for _ in range(boot):
         fit = bradley_terry([rng.choice(rs) for _ in rs], iters=60)
-        for n, v in fit.items():  # an entrant left out of a resample has no estimate there (arch r3 #10)
+        for n, v in fit.items():  # an entrant left out of a resample has no estimate there (#138)
             samples[n].append(v)
     count = {n: sum(n in (x.a, x.b) for x in rs) for n in point}
     out = []
