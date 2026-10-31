@@ -12,9 +12,9 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from claude_duel.adapters.providers.registry import VENDORS
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
@@ -65,7 +65,7 @@ class BudgetLimits(BaseModel):
     run_max_calls: int = Field(default=200, ge=1)
     run_max_usd: float = Field(default=0.50, gt=0)
     lifetime_max_usd: float = Field(default=33.0, gt=0)
-    key_limit_usd: float = Field(default=50.0, gt=0, description="provider key's hard limit; shown in output")
+    key_limit_usd: float = Field(default=50.0, gt=0, description="key's hard limit; must be >= lifetime_max_usd")
 
     @model_validator(mode="after")
     def _ceiling_under_key_limit(self) -> BudgetLimits:
