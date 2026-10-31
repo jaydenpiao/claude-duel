@@ -118,13 +118,15 @@ def flag_shaped(text: str) -> bool:
     return any(p.search(text) for p in (FLAG_PATTERN, *ENCODED_FLAG_PATTERNS))
 
 
-# Terminal-unsafe characters: C0 except \t and \n, DEL, C1, and bidi overrides/isolates.
-UNPRINTABLE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+# Terminal-unsafe code points: C0 except \t and \n, DEL, C1, and bidi overrides/isolates (a str.translate table).
+UNPRINTABLE: dict[int, None] = dict.fromkeys(
+    (*range(0x00, 0x09), *range(0x0B, 0x20), *range(0x7F, 0xA0), *range(0x202A, 0x202F), *range(0x2066, 0x206A))
+)
 
 
 def printable(text: str) -> str:
     """Drop characters that could drive the terminal (escape sequences, OSC 52, bidi spoofing)."""
-    return UNPRINTABLE.sub("", text)
+    return text.translate(UNPRINTABLE)
 
 
 def scrub(text: str, flags: tuple[str, ...] = ()) -> str:
