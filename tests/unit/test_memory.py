@@ -86,10 +86,10 @@ def test_prepare_cap_fixture(make_engine, new_state) -> None:  # type: ignore[no
 
 
 def test_technique_tags() -> None:
-    assert memory.technique("import hashlib\nx = hashlib.sha256(b'a')") == "hash-check"
-    assert memory.technique("stack = []\nstack.pop()") == "vm"
-    assert memory.technique('grid = ["S.G"]') == "maze"
-    assert memory.technique("x = sum(ord(c) for c in 'ab')") == "checksum"
+    assert memory.technique("import hashlib\nx = hashlib.sha256(b'a')").startswith("hash-check#")
+    assert memory.technique("stack = []\nstack.pop()").startswith("vm#")
+    assert memory.technique('grid = ["S.G"]').startswith("maze#")
+    assert memory.technique("x = sum(ord(c) for c in 'ab')").startswith("checksum#")
     assert memory.technique("def (:") == "other"
 
 
