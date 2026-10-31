@@ -33,7 +33,7 @@ RULE = "─" * 48
 class Commentary(MatchFold):
     """EventObserver that writes match commentary to ``out``.
 
-    ``lifetime_usd`` reads total spend on the key (the shared ledger) for the burn line.
+    ``lifetime_usd`` reads lifetime spend (the shared ledger) for the spend line.
     """
 
     def __init__(self, out: TextIO, match_id: str, cap_usd: float, lifetime_usd: Callable[[], float]) -> None:
