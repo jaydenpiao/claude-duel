@@ -2,6 +2,7 @@
 
 Pure rules. No I/O (`policy._is_submodule` only imports stdlib pure modules to inspect them), no adapters, no logging. Root context: [AGENTS.md](../../../AGENTS.md).
 
+- `vendors.py`: `Vendor`/`VENDORS`, plain metadata for each real vendor (name, model prefix, key env var, default model; ADR 0013). No adapter imports: config and `budget.vendor_of` read it; the container pairs it with `adapters/providers/registry.FACTORIES`.
 - `models.py`: `Stage`, `AgentSpec`, `Rules`, `SandboxLimits`, `ChallengeSpec`, `Challenge`, `Validation`, `Attack`, `Usage`, `Event`, `MatchState` (the only mutable aggregate).
 - `state_machine.py`: `_ALLOWED` transitions, `next_stage`, `transition`, `recover`.
 - `flags.py`: `derive_flag`, `flag_of(secret, cid, epoch)` (repair try `epoch` > 0 derives from `cid~epoch`; `Challenge.flag_epoch` pins the try that built it), `assert_no_flag`, `redact`, `scrub` (the only redactor), `FLAG_PATTERN` (`DUEL{hex}`). `assert_no_flag` (and `redact`) also test order-preserving reductions of the text (`_canonical`: hex-only, every other hex char, whitespace-stripped, decimal codes) against every 16-char window of the digest, its reverse, +-1..5 shifts and single-byte XOR-hex (`_needles`); `redact` withholds the whole text when such a leak has no clean span. Tests: `tests/unit/test_flag_encodings.py` (hypothesis).

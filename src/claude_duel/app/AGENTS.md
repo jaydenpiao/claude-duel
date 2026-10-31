@@ -25,5 +25,5 @@ Use cases and wiring. Root: [AGENTS.md](../../../AGENTS.md).
 
 Gotchas
 - Every prompt must pass `assert_no_flag`; attacker-visible output must go through `redact`.
-- `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.default_model(provider)`; vendors are declared once in `adapters/providers/registry.py`.
+- `Settings.model_for(agent)` is the one place models resolve: fake agents use `FAKE_MODEL`, others `agent.model` or `settings.default_model(provider)`; vendors are declared once in `domain/vendors.py` (factories in `adapters/providers/registry.py`, read only by the container).
 
