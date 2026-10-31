@@ -118,9 +118,18 @@ def flag_shaped(text: str) -> bool:
     return any(p.search(text) for p in (FLAG_PATTERN, *ENCODED_FLAG_PATTERNS))
 
 
+# Terminal-unsafe characters: C0 except \t and \n, DEL, C1, and bidi overrides/isolates.
+UNPRINTABLE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def printable(text: str) -> str:
+    """Drop characters that could drive the terminal (escape sequences, OSC 52, bidi spoofing)."""
+    return UNPRINTABLE.sub("", text)
+
+
 def scrub(text: str, flags: tuple[str, ...] = ()) -> str:
-    """The redactor for anything shown or logged: flags (and their variants when known) plus secret-shaped text."""
-    text = redact(text, flags)
+    """The redactor for anything shown or logged: control characters, flags (and variants when known), secrets."""
+    text = redact(printable(text), flags)
     for pat in SECRET_PATTERNS:
         text = pat.sub("<redacted>", text)
     return text
