@@ -15,5 +15,5 @@ now: match over
 · 🔥 bob's 'Maze' heat 100% -10
 · 🔥 bob's 'Mirror' heat 100% -10
 · after round 2: alice 56  bob 37 · alice leads
-$0.0019 this match · $0.0000 of $50 burned
+$0.0019 this match · $0.0000 of $50 cap
 🏆 winner: alice · alice 56  bob 37

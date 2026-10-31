@@ -52,6 +52,7 @@ TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
+CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
 REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
 
@@ -202,7 +203,7 @@ class MatchEngine:
 
     def _call(self, state: MatchState, agent: str, request: CompletionRequest) -> Completion:
         """Single choke point for paid calls: wallet, then budget caps (strictest wins), call, charge, checkpoint."""
-        if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (arch r3 #8)
+        if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (#121)
             allowance.check(state, agent)
         self._budget.check(state)
         if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
@@ -443,7 +444,9 @@ class MatchEngine:
             purpose=purpose,
             max_tokens=tokens,
             reasoning_effort=state.rules.reasoning_effort,
-            json_schema=agents.ANSWER_SCHEMAS[purpose],
+            json_schema=agents.ANSWER_SCHEMAS[
+                "attack_solver" if purpose == "attack" and state.rules.attacker_solver else purpose
+            ],
         )
 
     def _gate(self, state: MatchState, cid: str, spec: ChallengeSpec) -> tuple[str | None, bool]:
@@ -464,12 +467,22 @@ class MatchEngine:
         """If the author gave a solver, run it (same policy and sandbox, empty stdin): its stdout is the payload."""
         if not spec.solver:
             return spec, None
-        program, cap = spec.solver, state.rules.max_source_bytes(state.round)
+        flag = self._flag_for(state, cid)
+        payload, reason = self._run_solver(state, spec.source, spec.solver, flag, "solve_reference")
+        if reason:
+            return spec, reason
+        return spec.model_copy(update={"reference_payload": payload}), None
+
+    def _run_solver(
+        self, state: MatchState, source: str, solver: str, flag: str, purpose: str
+    ) -> tuple[str, str | None]:
+        """Run a solver (same policy and sandbox, empty stdin, 4x time): (its stdout payload, None) or ("", why)."""
+        program, cap = solver, state.rules.max_source_bytes(state.round)
         if state.rules.challenge_form == "check":
-            program, cap = contract.solver_program(spec.source, spec.solver), 2 * cap
+            program, cap = contract.solver_program(source, solver), 2 * cap
         rejected = policy.check_source(program, cap)  # the whole program that runs, definitions included
         if rejected:
-            return spec, f"solver: {rejected}"
+            return "", f"solver: {rejected}"
         lim = state.limits
         slow = lim.model_copy(
             update={
@@ -477,16 +490,15 @@ class MatchEngine:
                 "cpu_seconds": lim.cpu_seconds * SOLVER_TIME_FACTOR,
             }
         )
-        out = self._run_challenge(program, "", self._flag_for(state, cid), state, "solve_reference", slow)
+        out = self._run_challenge(program, "", flag, state, purpose, slow)
         payload = out.stdout.strip()
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
-            flag = self._flag_for(state, cid)
-            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # the solver runs with the real flag
+            seen = redact(payload, (flag,))[:REF_OUTPUT_CHARS]  # the solver may run with the real flag
             reason = f"solver failed ({status}); it printed {seen!r}"
             assert_no_flag(reason, flag, "solver failure")
-            return spec, reason
-        return spec.model_copy(update={"reference_payload": payload}), None
+            return "", reason
+        return payload, None
 
     def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
@@ -690,6 +702,7 @@ class MatchEngine:
                 self._memory(state, attacker),
                 self._scratch(state),
                 state.rules.retry_hint,
+                state.rules.attacker_solver,
             )
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
@@ -711,19 +724,46 @@ class MatchEngine:
         ground: str | None = None,
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
+        tokens = completion.total_tokens
         try:
             if completion.truncated:
                 raise MalformedOutputError(TRUNCATED)
-            payload = agents.parse_attack(completion.text).payload
+            move = agents.parse_attack(completion.text)
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
             return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
+        payload = move.payload
+        if state.rules.attacker_solver and move.solver.strip():
+            self._metrics.incr("attack.solver")
+            decoy = flag_of(state.secret, f"{agent}:attacker-solver", state.round)  # never the challenge's flag
+            payload, failed = self._run_solver(state, spec.source, move.solver, decoy, "attack_solver")
+            if failed:
+                return AttackAttempt(payload=MALFORMED, output=failed, tokens=tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
         source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
         stdin = terrain.apply(ground, payload) if ground else payload
         run = self._run_challenge(source, stdin, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
+        if state.rules.integrity_control:
+            self._control(state, agent, payload, flag)
         return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
+
+    def _control(self, state: MatchState, agent: str, payload: str, flag: str) -> None:
+        """Integrity control: the same payload and flag on a program that never prints it. A capture there means
+        the flag leaks through the harness, not the challenge, and voids the run (docs/runs/launch-prereg.md)."""
+        run = self._run_challenge(CONTROL_SOURCE, payload, flag, state, "control")
+        self._metrics.incr("control.run")
+        if flag in run.stdout:
+            self._metrics.incr("control.capture")
+            hit = Finding(
+                agent=agent,
+                round=state.round,
+                category="integrity",
+                severity="critical",
+                rule_id="control-capture",
+                excerpt=payload[:200],
+            )
+            self._flag(state, [hit], flag)
 
     # -- stage 4: score ---------------------------------------------------
     def _score(self, state: MatchState) -> None:

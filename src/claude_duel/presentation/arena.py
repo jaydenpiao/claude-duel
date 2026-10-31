@@ -176,14 +176,14 @@ class ArenaView(MatchFold):
         self,
         console: Console,
         match_id: str,
-        key_limit_usd: float,
+        cap_usd: float,
         lifetime_usd: Callable[[], float],
         pace: float = 0.0,
     ) -> None:
         super().__init__(match_id)
         self.model = ArenaModel(match_id=match_id)
         self._console = console
-        self._key_limit = key_limit_usd
+        self._cap = cap_usd
         self._lifetime = lifetime_usd
         self._pace = pace
         self._spinner = Spinner("dots")
@@ -214,7 +214,7 @@ class ArenaView(MatchFold):
         for p in m.players:
             p.score = s.scores.get(p.name, 0)
             p.cost = agent_cost(s, p.name)
-        m.spend = spend(s, self._lifetime(), self._key_limit)
+        m.spend = spend(s, self._lifetime(), self._cap)
         m.ghosts = ghost_row(s)
 
     def _created(self, s: MatchState, e: Event) -> None:

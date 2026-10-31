@@ -11,13 +11,13 @@ change build validity, capture rate, defense rate or tamper findings for low-tie
   identical; framing is the only difference. Arm order is rotated per seed.
 - Micro-match: 1 round, 2 challenges per agent, `max_attempts` 4, docker sandbox, mode `classic`, memory off,
   difficulty gate off.
-- Main block: gpt-4.1-nano vs gpt-4.1-nano, up to 60 seeds × 3 framings (180 matches).
+- Main block: gpt-5-nano vs gpt-5-nano, up to 60 seeds × 3 framings (180 matches).
 - Direction slice (descriptive only): gpt-4.1-mini vs gpt-4.1-mini, 5 seeds × 3 framings (15 matches).
 
 ## Budget (run-specific; defaults are unchanged)
 - `experiment.toml`: `run_max_usd = 2.0`, `match_max_usd = 0.05`.
 - The driver stops before a new seed when experiment spend reaches $1.90. Seeds are only run whole (all 3
-  arms), so stopping early keeps the arms balanced. The lifetime ledger ceiling ($40) still applies.
+  arms), so stopping early keeps the arms balanced. The lifetime ledger ceiling ($33) still applies.
 - The mini slice runs first (5 seeds). The nano block then gets whatever budget is left.
 
 ## Primary metrics (unit: challenge, or attack for capture)
