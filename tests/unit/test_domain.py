@@ -266,7 +266,9 @@ class TestModes:
         assert load_settings(None, env={"DUEL_MODE": "gated"}).rules.difficulty_gate
 
     def test_unknown_mode_lists_known(self) -> None:
-        with pytest.raises(ConfigError, match="known: blitz, capped, checked, classic, efficiency, gated, quick"):
+        with pytest.raises(
+            ConfigError, match="known: blitz, capped, checked, classic, efficiency, gated, ledger, quick"
+        ):
             load_settings(None, env={"DUEL_MODE": "nope"})
 
     def test_presets_are_valid_rules_named_after_themselves(self) -> None:
