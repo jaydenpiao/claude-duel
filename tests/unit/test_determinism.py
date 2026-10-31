@@ -6,7 +6,8 @@ from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.domain import policy
 from claude_duel.ports import RunResult, SandboxLimits
-from tests.unit.test_flag_independence import LOCK, ONE, Builds
+from tests.helpers import ONE, Builds
+from tests.unit.test_flag_independence import LOCK
 
 SET_ORDER = "print(''.join({'alpha', 'beta', 'gamma', 'delta', 'eps'}))\n"
 
