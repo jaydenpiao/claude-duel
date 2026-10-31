@@ -14,6 +14,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from claude_duel.domain.stakes import LedgerRule
+
 Kind = Literal["ghost_kills_ge", "keystone_is", "uses_construct", "capture_count_le", "max_stake_ge"]
 Selector = Literal["longest", "shortest", "first"]
 MAX_ATOMS = 3
@@ -109,7 +111,7 @@ TEMPLATES: dict[str, tuple[Atom, ...]] = {
     "ghost_kill": (_a("ghost_kills_ge", n=1),),
     "no_captures": (_a("capture_count_le", n=0),),
     "one_capture_max": (_a("capture_count_le", n=1),),
-    "all_in": (_a("max_stake_ge", n=6_000),),
+    "all_in": (_a("max_stake_ge", n=LedgerRule().attack_tokens // 2),),
     "longest_keystone_no_ghost": (_a("keystone_is", selector="longest"), _a("ghost_kills_ge", n=1, negate=True)),
 }
 

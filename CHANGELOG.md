@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed (quality L24, L26, L28).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 
 ### Added
