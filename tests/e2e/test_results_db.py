@@ -256,6 +256,8 @@ def test_sync_refuses_superuser_and_pending_migrations(
         assert "0001_results.sql" in capsys.readouterr().out
         assert main(["db", "migrate"]) == 0
         assert "up to date" in capsys.readouterr().out
+        assert main(["sync"]) == 2  # the owner may migrate and --rebuild, never routine sync
+        assert "table owner" in capsys.readouterr().err
         with connect(owner) as conn:
             conn.execute("update duel.schema_migrations set sha256 = repeat('0', 64)")
             with pytest.raises(ConfigError, match="forward-only"):

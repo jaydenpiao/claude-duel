@@ -89,7 +89,7 @@ def test_responses_without_schema_falls_back_to_json_mode() -> None:
 def test_chat_models_keep_chat_completions_and_flag_length() -> None:
     seen: list[dict[str, object]] = []
     reply = {"choices": [{"message": {"content": "{"}, "finish_reason": "length"}], "usage": {"prompt_tokens": 5}}
-    out = OpenAIProvider(KEY, "gpt-4.1-nano", transport=_mock(seen, reply)).complete(REQ)
+    out = OpenAIProvider(KEY, "gpt-4o-mini", transport=_mock(seen, reply)).complete(REQ)
     assert seen[0]["path"] == "/v1/chat/completions"
     assert seen[0]["temperature"] == 0.0
     assert out.truncated

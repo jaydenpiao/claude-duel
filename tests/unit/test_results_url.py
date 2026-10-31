@@ -22,6 +22,16 @@ def test_iam_url_escapes_the_iam_user_for_libpq() -> None:
     assert iam_url("postgresql://u:p@127.0.0.1/db") == "postgresql://u:p@127.0.0.1/db"
 
 
+def test_iam_url_over_the_proxy_unix_socket() -> None:
+    from psycopg.conninfo import conninfo_to_dict  # noqa: PLC0415
+
+    url = "postgresql://duel-ingest@project.iam@/duel?host=/run/duel-proxy/project:region:inst"
+    info = conninfo_to_dict(iam_url(url))
+    assert info["user"] == "duel-ingest@project.iam"
+    assert (info["host"], info["dbname"]) == ("/run/duel-proxy/project:region:inst", "duel")
+    require_tls(url, {})  # socket host: TLS is the proxy's job
+
+
 def test_require_tls_parses_without_a_driver() -> None:
     require_tls("postgresql://u:p@[::1]:5432/db", {})
     require_tls("postgresql://u:p@localhost,127.0.0.1/db", {})

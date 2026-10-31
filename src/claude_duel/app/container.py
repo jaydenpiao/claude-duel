@@ -11,21 +11,28 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
-from claude_duel.adapters.providers.anthropic import AnthropicProvider
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
-from claude_duel.adapters.providers.openai import OpenAIProvider
+from claude_duel.adapters.providers.registry import FACTORIES
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.adapters.store.results_sql import Executor, SqlResults, migrate, refuse_superuser, require_current
+from claude_duel.adapters.store.results_sql import (
+    Executor,
+    SqlResults,
+    migrate,
+    refuse_superuser,
+    refuse_table_owner,
+    require_current,
+)
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, RunOverride, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
 from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox
 
@@ -36,17 +43,13 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     if agent.provider == "fake":
         return FakeProvider(skill=agent.skill)
     model, timeout = settings.model_for(agent), settings.provider_timeout
-    inner: LLMProvider
-    if agent.provider == "openai":
-        if settings.openai_api_key is None:
-            raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
-        inner = OpenAIProvider(settings.openai_api_key, model, timeout=timeout)
-    elif agent.provider == "anthropic":
-        if settings.anthropic_api_key is None:
-            raise ConfigError("agent uses anthropic but ANTHROPIC_API_KEY is not set")
-        inner = AnthropicProvider(settings.anthropic_api_key, model, timeout=timeout)
-    else:
+    vendor = VENDORS.get(agent.provider)
+    if vendor is None:
         raise ConfigError(f"unknown provider {agent.provider!r}")
+    key = settings.api_keys.get(vendor.name)
+    if key is None:
+        raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
+    inner = FACTORIES[vendor.name](key, model, timeout)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
@@ -202,6 +205,8 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
     ex = results_executor(settings, _owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
     refuse_superuser(ex)
     require_current(ex)
+    if not owner:
+        refuse_table_owner(ex)
     return SqlResults(ex)
 
 

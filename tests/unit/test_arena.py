@@ -62,7 +62,7 @@ def test_full_match_snapshot(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("width", [1, 20, 40, 200])
 def test_any_width_renders(width: int) -> None:
-    m = ArenaModel(match_id="m", players=[Player("alice-with-a-long-name", "gpt-4.1-nano", 9), Player("bob", "x", -3)])
+    m = ArenaModel(match_id="m", players=[Player("alice-with-a-long-name", "gpt-4o-mini", 9), Player("bob", "x", -3)])
     m.flash = "x" * 500
     lines = _text(m, width).splitlines()
     assert lines
