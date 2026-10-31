@@ -5,11 +5,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
-- CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
-
 ### Added
+- `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
+- Ledger rejection of malformed stakes (#208).
+- Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
+- `open_match` helper for drivers (#185).
+- PROPHECY core (#214; engine wiring follows).
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
 - Flag-form detection covers split and shifted encodings in the redactor.
@@ -24,6 +25,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Integrity control and attacker solver parity (ADR 0015).
 
 ### Changed
+- Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
+- CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
+
+- Results index is Cloud SQL only (`results_sql`, IAM via cloud-sql-proxy Unix socket); Neon dropped (#156).
+- Provider registry: vendors and factories behind one table (#154).
+- gpt-4.1-nano removed from the allowlist (#209).
+- SECURITY.md: contact and branch-protection note (#215, #227).
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
 - Hypothesis runs without a per-example deadline in CI.
 - Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
