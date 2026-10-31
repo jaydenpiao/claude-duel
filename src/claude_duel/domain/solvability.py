@@ -1,6 +1,7 @@
 """Solvability band for the check form (design rec R1): pure helpers; the engine does the running.
 
-Upper bound: the arena counts how many times the author's solver calls ``check`` (or any helper of the source). A solver that needs more
+Upper bound: the arena counts how many times the author's solver calls ``check`` (or any helper of the
+source). A solver that needs more
 calls than the rules allow is only reachable by brute force, which a checked-mode attacker (no code) can't do.
 
 Lower bound: the arena runs ``check`` on seeded random inputs shaped like the reference payload. If too many
