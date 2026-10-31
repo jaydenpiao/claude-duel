@@ -54,7 +54,8 @@ def require_tls(url: str, env: Mapping[str, str] | None = None) -> None:
 
     Loopback hosts and unix sockets (``/path`` hosts) are exempt. ``hostaddr``/PGHOSTADDR, when set, is the address
     libpq dials, so it is checked instead of ``host``. ``service``, PGSERVICE and PGSERVICEFILE are refused because
-    pg_service.conf could supply a host and sslmode this check never sees. Neither the URL nor a parser message is echoed.
+    pg_service.conf could supply a host and sslmode this check never sees.
+    Neither the URL nor a parser message is echoed.
     """
     env = os.environ if env is None else env
     try:
