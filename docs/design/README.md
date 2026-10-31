@@ -7,3 +7,4 @@ Review specs that issues link to:
 - [design-core-logic.md](design-core-logic.md): Sealed Ledger mode (stakes, keystone, terrain, heat), 2026-10-29.
 - [design-reasoning-models.md](design-reasoning-models.md): gpt-5 family routing and reasoning effort, 2026-10-29.
 - [design-deep-layer.md](design-deep-layer.md): the deep layer (ghosts, moments, PROPHECY), 2026-10-30.
+- [design-prophecy-wiring.md](design-prophecy-wiring.md): wiring PROPHECY into the engine (seal, reveal, settle), 2026-10-31.

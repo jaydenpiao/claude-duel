@@ -103,7 +103,7 @@ def round_heat(
     if rules.ledger is None:
         return {}
     return heat_lines(
-        challenges, validations, attacks, round_no, rules.ledger, lambda ch: _defense(ch, round_no, rules.scoring)
+        challenges, validations, attacks, round_no, rules.ledger, lambda ch: paid_defense(ch, round_no, rules.scoring)
     )
 
 
@@ -202,7 +202,7 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, max(1, hit.attempts), rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
-            scores[author] += _defense(stone, facts.round_no, rule)
+            scores[author] += paid_defense(stone, facts.round_no, rule)
     return scores
 
 
@@ -214,7 +214,7 @@ def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
             scores[authors[cid]] -= pts
 
 
-def _defense(ch: Challenge, round_no: int, rule: ScoringRule) -> int:
+def paid_defense(ch: Challenge, round_no: int, rule: ScoringRule) -> int:
     """What classic pays a defended challenge: halved when the build probe solved it."""
     assert ch.spec is not None
     award = defense_award(ch.spec, round_no, rule)

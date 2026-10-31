@@ -98,29 +98,39 @@ def _a(kind: Kind, **kw: object) -> Atom:
     return Atom.model_validate({"kind": kind, **kw})
 
 
-TEMPLATES: dict[str, tuple[Atom, ...]] = {
-    "keystone_longest": (_a("keystone_is", selector="longest"),),
-    "keystone_shortest": (_a("keystone_is", selector="shortest"),),
-    "keystone_first": (_a("keystone_is", selector="first"),),
-    "uses_maze": (_a("uses_construct", tag="maze"),),
-    "uses_vm": (_a("uses_construct", tag="vm"),),
-    "uses_checksum": (_a("uses_construct", tag="checksum"),),
-    "uses_state_machine": (_a("uses_construct", tag="state-machine"),),
-    "ghost_kill": (_a("ghost_kills_ge", n=1),),
-    "no_captures": (_a("capture_count_le", n=0),),
-    "one_capture_max": (_a("capture_count_le", n=1),),
-    "all_in": (_a("max_stake_ge", n=6_000),),
-    "longest_keystone_no_ghost": (_a("keystone_is", selector="longest"), _a("ghost_kills_ge", n=1, negate=True)),
-}
+ATTACK_TOKENS = 12_000  # LedgerRule.attack_tokens default
+PROPHECY_RATES: dict[int, dict[str, float]] = {0: {}}  # rates_version -> template hit rates; v0: nothing vacuous
 
 
-def pick(raw: str) -> list[Prophecy] | None:
+def templates(attack_tokens: int = ATTACK_TOKENS) -> dict[str, tuple[Atom, ...]]:
+    """The menu; ``all_in`` means some stake of at least half the attacker's tokens."""
+    return {
+        "keystone_longest": (_a("keystone_is", selector="longest"),),
+        "keystone_shortest": (_a("keystone_is", selector="shortest"),),
+        "keystone_first": (_a("keystone_is", selector="first"),),
+        "uses_maze": (_a("uses_construct", tag="maze"),),
+        "uses_vm": (_a("uses_construct", tag="vm"),),
+        "uses_checksum": (_a("uses_construct", tag="checksum"),),
+        "uses_state_machine": (_a("uses_construct", tag="state-machine"),),
+        "ghost_kill": (_a("ghost_kills_ge", n=1),),
+        "no_captures": (_a("capture_count_le", n=0),),
+        "one_capture_max": (_a("capture_count_le", n=1),),
+        "all_in": (_a("max_stake_ge", n=attack_tokens // 2),),
+        "longest_keystone_no_ghost": (_a("keystone_is", selector="longest"), _a("ghost_kills_ge", n=1, negate=True)),
+    }
+
+
+TEMPLATES = templates()
+
+
+def pick(raw: str, attack_tokens: int = ATTACK_TOKENS) -> list[Prophecy] | None:
     """Parse a menu reply ``{"prophecies": [{"template": ..., "stake": 1-3}]}`` (max 2); None -> skipped."""
+    menu = templates(attack_tokens)
     try:
         items = json.loads(raw)["prophecies"]
         if not isinstance(items, list) or not 1 <= len(items) <= 2:
             return None
-        return [Prophecy(template=i["template"], atoms=TEMPLATES[i["template"]], stake=i["stake"]) for i in items]
+        return [Prophecy(template=i["template"], atoms=menu[i["template"]], stake=i["stake"]) for i in items]
     except (ValueError, KeyError, TypeError, ValidationError):
         return None
 
@@ -149,3 +159,27 @@ def settle(
     room = max(0, pool - swing)
     delta = max(-room, min(room, delta))
     return delta, hits
+
+
+def prophecy_salt(seed: str, round_no: int, agent: str, slot: int) -> str:
+    """Seeded like ``keystone_salt`` but domain-separated, so a keystone reveal never leaks a prophecy salt."""
+    return hashlib.sha256(f"prophecy:{seed}:{round_no}:{agent}:{slot}".encode()).hexdigest()[:16]
+
+
+def make(template: str, stake: int, attack_tokens: int = ATTACK_TOKENS) -> Prophecy:
+    return Prophecy(template=template, atoms=templates(attack_tokens)[template], stake=stake)
+
+
+def open_prophecy(sealed: str, salt: str, attack_tokens: int = ATTACK_TOKENS) -> Prophecy:
+    """The unique menu pick (template x stake, 36 candidates) that ``sealed`` commits to; else ValueError."""
+    for name in sorted(templates(attack_tokens)):
+        for stake in (1, 2, 3):
+            p = make(name, stake, attack_tokens)
+            if verify(p, salt, sealed):
+                return p
+    raise ValueError("prophecy commit matches no menu pick")
+
+
+def round_cap(rule_cap: int, defense_awards: list[int]) -> int:
+    """Per-round cap: never worth more than the target's cheapest defense, never below 1 (open question 5)."""
+    return max(1, min([rule_cap, *defense_awards]))

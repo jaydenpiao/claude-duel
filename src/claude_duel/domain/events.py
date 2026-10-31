@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import platform
 from collections.abc import Callable, Iterable
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -23,12 +23,14 @@ from claude_duel.domain.models import (
     Finding,
     Keystone,
     MatchState,
+    ProphecySeal,
     Rules,
     SandboxLimits,
     Stage,
     Usage,
     Validation,
 )
+from claude_duel.domain.prophecy import ATTACK_TOKENS, make, verify
 from claude_duel.domain.scoring import add_scores
 from claude_duel.domain.stakes import keystone_commit
 from claude_duel.domain.state_machine import recover, transition
@@ -54,6 +56,10 @@ KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
 TERRAIN_DRAWN = "terrain_drawn"
 GHOST_RUN = "ghost_run"
+PROPHECY_SEALED = "prophecy_sealed"
+PROPHECY_SKIPPED = "prophecy_skipped"
+PROPHECY_REVEALED = "prophecy_revealed"
+PROPHECY_SETTLED = "prophecy_settled"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -209,11 +215,46 @@ class GhostRun(_Payload):
     stdout_sha: str
 
 
+class ProphecySealed(_Payload):
+    """A prophet's commit only, sealed in ``round`` about the opponent's ``target_round``."""
+
+    agent: str
+    round: int
+    target_round: int
+    slot: int = Field(ge=0, le=1)
+    commit: str
+
+
+class ProphecySkipped(_Payload):
+    agent: str
+    round: int
+    reason: Literal["malformed", "truncated", "no_reply", "allowance", "pool_empty"]
+
+
+class ProphecyRevealed(_Payload):
+    agent: str
+    round: int  # the target round
+    slot: int = Field(ge=0, le=1)
+    template: str
+    stake: int = Field(ge=1, le=3)
+    salt: str
+
+
+class ProphecySettled(_Payload):
+    agent: str
+    round: int
+    hits: list[bool]
+    vacuous: list[bool]
+    void: bool = False
+    delta: int
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
     points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
     heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
+    prophecy: dict[str, int] = Field(default_factory=dict)  # deep: agent -> settled prophecy line (in delta)
 
 
 class FindingFlagged(_Payload):
@@ -321,6 +362,36 @@ def _ghost_ran(state: MatchState, p: GhostRun) -> None:
     state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
 
 
+def _prophecy_sealed(state: MatchState, p: ProphecySealed) -> None:
+    if p.target_round != p.round + 1:
+        raise EventLogCorruptError(f"tampered: prophecy by {p.agent} in round {p.round} targets {p.target_round}")
+    state.prophecies[f"{p.target_round}:{p.agent}:{p.slot}"] = ProphecySeal(commit=p.commit)
+
+
+def _prophecy_skipped(state: MatchState, p: ProphecySkipped) -> None:
+    del state, p  # audit only
+
+
+def _prophecy_revealed(state: MatchState, p: ProphecyRevealed) -> None:
+    key = f"{p.round}:{p.agent}:{p.slot}"
+    sealed = state.prophecies.get(key)
+    tokens = state.rules.ledger.attack_tokens if state.rules.ledger else ATTACK_TOKENS
+    try:
+        ok = sealed is not None and verify(make(p.template, p.stake, tokens), p.salt, sealed.commit)
+    except KeyError:
+        ok = False  # not a menu template
+    if sealed is None or not ok:
+        raise EventLogCorruptError(f"tampered: prophecy reveal for {key} does not match its commit")
+    state.prophecies[key] = sealed.model_copy(
+        update={"template": p.template, "stake": p.stake, "salt": p.salt, "revealed": True}
+    )
+
+
+def _prophecy_settled(state: MatchState, p: ProphecySettled) -> None:
+    state.prophecy_points[p.agent] = state.prophecy_points.get(p.agent, 0) + p.delta
+    state.prophecy_swing[p.agent] = state.prophecy_swing.get(p.agent, 0) + abs(p.delta)
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -348,6 +419,10 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
     TERRAIN_DRAWN: (TerrainDrawn, _terrain),
     GHOST_RUN: (GhostRun, _ghost_ran),
+    PROPHECY_SEALED: (ProphecySealed, _prophecy_sealed),
+    PROPHECY_SKIPPED: (ProphecySkipped, _prophecy_skipped),
+    PROPHECY_REVEALED: (ProphecyRevealed, _prophecy_revealed),
+    PROPHECY_SETTLED: (ProphecySettled, _prophecy_settled),
 }
 
 
