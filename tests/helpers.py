@@ -1,7 +1,11 @@
+"""Test-only helpers."""
+
+import json
+
+from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.domain import events as ev
 from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
-
-"""Test-only helpers."""
+from claude_duel.ports import Completion, CompletionRequest
 
 
 def any_source(source: str) -> bool:
@@ -36,3 +40,28 @@ def forfeit_events(reject_reason: str, failure: str) -> list[Event]:
         Event(seq=5, type=ev.MATCH_FAILED, trace_id="t", data={"reason": failure}),
         Event(seq=6, type=ev.MATCH_RECOVERED, trace_id="t", data={}),
     )
+
+
+ONE = {"rounds": 1, "challenges_per_round": 1}
+
+
+class Builds:
+    """Answers every build with one fixed challenge; attacks go to the fake provider."""
+
+    name = "builds"
+
+    def __init__(self, **spec: object) -> None:
+        self.text = json.dumps({"title": "t", "description": "d", "difficulty": 1, **spec})
+        self.fake = FakeProvider()
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        if request.purpose != "build":
+            return self.fake.complete(request)
+        return Completion(text=self.text, input_tokens=10, output_tokens=10)
+
+
+def run_bob(make_engine, new_state, metrics=None, **spec):  # type: ignore[no-untyped-def]
+    """Runs a 1-challenge match where bob builds ``spec``; returns the state and bob's challenge."""
+    engine = make_engine({"alice": FakeProvider(), "bob": Builds(**spec)}, metrics=metrics)
+    state = engine.run(new_state(**ONE))
+    return state, next(c for c in state.challenges.values() if c.author == "bob")
