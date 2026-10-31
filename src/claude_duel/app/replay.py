@@ -67,7 +67,14 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
         r = int(str(event.data["round"]))
         keystones = stakes.keystone_targets(folded, r)
         delta = score_round(
-            r, names, folded.challenges.values(), folded.validations, folded.attacks, folded.rules, keystones
+            r,
+            names,
+            folded.challenges.values(),
+            folded.validations,
+            folded.attacks,
+            folded.rules,
+            keystones,
+            folded.heat_refs,
         )
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")

@@ -89,6 +89,7 @@ class MatchCreated(_Payload):
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
+    heat_refs: dict[str, list[str]] = {}  # design R5: frozen cross-match heat references; absent when empty
 
 
 class StageChanged(_Payload):
@@ -351,7 +352,7 @@ def payload(event: Event) -> _Payload:
 
 def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
-    return {
+    data: dict[str, object] = {
         "seed": state.seed,
         "python": platform.python_version(),
         "framing_text": state.framing_text,
@@ -359,6 +360,9 @@ def created_data(state: MatchState) -> dict[str, object]:
         "rules": state.rules.model_dump(mode="json"),
         "limits": state.limits.model_dump(mode="json"),
     }
+    if state.heat_refs:  # omitted when empty, so older logs stay byte-identical
+        data["heat_refs"] = state.heat_refs
+    return data
 
 
 def apply(state: MatchState, event: Event) -> None:
@@ -382,6 +386,7 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         agents=p.agents,
         rules=p.rules,
         limits=p.limits,
+        heat_refs=p.heat_refs,
     )
 
 

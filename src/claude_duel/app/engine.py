@@ -700,6 +700,7 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            state.heat_refs,
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
         lines = heat_of_state(state, state.round)

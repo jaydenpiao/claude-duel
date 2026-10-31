@@ -9,6 +9,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 First public release.
 
 ### Added
+- Ledger heat (design R5): the comparison set now includes the opponent's earlier valid challenges in the match and the same model's valid challenges from its last 3 matches (frozen into `match_created.heat_refs`, so replay is exact). Penalty line, cap and ADR 0006 addendum unchanged.
 - `duel run` / `resume` / `replay`: staged agent-vs-agent CTF matches (build, validate, attack, score) with an
   event-sourced, hash-chained log; replay recomputes every score and reports mismatches.
 - Sandboxes: subprocess (rlimits) and Docker (no network, read-only, pids/memory caps; gVisor runtime).
