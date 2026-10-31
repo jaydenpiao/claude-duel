@@ -1,4 +1,4 @@
-"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament, bench."""
+"""`duel` command line: run, resume, replay, card, estimate, series, ratings, tournament, bench, sync, export."""
 
 from __future__ import annotations
 
@@ -17,13 +17,24 @@ from rich.console import Console
 
 from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
-from claude_duel.app.container import build_event_log, build_ledger, build_metrics, build_store
+from claude_duel.app.container import (
+    build_event_log,
+    build_ledger,
+    build_metrics,
+    build_public_reader,
+    build_results,
+    build_store,
+    git_sha,
+    migrate_results,
+)
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
+from claude_duel.app.export import write as write_export
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
+from claude_duel.app.sync import sync
 from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
@@ -83,6 +94,17 @@ def _parser() -> argparse.ArgumentParser:
     tour = sub.add_parser("tournament", help="play or resume the config's [tournament] (round robin or Swiss)")
     tour.add_argument("--tournament-id", help="explicit id (re-running an existing id resumes it)")
     tour.add_argument("--format", choices=("text", "json"), default="text")
+    syn = sub.add_parser("sync", help="verify, replay and load every match log into the results DB (DATABASE_URL)")
+    syn.add_argument(
+        "--rebuild", action="store_true", help="empty and reload the derived tables in one transaction (schema owner)"
+    )
+    syn.add_argument("--boot", type=int, default=200, help="bootstrap resamples for the ratings snapshot")
+    syn.add_argument("--format", choices=("text", "json"), default="text")
+    db_p = sub.add_parser("db", help="results database administration")
+    db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
+    db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
+    out_p = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
+    out_p.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
     exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
     exp_sub = exp.add_subparsers(dest="experiment", required=True)
     stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
@@ -116,7 +138,7 @@ def _summary(state: MatchState) -> str:
 def _observer(settings: Settings, mid: str, args: argparse.Namespace) -> Commentary | ArenaView | None:
     if args.format != "text":
         return None
-    limit, lifetime = settings.budget.key_limit_usd, build_ledger(settings).total_usd
+    limit, lifetime = settings.budget.lifetime_max_usd, build_ledger(settings).total_usd
     if args.view == "arena" or (args.view == "auto" and sys.stdout.isatty()):
         return ArenaView(Console(), mid, limit, lifetime, pace=max(args.pace, 0.0))
     return Commentary(sys.stdout, mid, limit, lifetime)
@@ -170,6 +192,9 @@ def _dispatch(args: argparse.Namespace) -> int:
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
+        "sync": lambda: _sync(settings, args.rebuild, max(args.boot, 0), args.format),
+        "export": lambda: _export(settings, args.out),
+        "db": lambda: _migrate(settings),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
         "experiment": lambda: _experiment(settings, args),
     }
@@ -221,7 +246,7 @@ def _bench(settings: Settings, manifest: Path, tries: int, fmt: str) -> int:
 
 
 def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
-    chosen = model or settings.openai_model
+    chosen = model or settings.default_model("openai")
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
@@ -327,6 +352,32 @@ def _card(settings: Settings, match_id: str, out: Path | None) -> int:
     path.write_text(card_svg(card_data(state, report, events)), encoding="utf-8")
     print(f"card written: {path}")
     return 0 if report.consistent else 1
+
+
+def _migrate(settings: Settings) -> int:
+    applied = migrate_results(settings)
+    print(f"migrations applied: {', '.join(applied)}" if applied else "migrations: up to date")
+    return 0
+
+
+def _sync(settings: Settings, rebuild: bool, boot: int, fmt: str) -> int:
+    db = build_results(settings, owner=rebuild)
+    log, snaps = build_event_log(settings), build_store(settings)
+    report = sync(log, snaps, db, boot=boot, rebuild=rebuild, git_sha=git_sha())
+    if fmt == "json":
+        print(json.dumps(dataclasses.asdict(report)))
+    else:
+        print(f"sync run {report.run_id}: {report.inserted} loaded, {report.skipped} up to date")
+        for mid, reason in sorted(report.rejected.items()):
+            print(f"rejected {mid}: {reason}")
+    return 1 if report.rejected else 0
+
+
+def _export(settings: Settings, out: Path) -> int:
+    manifest = write_export(build_public_reader(settings), out)["manifest"]
+    assert isinstance(manifest, dict)
+    print(f"export written: {out} ({len(manifest['heads'])} matches, digest {manifest['digest'][:16]})")
+    return 0
 
 
 def _silence_stdout() -> None:
