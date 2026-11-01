@@ -50,6 +50,7 @@ _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
 TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+VALIDATION_TIME_FACTOR = 6  # S10-1: all validation runs of one challenge share this many wall_seconds
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
@@ -591,13 +592,21 @@ class MatchEngine:
         second = _decoy(state, cid, "second")
         if second not in self._run_challenge(spec.source, spec.reference_payload, second, state, "validate").stdout:
             return "flag-dependent: the reference payload only works for one flag (it must not depend on FLAG)"
-        empty = self._run_challenge(spec.source, "", flag, state, "validate")
-        if flag in empty.stdout:
-            return "trivial: empty input reveals flag"
-        for probe in junk_inputs(spec.reference_payload):
-            if flag in self._run_challenge(spec.source, probe, flag, state, "validate").stdout:
-                return f"trivial: junk input {probe[:20]!r} reveals flag"
-        return self._density(state, cid, spec)
+        return self._probes(state, spec, flag) or self._density(state, cid, spec)
+
+    def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
+        """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
+        budget = time.monotonic() + VALIDATION_TIME_FACTOR * state.limits.wall_seconds
+        for probe in ["", *junk_inputs(spec.reference_payload)]:
+            if time.monotonic() > budget:
+                return "too slow: validation ran over its time budget; check must answer every input quickly"
+            out = self._run_challenge(spec.source, probe, flag, state, "validate")
+            shown = "empty input" if not probe else f"junk input {probe[:20]!r}"
+            if flag in out.stdout:
+                return f"trivial: {shown} reveals flag"
+            if out.timed_out or out.killed_reason in ("wall", "signal"):
+                return f"too slow: {shown} timed out or was killed; check must answer every input quickly"
+        return None
 
     def _density(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
         """R1 lower bound: seeded random inputs shaped like the answer must rarely pass check()."""
