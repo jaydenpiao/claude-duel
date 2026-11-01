@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from claude_duel.config import load_settings
-from claude_duel.domain.errors import ConfigError
 
 
 def _cfg(tmp_path: Path, kind: str) -> Path:
@@ -12,11 +11,7 @@ def _cfg(tmp_path: Path, kind: str) -> Path:
     return p
 
 
-def test_ledger_scoring_is_rejected_until_192(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"scoring kind 'ledger' is not available yet.*#192"):
-        load_settings(_cfg(tmp_path, "ledger"), env={})
-
-
-@pytest.mark.parametrize("kind", ["classic", "efficiency", "timed"])
-def test_other_scoring_kinds_still_load(tmp_path: Path, kind: str) -> None:
+@pytest.mark.parametrize("kind", ["classic", "efficiency", "timed", "ledger"])
+def test_every_scoring_kind_loads(tmp_path: Path, kind: str) -> None:
+    """Ledger stakes are wired into matches here, so ledger scoring loads like the others."""
     assert load_settings(_cfg(tmp_path, kind), env={}).rules.scoring.kind == kind

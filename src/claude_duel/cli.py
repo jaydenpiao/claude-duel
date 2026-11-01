@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from claude_duel.app.backup import backup
 from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
 from claude_duel.app.container import (
@@ -101,6 +102,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     syn.add_argument("--boot", type=int, default=200, help="bootstrap resamples for the ratings snapshot")
     syn.add_argument("--format", choices=("text", "json"), default="text")
+    sub.add_parser("backup", help="copy event logs and state (never secrets) to the GCS replay bucket").add_argument(
+        "--bucket", help="gs:// destination (default DUEL_REPLAY_BUCKET)"
+    )
     db_p = sub.add_parser("db", help="results database administration")
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
@@ -196,6 +200,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "card": lambda: _card(settings, args.match_id, args.out),
         "sync": lambda: _sync(settings, args.rebuild, max(args.boot, 0), args.format),
         "export": lambda: _export(settings, args.out),
+        "backup": lambda: _backup(settings, args.bucket),
         "db": lambda: _migrate(settings),
         "bench": lambda: _bench(settings, args.manifest, args.tries, args.format),
         "experiment": lambda: _experiment(settings, args),
@@ -222,6 +227,12 @@ def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> 
             view(e)
     finally:
         view.close()
+
+
+def _backup(settings: Settings, bucket: str | None) -> int:
+    files = backup(settings.store_dir, bucket or settings.replay_bucket)
+    print(f"backed up {len(files)} replay files")
+    return 0
 
 
 def _experiment(settings: Settings, args: argparse.Namespace) -> int:
