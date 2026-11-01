@@ -71,5 +71,11 @@ queryable index, and a future public page needs data that provably holds no flag
 - `duel backup` (#213) copies finished, unlocked matches' `<id>.events.jsonl` and `<id>.json` to
   `DUEL_REPLAY_BUCKET`, a private GCS bucket with public access prevention enforced. `*.secret` never leaves the box,
   symlinked matches are skipped, file names reach `gcloud storage cp -I` on stdin only, and each file is scanned for
-  every flag variant of its match before upload (any hit refuses the whole run). It is a raw replay archive, not part
-  of the public export; the database and `public_v` rules above are unchanged.
+  every flag variant of its match and for the match secret before upload (any hit refuses the whole run). It is a raw
+  replay archive, not part of the public export; the database and `public_v` rules above are unchanged.
+- Key scan (#264): a file with API-key-shaped text (`flags.KEY_PATTERNS`) holds back only its own match, which is
+  reported as skipped and never sent; ordinary model text can trip it, so it does not abort the run.
+- Ports (#264): the file list comes from the store (`ReplaySource.replays`) and the copy goes through the `Uploader`
+  port (`adapters/store/gcs.py`); `app/backup.py` never globs the store directory or calls `gcloud` itself.
+- Private bucket (#224): the `Uploader` checks that the bucket enforces public access prevention before every copy
+  and refuses otherwise; the check stays behind the port.
