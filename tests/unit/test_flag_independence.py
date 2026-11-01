@@ -91,3 +91,10 @@ def test_validation_over_its_time_budget_is_rejected(make_engine, new_state, mon
     state, ch = run_bob(make_engine, new_state, source=HANGS, reference_payload="0000003")
     assert not state.validations[ch.id].valid
     assert any("time budget" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+
+
+def test_junk_inputs_keep_the_answer_shape() -> None:
+    """S11-1: last and middle char swapped within their class (digit, letter, other)."""
+    assert {"0000004", "0001003"} <= set(junk_inputs("0000003"))
+    assert {"abD", "acC"} <= set(junk_inputs("abC"))
+    assert "ab#" in junk_inputs("ab!")
