@@ -71,6 +71,9 @@ never resumed, and counts as void (no winner, excluded from ratings). A seed wit
 1. **Neutral labels and seat swap.** Agents are named `a`/`b`, never by vendor. Each seed is played twice,
    once with Claude as `a` and once as `b`. The dry run below shows why: with identical fake agents, the
    winner followed the *name* (the fake hashes it), not the seat. With the seats swapped, the same name still won.
+   Model names (#219, #229) are display labels only: the arena, commentary, card and replay output show them,
+   but agent ids stay `a`/`b` and no prompt or system prompt names a model or vendor (pinned by
+   `tests/integration/test_neutral_labels.py`). Clarified 2026-10-31, before any spend.
 2. **Replay verification.** Every match log must replay to the same state (`series verified ✓`). A mismatch
    voids the match.
 3. **Empty-challenge integrity control** (required before launch, ~$0; `integrity_control = true` in launch.toml). A challenge that can never print the
