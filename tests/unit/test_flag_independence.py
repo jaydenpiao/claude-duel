@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from claude_duel.app.engine import junk_inputs
@@ -65,3 +67,27 @@ def test_degenerate_acceptance_is_rejected(make_engine, new_state, source: str) 
 def test_junk_inputs_skip_the_answer() -> None:
     assert "0000003" not in junk_inputs("0000003")
     assert {"a", "0", "AAAAAAA", "a000003"} <= set(junk_inputs("0000003"))
+
+
+HANGS = (
+    "import sys\n"
+    "s = sys.stdin.read().strip()\n"
+    "if s.isdigit() and int(s) * 7 == 21 and len(s) == 7:\n    print(FLAG)\n"
+    "else:\n    n = 0\n    for i in range(10**10):\n        n += i\n"
+)
+
+
+def test_a_check_that_hangs_on_wrong_input_is_rejected_fast(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    t = time.monotonic()
+    state, ch = run_bob(make_engine, new_state, source=HANGS, reference_payload="0000003")
+    took = time.monotonic() - t
+    assert not state.validations[ch.id].valid
+    assert any("timed out" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
+    assert took < 2 * state.limits.wall_seconds + 2  # one probe timeout plus the fast runs and engine overhead
+
+
+def test_validation_over_its_time_budget_is_rejected(make_engine, new_state, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("claude_duel.app.engine.VALIDATION_TIME_FACTOR", -1)
+    state, ch = run_bob(make_engine, new_state)
+    assert not state.validations[ch.id].valid
+    assert any("time budget" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
