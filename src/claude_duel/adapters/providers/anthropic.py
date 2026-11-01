@@ -12,7 +12,7 @@ from __future__ import annotations
 import httpx
 from pydantic import SecretStr
 
-from claude_duel.adapters.providers.openai import raise_for_status
+from claude_duel.adapters.providers.http import raise_for_status
 from claude_duel.domain.errors import ProviderTimeoutError, QuotaExceededError, TransientProviderError
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -63,7 +63,7 @@ class AnthropicProvider:
             raise TransientProviderError("anthropic overloaded")
         if resp.status_code in (400, 402, 403) and "credit balance" in resp.text:
             raise QuotaExceededError("anthropic credit balance too low; top up or raise the limit")
-        raise_for_status(resp)
+        raise_for_status(resp, "anthropic")
         return _parse(resp)
 
 

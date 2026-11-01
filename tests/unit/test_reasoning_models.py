@@ -36,7 +36,7 @@ RESP = {
 
 
 def test_default_model_goes_to_responses_without_temperature() -> None:
-    model = Settings().openai_model
+    model = Settings().default_model("openai")
     assert model.startswith("gpt-5")
     sent: list[httpx.Request] = []
     _provider(model, RESP, sent).complete(REQ)

@@ -13,13 +13,8 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from claude_duel.domain.errors import (
-    PermanentProviderError,
-    ProviderTimeoutError,
-    QuotaExceededError,
-    RateLimitError,
-    TransientProviderError,
-)
+from claude_duel.adapters.providers.http import raise_for_status
+from claude_duel.domain.errors import ProviderTimeoutError, TransientProviderError
 from claude_duel.ports import RESPONSES_MODELS, Completion, CompletionRequest
 
 # Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
@@ -33,26 +28,6 @@ def default_effort(model: str, effort: str | None) -> str | None:
     if effort is not None:
         return effort
     return "minimal" if model.startswith(MINIMAL_EFFORT_MODELS) else None
-
-
-def _retry_after(resp: httpx.Response) -> float | None:
-    raw = resp.headers.get("retry-after")
-    try:
-        return float(raw) if raw is not None else None
-    except ValueError:
-        return None
-
-
-def raise_for_status(resp: httpx.Response) -> None:
-    """Map HTTP status to the provider error taxonomy (shared by HTTP adapters)."""
-    if resp.status_code == 429 and "insufficient_quota" in resp.text:
-        raise QuotaExceededError("openai quota exhausted or spend limit reached; top up or raise the limit")
-    if resp.status_code == 429:
-        raise RateLimitError("rate limited", _retry_after(resp))
-    if resp.status_code >= 500 or resp.status_code == 408:
-        raise TransientProviderError(f"server error {resp.status_code}")
-    if resp.status_code >= 400:
-        raise PermanentProviderError(f"client error {resp.status_code}")
 
 
 class OpenAIProvider:
@@ -87,7 +62,7 @@ class OpenAIProvider:
             raise ProviderTimeoutError("openai timeout") from exc
         except httpx.TransportError as exc:
             raise TransientProviderError(f"openai transport: {type(exc).__name__}") from exc
-        raise_for_status(resp)
+        raise_for_status(resp, "openai")
         try:
             data = resp.json()
             if not responses:
