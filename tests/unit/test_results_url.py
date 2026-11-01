@@ -17,7 +17,7 @@ def test_iam_url_escapes_the_iam_user_for_libpq() -> None:
     assert info["user"] == "duel-sql-proxy@project-0fedfc79-0519-43dd-8a0.iam"
     assert (info["host"], info["port"], info["dbname"]) == ("127.0.0.1", "5433", "duel")
     assert "password" not in info  # IAM auth through the proxy: no DB password
-    require_tls(IAM, {})  # loopback proxy: TLS is the proxy's job
+    require_tls(IAM, {})  # proxy over a Unix socket in a 0700 dir: TLS is the proxy's job
     assert iam_url("postgresql://u:p@127.0.0.1/db") == "postgresql://u:p@127.0.0.1/db"
 
 
