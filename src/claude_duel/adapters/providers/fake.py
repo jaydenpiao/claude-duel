@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from claude_duel.domain import terrain
 from claude_duel.domain.policy import MAZE_SOURCE
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -121,6 +122,9 @@ class FakeProvider:
             known = sorted(TEMPLATES, key=lambda t: _stable(agent, t.key))[: self._skill]
             attempt = int(_field(_ATTEMPT, request.prompt, "1"))
             payload = known[attempt - 1].payload if attempt <= len(known) else f"guess-{attempt}"
+            ground = re.search(r"\[terrain=([a-z0-9:]+)\]", request.prompt)
+            if ground:  # a skilled fake reasons through the transform
+                payload = terrain.invert(ground.group(1), payload) or payload
             body = {"payload": payload}
         return self._wrap(request, "```json\n" + json.dumps(body) + "\n```")
 
