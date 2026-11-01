@@ -72,9 +72,6 @@ class Settings(BaseModel):
         return agent.model or self.default_model(agent.provider)
 
 
-# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger was, until #192).
-UNAVAILABLE_SCORING: frozenset[str] = frozenset()
-
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
     "DUEL_METRICS": "metrics",
@@ -137,13 +134,6 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
         raise ConfigError(f"cannot read config {path}: {exc}") from exc
 
 
-def _check_scoring_available(rules: Rules) -> None:
-    if rules.scoring.kind in UNAVAILABLE_SCORING:
-        raise ConfigError(
-            f"scoring kind {rules.scoring.kind!r} is not available yet; use classic, efficiency, timed or ledger"
-        )
-
-
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
     data = _read_toml(path)
@@ -167,7 +157,6 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-    _check_scoring_available(settings.rules)
     _check_models(settings)
     return settings
 
