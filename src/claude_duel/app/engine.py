@@ -586,22 +586,36 @@ class MatchEngine:
             (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
             for c in targets
         ]
+        own = stakes.own_challenges(state.challenges, state.round, attacker)
+        valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
+        own_rows = (
+            [(c.spec.title if c.spec else "", c.spec.source if c.spec else "", valid.get(c.id, False)) for c in own]
+            if rule.keystone
+            else None
+        )
         prompt = agents.allocate_prompt(
-            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker)
+            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
         raw: object = None
+        pick: object = None
         if allowance.empty(state, attacker) is None:
             completion = self._complete(state, attacker, prompt, "allocate")
             try:
                 if not completion.truncated:
-                    raw = agents.parse_allocation(completion.text)
+                    move = agents.parse_allocation(completion.text)
+                    raw, pick = move.stakes, move.keystone
             except MalformedOutputError:
                 self._metrics.incr("model.malformed", purpose="allocate")
         chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
+        if rule.keystone:  # sealed with the allocation: same call, so it costs nothing extra
+            index = stakes.pick_keystone(pick, own, valid)
+            salt = stakes.keystone_salt(state.seed, state.round, attacker)
+            commit = stakes.keystone_commit(index, salt)
+            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
         self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
@@ -694,6 +708,13 @@ class MatchEngine:
     def _score(self, state: MatchState) -> None:
         if state.round in state.scored_rounds:
             return  # idempotent resume
+        for key, ks in sorted(state.keystones.items()):  # reveal after every attack, before scoring
+            r, author = key.split(":", 1)
+            if int(r) == state.round and not ks.revealed:
+                salt = stakes.keystone_salt(state.seed, state.round, author)
+                n = len(stakes.own_challenges(state.challenges, state.round, author))
+                index = stakes.open_keystone(ks.commit, salt, n)  # the seal logs only the commit
+                self._checkpoint(state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=index, salt=salt)
         delta = score_round(
             state.round,
             [a.name for a in state.agents],
@@ -701,5 +722,6 @@ class MatchEngine:
             state.validations,
             state.attacks,
             state.rules,
+            stakes.keystone_targets(state, state.round),
         )
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
