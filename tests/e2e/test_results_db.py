@@ -17,8 +17,10 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from claude_duel.adapters.store import results_sql
 from claude_duel.adapters.store.file_store import FileMatchStore
-from claude_duel.adapters.store.postgres import PostgresResults, PublicReader, connect, migrate, require_current
+from claude_duel.adapters.store.postgres import PgExecutor, PublicReader, connect
+from claude_duel.adapters.store.results_sql import SqlResults
 from claude_duel.cli import main
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 from claude_duel.domain.flags import assert_no_flag, flag_of
@@ -53,7 +55,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, st
     name = _new_db()
     owner = _url(name, "duel_test_owner", OWNER_PW)
     with connect(owner) as conn:
-        migrate(conn)
+        results_sql.migrate(PgExecutor(conn))
     with psycopg.connect(ADMIN, autocommit=True) as admin:
         admin.execute(f"alter role duel_exporter login password '{EXPORTER_PW}'")
         if admin.execute("select 1 from pg_roles where rolname = 'duel_test_ingest'").fetchone() is None:
@@ -149,7 +151,7 @@ def test_public_reader_refuses_writer_roles(db: dict[str, str]) -> None:
 
 def test_schema_hardening(db: dict[str, str]) -> None:
     with connect(db["owner"]) as conn:
-        assert migrate(conn) == []  # idempotent
+        assert results_sql.migrate(PgExecutor(conn)) == []  # idempotent
         tables = conn.execute(
             "select relname, relrowsecurity, relforcerowsecurity from pg_class c"
             " join pg_namespace n on n.oid = c.relnamespace where nspname = 'duel' and relkind = 'r'"
@@ -261,9 +263,9 @@ def test_sync_refuses_superuser_and_pending_migrations(
         with connect(owner) as conn:
             conn.execute("update duel.schema_migrations set sha256 = repeat('0', 64)")
             with pytest.raises(ConfigError, match="forward-only"):
-                require_current(conn)
+                results_sql.require_current(PgExecutor(conn))
             with pytest.raises(ConfigError, match="forward-only"):
-                migrate(conn)
+                results_sql.migrate(PgExecutor(conn))
     finally:
         _drop(fresh)
 
@@ -273,7 +275,7 @@ def test_concurrent_migrations_apply_once() -> None:
     try:
         owner = _url(fresh, "duel_test_owner", OWNER_PW)
         with ThreadPoolExecutor(2) as pool:
-            done = list(pool.map(lambda _: migrate(connect(owner)), range(2)))
+            done = list(pool.map(lambda _: results_sql.migrate(PgExecutor(connect(owner))), range(2)))
         assert sorted(len(d) for d in done) == [0, 1]
     finally:
         _drop(fresh)
@@ -286,14 +288,14 @@ def test_security_definer_functions_are_refused(db: dict[str, str]) -> None:
             " as 'select string_agg(rules::text, '','') from duel.matches'"
         )
         with pytest.raises(ConfigError, match="SECURITY DEFINER"):
-            require_current(conn)
+            results_sql.require_current(PgExecutor(conn))
     with connect(db["exporter"]) as conn, pytest.raises(ConfigError, match="SECURITY DEFINER"):
         PublicReader(conn)
 
 
 def test_database_errors_are_redacted(db: dict[str, str]) -> None:
     with connect(db["ingest"]) as conn:
-        results = PostgresResults(conn)
+        results = SqlResults(PgExecutor(conn))
         with pytest.raises(ResultsDbError) as err:
             results.start_run("not-a-uuid-secret-value", None)
     assert "secret-value" not in str(err.value)
