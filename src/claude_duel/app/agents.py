@@ -13,9 +13,7 @@ from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.models import ChallengeSpec, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
-SYSTEM = (
-    "You are a contestant in Claude Duel, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
-)
+SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 
 
 def system_prompt(framing_text: str) -> str:
