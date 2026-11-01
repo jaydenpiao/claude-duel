@@ -6,14 +6,30 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only.
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
+- Default model is gpt-5-nano; the code default lifetime cap is $33.
+- Hypothesis runs without a per-example deadline in CI.
+- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
+- Shared driver helpers for match, series and tournament drivers.
+- Public-facing repo docs (security policy, code owners, issue templates).
+- Review-code gate is case-insensitive and covers `docs/`.
+- Results index is Cloud SQL only (`results_sql`, IAM via cloud-sql-proxy Unix socket); Neon dropped (#156).
+- Provider registry: vendors and factories behind one table (#154).
+- gpt-4.1-nano removed from the allowlist (#209).
+- SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
+- `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
+- Ledger rejection of malformed stakes (#208).
+- Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
+- `open_match` helper for drivers (#185).
+- PROPHECY core (#214; engine wiring follows).
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
 - Flag-form detection covers split and shifted encodings in the redactor.
@@ -26,14 +42,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
-
-### Changed
-- Default model is gpt-5-nano; the code default lifetime cap is $33.
-- Hypothesis runs without a per-example deadline in CI.
-- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
-- Shared driver helpers for match, series and tournament drivers.
-- Public-facing repo docs (security policy, code owners, issue templates).
-- Review-code gate is case-insensitive and covers `docs/`.
 
 ## [0.1.0]
 First public release.

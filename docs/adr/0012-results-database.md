@@ -39,7 +39,7 @@ queryable index, and a future public page needs data that provably holds no flag
   operator, never on TCP loopback and never as the CI runner's uid, so other local processes can't borrow its
   login. Routine `duel sync` refuses a role that owns a `duel` table (`refuse_table_owner`), and the export refuses
   any write or owner role. Keep every URL and key out of the repo and CI.
-- Transport: `PostgresResults` uses psycopg to the local proxy, which dials Google with IAM + TLS.
+- Transport: `SqlResults(PgExecutor(conn))` uses psycopg to the local proxy's Unix socket, which dials Google with IAM + TLS.
 
 
 ## Amendments (review fixes, 2026-10-22)

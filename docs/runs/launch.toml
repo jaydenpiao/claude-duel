@@ -16,6 +16,6 @@ variety = true
 integrity_control = true
 attacker_solver = true
 framing = { kind = "neutral" }
-[budget]
+[budget]  # fallback only: every arm in launch-arms.toml overrides both caps
 match_max_usd = 0.75
 run_max_usd = 20.0
