@@ -17,6 +17,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
+from claude_duel.domain import stakes
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.series import game_winner
@@ -183,6 +184,43 @@ def test_ledger_match_stops_at_the_call_cap(make_engine, new_state, store, calls
     assert state.usage.calls == calls
 
 
+def test_keystones_sealed_then_revealed_and_replayed(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    provs = {"alice": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 1}'), "bob": Allocating("not json")}
+    state = make_engine(providers=provs).run(_ledger(new_state))
+    log = event_log.read("l1")
+    types = [e.type for e in log]
+    sealed = [e.data for e in log if e.type == ev.KEYSTONE_SEALED]
+    assert [(d["round"], d["agent"]) for d in sealed] == [(1, "alice"), (1, "bob"), (2, "alice"), (2, "bob")]
+    opened = [e.data for e in log if e.type == ev.KEYSTONE_REVEALED]
+    assert {d["agent"]: d["index"] for d in opened if d["round"] == 1} == {"alice": 1, "bob": None}
+    for r in (1, 2):  # reveal comes after every attack of the round and before its score
+        reveals = [i for i, e in enumerate(log) if e.type == ev.KEYSTONE_REVEALED and e.data["round"] == r]
+        attacks = [
+            i for i, e in enumerate(log) if e.type == ev.CHALLENGE_ATTACKED and e.data["key"].startswith(f"r{r}-")
+        ]
+        scored = next(i for i, e in enumerate(log) if e.type == ev.ROUND_SCORED and e.data["round"] == r)
+        assert len(reveals) == 2
+        assert max(attacks) < min(reveals)
+        assert max(reveals) < scored
+    assert all(ks.revealed for ks in state.keystones.values())
+    assert types.count(ev.KEYSTONE_REVEALED) == 4
+    assert all("index" not in e.data for e in log if e.type == ev.KEYSTONE_SEALED)  # the seal logs only the commit
+    assert replay(state, log).consistent
+
+
+def test_keystone_never_reaches_the_opponent_before_reveal(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    """Spec test 4, differential: alice's keystone index changes nothing bob sees in round 1."""
+    seen = []
+    for mid, pick in (("k1", 0), ("k2", 2)):
+        alice = Allocating(json.dumps({"stakes": [4000, 4000, 4000], "keystone": pick}))
+        provs = {"alice": alice, "bob": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 1}')}
+        state = make_engine(providers=provs).run(_ledger(new_state, mid))
+        assert state.keystones["1:alice"].index == pick
+        seen.append(_round_one(provs["bob"].prompts))
+    assert len(seen[0]) > 3
+    assert seen[0] == seen[1]
+
+
 def test_ledger_match_stops_at_the_dollar_cap(new_state, store, event_log, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Spec test 10 (dollars): priced like gpt-5-nano, allocate calls included, the match cap aborts the match
     once spend reaches it, before any further call. It ends CAPPED (ADR 0014)."""
@@ -216,6 +254,20 @@ def test_no_attack_call_when_the_stake_left_is_below_the_floor(make_engine, new_
     mine = [a for a in state.attacks.values() if a.attacker == "alice"]
     assert all(a.reason == "stake exhausted" and a.attempts == 0 for a in mine)
     assert not [p for p, _ in provs["alice"].prompts if p == "attack"]
+
+
+def test_keystone_pick_shows_sources_and_memory_recalls_past_keystones(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    provs = {
+        "alice": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 1}'),
+        "bob": Allocating('{"stakes": [4000, 4000, 4000], "keystone": 0}'),
+    }
+    state = make_engine(providers=provs).run(_ledger(new_state))
+    alloc = [p for purpose, p in provs["alice"].prompts if purpose == "allocate"]
+    assert len(alloc) == 2
+    own = stakes.own_challenges(state.challenges, 1, "alice")
+    assert all(c.spec is not None and c.spec.source.strip().splitlines()[0] in alloc[0] for c in own)
+    assert "(keystone)" not in alloc[0]  # nothing to recall in round 1
+    assert alloc[1].count("(keystone)") == 2  # round 2 memory: alice's and bob's revealed round-1 keystones
 
 
 class Heavy(Allocating):

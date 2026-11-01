@@ -200,8 +200,11 @@ def _postgres() -> ModuleType:
         raise ConfigError("the results database needs psycopg: install claude-duel[db]") from None
 
 
-def results_executor(settings: Settings, url: str) -> Executor:
-    """psycopg to the results database (cloud-sql-proxy on loopback in production); imported only when used."""
+def results_executor(url: str) -> Executor:
+    """psycopg to the results database (in production a cloud-sql-proxy Unix socket in a 0700 dir, ADR 0012).
+
+    psycopg is imported only when used.
+    """
     pg = _postgres()
     ex: Executor = pg.PgExecutor(pg.connect(url))
     return ex
@@ -212,7 +215,7 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
 
     Fails clearly if migrations are pending: run ``duel db migrate``.
     """
-    ex = results_executor(settings, _owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
+    ex = results_executor(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
     refuse_superuser(ex)
     require_current(ex)
     if not owner:
@@ -222,7 +225,7 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
 
 def migrate_results(settings: Settings) -> list[str]:
     """``duel db migrate``: apply pending migrations as the schema owner. Returns the names applied."""
-    return migrate(results_executor(settings, _owner_url(settings)))
+    return migrate(results_executor(_owner_url(settings)))
 
 
 def git_sha() -> str | None:

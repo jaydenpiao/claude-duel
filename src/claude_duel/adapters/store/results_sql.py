@@ -88,45 +88,6 @@ def check_applied(applied: dict[str, str]) -> list[str]:
     return [name for name in bundled if name not in applied]
 
 
-def split_statements(text: str) -> list[str]:
-    """Split a migration file on top-level ``;`` (HTTP transports run one statement per query).
-
-    Understands ``--`` comments, ``'...'`` strings, ``"..."`` identifiers and ``$tag$...$tag$`` bodies.
-    """
-    out: list[str] = []
-    buf: list[str] = []
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if text.startswith("--", i):
-            end = text.find("\n", i)
-            i = n if end < 0 else end
-            continue
-        if c in "'\"":
-            end = text.index(c, i + 1)
-            while text.startswith(c, end + 1):  # doubled quote
-                end = text.index(c, end + 2)
-            buf.append(text[i : end + 1])
-            i = end + 1
-            continue
-        if c == "$":
-            close = text.find("$", i + 1)
-            tag = text[i : close + 1] if close > 0 else ""
-            if tag and (tag == "$$" or tag[1:-1].isidentifier()):
-                end = text.index(tag, close + 1) + len(tag)
-                buf.append(text[i:end])
-                i = end
-                continue
-        if c == ";":
-            out.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(c)
-        i += 1
-    out.append("".join(buf).strip())
-    return [s for s in out if s]
-
-
 def _applied(ex: Executor) -> dict[str, str]:
     if not ex.query("select to_regclass('duel.schema_migrations') is not null as present")[0]["present"]:
         return {}
@@ -154,7 +115,7 @@ def migrate(ex: Executor) -> list[str]:
     for name, digest, text in migrations():
         if name in pending:
             stmts.append(("insert into duel.schema_migrations (name, sha256) values (%s, %s)", (name, digest)))
-            stmts += [(s, ()) for s in split_statements(text)]  # our own bundled file, never input
+            stmts.append((text, ()))  # our own bundled file, never input; psycopg runs it whole (no params)
     try:
         ex.batch(stmts)
     except ResultsDbError as exc:

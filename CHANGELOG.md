@@ -18,8 +18,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Shared driver helpers for match, series and tournament drivers.
 - Public-facing repo docs (security policy, code owners, issue templates).
 - Review-code gate is case-insensitive and covers `docs/`.
+- Results index is Cloud SQL only (`results_sql`, IAM via cloud-sql-proxy Unix socket); Neon dropped (#156).
+- Provider registry: vendors and factories behind one table (#154).
+- gpt-4.1-nano removed from the allowlist (#209).
+- SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
+- Ledger rejection of malformed stakes (#208).
+- Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
+- `open_match` helper for drivers (#185).
+- PROPHECY core (#214; engine wiring follows).
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
 - Flag-form detection covers split and shifted encodings in the redactor.
