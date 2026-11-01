@@ -10,14 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from claude_duel.adapters.store.file_store import FileMatchStore
+from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
+from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.app import backup as backup_mod
-from claude_duel.app.backup import backup, scan_deep
+from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.errors import ConfigError, FlagLeakError
-from claude_duel.domain.flags import flag_of
-from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits, Stage
+from claude_duel.domain.flags import HEX_PATTERN, KEY_PATTERNS, SECRET_PATTERNS, flag_of, match_flags
+from claude_duel.domain.models import AgentSpec, Challenge, Event, MatchState, Rules, SandboxLimits, Stage
 
 BUCKET = "gs://project-0fedfc79-0519-43dd-8a0-duel-replays"
+PRIVATE = '{"public_access_prevention": "enforced"}'
 
 
 def _match(root: Path, mid: str, stage: Stage = Stage.COMPLETE, log: str = "{}\n") -> None:
@@ -42,6 +44,10 @@ class Gcloud:
     def __call__(self, cmd: Sequence[str], stdin: str) -> int:
         self.calls.append((list(cmd), stdin.splitlines()))
         return self.code
+
+
+def backup(root: Path, bucket: str | None, run: Gcloud) -> list[Path]:
+    return backup_mod.backup(FileMatchStore(root), GcloudUploader(run, lambda _: PRIVATE), bucket).files
 
 
 def test_backup_sends_finished_matches_but_never_secrets(tmp_path: Path) -> None:
@@ -107,29 +113,124 @@ def test_backup_refuses_a_bad_bucket_or_a_failed_copy(tmp_path: Path) -> None:
     assert os.access(tmp_path / "m1.secret", os.R_OK)
 
 
-@pytest.fixture(autouse=True)
-def _bucket_is_private(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(backup_mod, "_describe", lambda _: '{"public_access_prevention": "enforced"}')
+def _rekeyed() -> MatchState:
+    """c1 was built on its third try, though only one repair error was kept (re-keyed epoch)."""
+    return MatchState(
+        match_id="m",
+        secret="s3cret",
+        agents=(AgentSpec(name="alice"), AgentSpec(name="bob")),
+        rules=Rules(rounds=1),
+        limits=SandboxLimits(),
+        challenges={"c1": Challenge(id="c1", round=1, author="alice", spec=None, flag_epoch=2)},
+        build_errors={"c1": ["x"], "c2": ["y", "z"]},
+    )
 
 
-@pytest.mark.parametrize("info", ['{"public_access_prevention": "inherited"}', "{}", "not json", ""])
+def test_match_flags_cover_every_epoch_and_extra_ids() -> None:
+    flags = match_flags(_rekeyed(), ["c3"])
+    want = [flag_of("s3cret", "c1", e) for e in range(3)] + [flag_of("s3cret", "c2", e) for e in range(3)]
+    assert flags == [*want, flag_of("s3cret", "c3", 0)]
+    assert match_flags(_rekeyed().model_copy(update={"secret": ""})) == []
+
+
+def test_backup_and_engine_share_one_flag_set(tmp_path: Path) -> None:
+    """M20: the built epoch's flag refuses the backup and the engine's event guard alike."""
+    state = _rekeyed().model_copy(update={"stage": Stage.COMPLETE})
+    FileMatchStore(tmp_path).save(state)
+    leak = flag_of("s3cret", "c1", 2)
+    (tmp_path / "m.events.jsonl").write_text(leak + "\n")
+    with pytest.raises(FlagLeakError):
+        backup(tmp_path, BUCKET, Gcloud())
+    with pytest.raises(FlagLeakError):
+        MatchEngine._no_flags(state, Event(seq=1, trace_id="t", type="note", data={"text": leak}))
+
+
+@pytest.mark.parametrize(
+    "leak",
+    ["sk-proj-" + "A" * 24, "sk-ant-api03-" + "B" * 24, "api_key=" + "c" * 12],
+    ids=["openai", "anthropic", "api-key-assignment"],
+)
+def test_an_api_key_shape_skips_only_that_match(tmp_path: Path, leak: str) -> None:
+    """M24: a key shape (often just model text) holds back its match, never uploaded, and the run goes on."""
+    _match(tmp_path, "m1", log=f'{{"note": "{leak}"}}\n')
+    _match(tmp_path, "m2")
+    run = Gcloud()
+    result = backup_mod.backup(FileMatchStore(tmp_path), GcloudUploader(run, lambda _: PRIVATE), BUCKET)
+    assert [p.name for p in result.files] == ["m2.events.jsonl", "m2.json"]
+    assert result.skipped == ["m1.events.jsonl: API-key-shaped text; match m1 not backed up"]
+    ((_, paths),) = run.calls
+    assert not any("m1." in p for p in paths)
+
+
+def test_key_scan_is_the_named_key_patterns() -> None:
+    """M24: the backup scans by name, not by position in SECRET_PATTERNS; the long-hex rule (event hashes) is out."""
+    assert backup_mod.KEY_PATTERNS is KEY_PATTERNS
+    assert HEX_PATTERN not in KEY_PATTERNS
+    assert (*KEY_PATTERNS, HEX_PATTERN) == SECRET_PATTERNS
+    assert not any(k.search("a" * 64) for k in KEY_PATTERNS)
+
+
+class _MemSource:
+    """A non-file store: backup lists files only through ``ReplaySource.replays`` (M23)."""
+
+    def __init__(self, root: Path, state: MatchState) -> None:
+        self.state, self.files = state, [root / "elsewhere.events.jsonl"]
+        self.files[0].write_text("{}\n")
+
+    def replays(self) -> list[tuple[str, list[Path]]]:
+        return [(self.state.match_id, self.files)]
+
+    def lock(self, match_id: str) -> FileLock:
+        return FileLock(self.files[0].with_suffix(".lock"))
+
+    def load(self, match_id: str) -> MatchState:
+        return self.state
+
+    def save(self, state: MatchState) -> None: ...
+
+    def snapshot(self, match_id: str) -> MatchState:
+        return self.state
+
+
+def test_backup_lists_files_through_the_store_port(tmp_path: Path) -> None:
+    state = _rekeyed().model_copy(update={"stage": Stage.COMPLETE})
+    (tmp_path / "m9.events.jsonl").write_text("{}\n")  # a stray file in the dir: never globbed
+    run = Gcloud()
+    result = backup_mod.backup(_MemSource(tmp_path, state), GcloudUploader(run, lambda _: PRIVATE), BUCKET)
+    assert [p.name for p in result.files] == ["elsewhere.events.jsonl"]
+    assert run.calls[0][1] == [str(tmp_path / "elsewhere.events.jsonl")]
+
+
+def test_the_match_secret_refuses_the_backup(tmp_path: Path) -> None:
+    _match(tmp_path, "m1", log='{"note": "s3cret"}\n')
+    run = Gcloud()
+    with pytest.raises(FlagLeakError, match="secret"):
+        backup(tmp_path, BUCKET, run)
+    assert run.calls == []
+
+
+def test_odd_match_ids_are_never_listed(tmp_path: Path) -> None:
+    _match(tmp_path, "m1")
+    for ext in ("secret", "json", "events.jsonl"):  # the store would refuse this id, so plant the files by hand
+        (tmp_path / f"m_2.{ext}").write_bytes((tmp_path / f"m1.{ext}").read_bytes())
+    sent = backup(tmp_path, BUCKET, Gcloud())
+    assert {p.name for p in sent} == {"m1.events.jsonl", "m1.json"}
+
+
+@pytest.mark.parametrize("info", ['{"public_access_prevention": "inherited"}', "{}", "[]", "not json", ""])
 def test_bucket_without_public_access_prevention_is_refused(tmp_path: Path, info: str) -> None:
     _match(tmp_path, "m1")
     run = Gcloud()
     with pytest.raises(ConfigError, match="public access prevention"):
-        backup(tmp_path, BUCKET + "/x", run, describe=lambda _: info)
+        backup_mod.backup(FileMatchStore(tmp_path), GcloudUploader(run, lambda _: info), BUCKET + "/x")
     assert run.calls == []
 
 
 def test_private_check_uses_the_bucket_root(tmp_path: Path) -> None:
     _match(tmp_path, "m1")
     seen: list[str] = []
-    backup(
-        tmp_path,
-        BUCKET + "/a/b",
-        Gcloud(),
-        describe=lambda b: seen.append(b) or '{"public_access_prevention": "enforced"}',
-    )
+    uploader = GcloudUploader(Gcloud(), lambda b: seen.append(b) or PRIVATE)
+    backup_mod.backup(FileMatchStore(tmp_path), uploader, BUCKET + "/a/b")
     assert seen == [BUCKET]
 
 
@@ -145,7 +246,7 @@ def _forms(flag: str) -> list[str]:
 
 
 @pytest.mark.parametrize("index", range(5))
-def test_s5_3_encodings_refuse_the_backup(tmp_path: Path, index: int) -> None:
+def test_rare_encodings_refuse_the_backup(tmp_path: Path, index: int) -> None:
     flag = flag_of("s3cret", "c1", 0)
     _match(tmp_path, "m1", log=f'{{"text": "{_forms(flag)[index]}"}}\n')
     with pytest.raises(FlagLeakError):
@@ -153,7 +254,7 @@ def test_s5_3_encodings_refuse_the_backup(tmp_path: Path, index: int) -> None:
 
 
 def test_ordinary_log_passes_the_deep_scan() -> None:
-    scan_deep(
+    backup_mod.scan_deep(
         '{"payload": "1000 337", "b64": "aGVsbG8gd29ybGQgdGhpcyBpcyBmaW5l", "n": 1010101}',
         "DUEL{" + "ab" * 16 + "}",
         "x",

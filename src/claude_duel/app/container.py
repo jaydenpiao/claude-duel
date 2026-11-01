@@ -18,6 +18,7 @@ from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_ru
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
+from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.adapters.store.results_sql import (
     Executor,
@@ -34,7 +35,7 @@ from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
 from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox, Uploader
 
 _LOG = logging.getLogger(__name__)
 
@@ -83,6 +84,10 @@ def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
 
 def build_store(settings: Settings) -> FileMatchStore:
     return FileMatchStore(settings.store_dir)
+
+
+def build_uploader() -> Uploader:
+    return GcloudUploader()
 
 
 def build_event_log(settings: Settings) -> FileEventLog:
@@ -190,8 +195,11 @@ def _owner_url(settings: Settings) -> str:
     return _db_url(settings.database_url, "MIGRATE_DATABASE_URL (or DATABASE_URL)")
 
 
-def results_executor(settings: Settings, url: str) -> Executor:
-    """psycopg to the results database (cloud-sql-proxy on loopback in production); imported only when used."""
+def results_executor(url: str) -> Executor:
+    """psycopg to the results database (in production a cloud-sql-proxy Unix socket in a 0700 dir, ADR 0012).
+
+    psycopg is imported only when used.
+    """
     from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415 - psycopg only when used
 
     return PgExecutor(connect(url))
@@ -202,7 +210,7 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
 
     Fails clearly if migrations are pending: run ``duel db migrate``.
     """
-    ex = results_executor(settings, _owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
+    ex = results_executor(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
     refuse_superuser(ex)
     require_current(ex)
     if not owner:
@@ -212,7 +220,7 @@ def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
 
 def migrate_results(settings: Settings) -> list[str]:
     """``duel db migrate``: apply pending migrations as the schema owner. Returns the names applied."""
-    return migrate(results_executor(settings, _owner_url(settings)))
+    return migrate(results_executor(_owner_url(settings)))
 
 
 def git_sha() -> str | None:
