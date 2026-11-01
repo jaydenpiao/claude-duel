@@ -68,11 +68,16 @@ class FileMatchStore:
             _write_atomic(secret, state.secret)
         _write_atomic(path, state.model_dump_json(indent=1))  # MatchState.secret is excluded from dumps
 
-    def load(self, match_id: str) -> MatchState:
+    def snapshot(self, match_id: str) -> MatchState:
+        """The saved state without its secret; ``<id>.secret`` is never opened (``duel sync`` uses this)."""
         path = self._path(match_id)
         if not path.exists():
             raise MatchNotFoundError(match_id)
-        state = MatchState.model_validate_json(path.read_text(encoding="utf-8"))
+        return MatchState.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def load(self, match_id: str) -> MatchState:
+        path = self._path(match_id)
+        state = self.snapshot(match_id)
         secret = path.with_suffix(".secret")
         if secret.exists():
             state.secret = secret.read_text(encoding="utf-8")

@@ -8,6 +8,6 @@ Status: accepted (revised 2026-10-21 after security review round 1).
 - Challenge code must also pass the AST allowlist in `domain/policy.py`.
 
 ## Round 2 hardening
-- Policy bans introspection attributes, submodule access and dunder strings (round-2 N1, arch #1).
+- Policy bans introspection attributes, submodule access and dunder strings.
 - Runner: minimal builtins (`policy.SAFE_BUILTINS`), restricted `__import__` returning module stand-ins without submodules, `sys` stand-in. A policy bypass alone no longer reaches `os`.
 - `SubprocessSandbox` takes a required `source_allowed`; production passes `fake.is_template`, so model-written code can only ever run in Docker.

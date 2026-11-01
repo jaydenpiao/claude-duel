@@ -48,7 +48,7 @@ def test_bars() -> None:
 
 def test_full_match_snapshot(tmp_path: Path) -> None:
     console = _console()
-    view = ArenaView(console, "snap", 50.0, lambda: 0.0031)
+    view = ArenaView(console, "snap", 33.0, lambda: 0.0031)
     play(Settings(store_dir=tmp_path, sandbox="subprocess", rules=Rules(rounds=2)), "snap", InMemoryMetrics(), view)
     view.close()
     view.close()  # idempotent
@@ -62,7 +62,7 @@ def test_full_match_snapshot(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("width", [1, 20, 40, 200])
 def test_any_width_renders(width: int) -> None:
-    m = ArenaModel(match_id="m", players=[Player("alice-with-a-long-name", "gpt-4.1-nano", 9), Player("bob", "x", -3)])
+    m = ArenaModel(match_id="m", players=[Player("alice-with-a-long-name", "gpt-4o-mini", 9), Player("bob", "x", -3)])
     m.flash = "x" * 500
     lines = _text(m, width).splitlines()
     assert lines
