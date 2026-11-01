@@ -73,6 +73,12 @@ class MatchStore(Protocol):
         ...
 
 
+class ReplaySource(MatchStore, Protocol):
+    def replays(self) -> list[tuple[str, list[Path]]]:
+        """``(match_id, files)`` per stored match: absolute replay files only, never a secret or a symlinked match."""
+        ...
+
+
 class MatchLock(Protocol):
     def __enter__(self) -> MatchLock: ...
 

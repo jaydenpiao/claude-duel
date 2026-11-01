@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from claude_duel.adapters.store.file_store import FileMatchStore
+from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.app import backup as backup_mod
 from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.errors import ConfigError, FlagLeakError
-from claude_duel.domain.flags import flag_of, match_flags
+from claude_duel.domain.flags import HEX_PATTERN, KEY_PATTERNS, SECRET_PATTERNS, flag_of, match_flags
 from claude_duel.domain.models import AgentSpec, Challenge, Event, MatchState, Rules, SandboxLimits, Stage
 
 BUCKET = "gs://project-0fedfc79-0519-43dd-8a0-duel-replays"
@@ -44,7 +44,7 @@ class Gcloud:
 
 
 def backup(root: Path, bucket: str | None, run: Gcloud) -> list[Path]:
-    return backup_mod.backup(root, FileMatchStore(root.resolve()), GcloudUploader(run), bucket)
+    return backup_mod.backup(FileMatchStore(root), GcloudUploader(run), bucket).files
 
 
 def test_backup_sends_finished_matches_but_never_secrets(tmp_path: Path) -> None:
@@ -147,12 +147,55 @@ def test_backup_and_engine_share_one_flag_set(tmp_path: Path) -> None:
     ["sk-proj-" + "A" * 24, "sk-ant-api03-" + "B" * 24, "api_key=" + "c" * 12],
     ids=["openai", "anthropic", "api-key-assignment"],
 )
-def test_an_api_key_shape_refuses_the_backup(tmp_path: Path, leak: str) -> None:
+def test_an_api_key_shape_skips_only_that_match(tmp_path: Path, leak: str) -> None:
+    """M24: a key shape (often just model text) holds back its match, never uploaded, and the run goes on."""
     _match(tmp_path, "m1", log=f'{{"note": "{leak}"}}\n')
+    _match(tmp_path, "m2")
     run = Gcloud()
-    with pytest.raises(FlagLeakError, match="API-key"):
-        backup(tmp_path, BUCKET, run)
-    assert run.calls == []
+    result = backup_mod.backup(FileMatchStore(tmp_path), GcloudUploader(run), BUCKET)
+    assert [p.name for p in result.files] == ["m2.events.jsonl", "m2.json"]
+    assert result.skipped == ["m1.events.jsonl: API-key-shaped text; match m1 not backed up"]
+    ((_, paths),) = run.calls
+    assert not any("m1." in p for p in paths)
+
+
+def test_key_scan_is_the_named_key_patterns() -> None:
+    """M24: the backup scans by name, not by position in SECRET_PATTERNS; the long-hex rule (event hashes) is out."""
+    assert backup_mod.KEY_PATTERNS is KEY_PATTERNS
+    assert HEX_PATTERN not in KEY_PATTERNS
+    assert (*KEY_PATTERNS, HEX_PATTERN) == SECRET_PATTERNS
+    assert not any(k.search("a" * 64) for k in KEY_PATTERNS)
+
+
+class _MemSource:
+    """A non-file store: backup lists files only through ``ReplaySource.replays`` (M23)."""
+
+    def __init__(self, root: Path, state: MatchState) -> None:
+        self.state, self.files = state, [root / "elsewhere.events.jsonl"]
+        self.files[0].write_text("{}\n")
+
+    def replays(self) -> list[tuple[str, list[Path]]]:
+        return [(self.state.match_id, self.files)]
+
+    def lock(self, match_id: str) -> FileLock:
+        return FileLock(self.files[0].with_suffix(".lock"))
+
+    def load(self, match_id: str) -> MatchState:
+        return self.state
+
+    def save(self, state: MatchState) -> None: ...
+
+    def snapshot(self, match_id: str) -> MatchState:
+        return self.state
+
+
+def test_backup_lists_files_through_the_store_port(tmp_path: Path) -> None:
+    state = _rekeyed().model_copy(update={"stage": Stage.COMPLETE})
+    (tmp_path / "m9.events.jsonl").write_text("{}\n")  # a stray file in the dir: never globbed
+    run = Gcloud()
+    result = backup_mod.backup(_MemSource(tmp_path, state), GcloudUploader(run), BUCKET)
+    assert [p.name for p in result.files] == ["elsewhere.events.jsonl"]
+    assert run.calls[0][1] == [str(tmp_path / "elsewhere.events.jsonl")]
 
 
 def test_the_match_secret_refuses_the_backup(tmp_path: Path) -> None:

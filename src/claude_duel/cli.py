@@ -217,8 +217,10 @@ def _dispatch(args: argparse.Namespace) -> int:
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
-    files = backup(settings.store_dir, build_store(settings), build_uploader(), bucket or settings.replay_bucket)
-    print(f"backed up {len(files)} replay files")
+    result = backup(build_store(settings), build_uploader(), bucket or settings.replay_bucket)
+    for why in result.skipped:
+        print(f"skipped {why}", file=sys.stderr)
+    print(f"backed up {len(result.files)} replay files")
     return 0
 
 

@@ -26,11 +26,13 @@ ENCODED_FLAG_PATTERNS = (
     re.compile(_DEC_SEP.join(("68", "85", "69", "76", "123")) + rf"(?:{_DEC_SEP}[0-9]{{2,3}}){{8,65}}"),
 )
 # Key-, token- and secret-shaped text: OpenAI keys, ``api_key=...``/``authorization: ...``, long hex runs.
-SECRET_PATTERNS = (
+# ``KEY_PATTERNS`` alone is the backup's key scan: event hashes match the long-hex rule.
+KEY_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
     re.compile(r"(?i)(api[_-]?key|authorization)[\"':= ]+\S+"),
-    re.compile(r"\b[0-9a-fA-F]{32,}\b"),
 )
+HEX_PATTERN = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+SECRET_PATTERNS = (*KEY_PATTERNS, HEX_PATTERN)
 _GAP = r"[\W_]*"  # spaces, punctuation or newlines a challenge may put between characters
 MIN_PART = 16  # halves of the 32-char digest are still a leak
 
