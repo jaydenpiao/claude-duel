@@ -37,6 +37,7 @@ class AttackMove(BaseModel):
 class AllocationMove(BaseModel):
     model_config = ConfigDict(extra="ignore")
     stakes: list[object] = Field(max_length=10)  # checked by domain/stakes.settle_stakes, not here
+    keystone: object = None  # checked by domain/stakes.pick_keystone
 
 
 EXAMPLE_CHALLENGE = {
@@ -301,7 +302,13 @@ def attack_prompt(
 
 
 def allocate_prompt(
-    agent: str, round_no: int, budget: int, min_alloc: int, targets: list[tuple[str, str, str, bool]], memory: str = ""
+    agent: str,
+    round_no: int,
+    budget: int,
+    min_alloc: int,
+    targets: list[tuple[str, str, str, bool]],
+    memory: str = "",
+    own: list[tuple[str, str, bool]] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -321,12 +328,25 @@ def allocate_prompt(
         f"author), otherwise at least {min_alloc}. Stakes must sum to at most {budget}. A capture that uses less of "
         "its stake scores more. An invalid answer falls back to an even split."
     )
-    lines.append('Return JSON: {"stakes": [<int>, ...]} with one stake per challenge, in order.')
+    if own:
+        lines.append("Your own challenges this round (pick one as your keystone; your opponent sees only a hash):")
+        lines += [
+            f"  keystone {i}: {fence(title)} [{'valid' if ok else 'INVALID'}]\n{fence(src)}"
+            for i, (title, src, ok) in enumerate(own)
+        ]
+        lines.append(
+            "Keystone: if it survives, its defense pays double; if captured, you lose half its capture value. "
+            "An invalid or out-of-range pick forfeits the keystone."
+        )
+    lines.append(
+        'Return JSON: {"stakes": [<int>, ...], "keystone": <int>} with one stake per challenge, in order '
+        "(keystone: an index above; 0 if there are none)."
+    )
     return "\n".join(lines)
 
 
-def parse_allocation(text: str) -> list[object]:
-    return parse(text, AllocationMove).stakes
+def parse_allocation(text: str) -> AllocationMove:
+    return parse(text, AllocationMove)
 
 
 SOLVER_HINT = (
@@ -411,8 +431,8 @@ ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
     "attack": _strict({"payload": _TEXT, "notes": _TEXT}),
     "allocate": {
         "type": "object",
-        "properties": {"stakes": {"type": "array", "items": {"type": "integer"}}},
-        "required": ["stakes"],
+        "properties": {"stakes": {"type": "array", "items": {"type": "integer"}}, "keystone": {"type": "integer"}},
+        "required": ["stakes", "keystone"],
         "additionalProperties": False,
     },
     "attack_solver": _strict({"payload": _TEXT, "solver": _TEXT, "notes": _TEXT}),  # Rules.attacker_solver

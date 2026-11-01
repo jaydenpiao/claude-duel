@@ -1,7 +1,7 @@
 """Deterministic, pure scoring."""
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
@@ -16,6 +16,7 @@ class RoundFacts:
     challenges: tuple[Challenge, ...]  # this round's, sorted by id
     validations: Mapping[str, Validation]
     attacks: Mapping[str, Attack]  # by challenge id
+    keystones: Mapping[str, str] = field(default_factory=dict)  # author -> revealed keystone challenge id (ledger)
 
 
 Scorer = Callable[[RoundFacts, ScoringRule], dict[str, int]]
@@ -28,6 +29,7 @@ def score_round(
     validations: Mapping[str, Validation],
     attacks: Mapping[str, Attack],
     rules: Rules,
+    keystones: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     facts = RoundFacts(
         round_no=round_no,
@@ -35,6 +37,7 @@ def score_round(
         challenges=tuple(sorted((c for c in challenges if c.round == round_no), key=lambda c: c.id)),
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
+        keystones=keystones or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
@@ -105,7 +108,8 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
 
     A stake of 0 means the attacker skipped the challenge, so it scores as a defense; a recorded capture on a
     0-stake challenge, or one with no stake, is a corrupt or tampered log and raises. Discount is 0..50%, never
-    below 1, so defense >= capture (ADR 0006) still holds.
+    below 1, so defense >= capture (ADR 0006) still holds. A revealed keystone doubles its defense award, or costs
+    its author ``base // 2`` when captured.
     """
     for a in facts.attacks.values():
         if a.solved and a.stake is None:
@@ -119,6 +123,17 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
             scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
+        stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
+        ok = facts.validations.get(cid)
+        if stone is None or stone.spec is None or ok is None or not ok.valid:
+            continue  # an invalid keystone forfeits
+        hit = facts.attacks.get(cid)
+        if hit is not None and hit.solved:
+            scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
+        else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
+            award = defense_award(stone.spec, facts.round_no, rule)
+            scores[author] += award // 2 if stone.probe_solved else award
     return scores
 
 
