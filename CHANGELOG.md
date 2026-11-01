@@ -7,8 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed; one role query for sync/export checks; psycopg moved to the optional `db` extra; export name in one constant (quality L23-L28, L30).
+- Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
+- Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
+- Default model is gpt-5-nano; the code default lifetime cap is $33.
+- Hypothesis runs without a per-example deadline in CI.
+- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
+- Shared driver helpers for match, series and tournament drivers.
+- Public-facing repo docs (security policy, code owners, issue templates).
+- Review-code gate is case-insensitive and covers `docs/`.
 
 ### Added
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
@@ -23,14 +31,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
-
-### Changed
-- Default model is gpt-5-nano; the code default lifetime cap is $33.
-- Hypothesis runs without a per-example deadline in CI.
-- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
-- Shared driver helpers for match, series and tournament drivers.
-- Public-facing repo docs (security policy, code owners, issue templates).
-- Review-code gate is case-insensitive and covers `docs/`.
 
 ## [0.1.0]
 First public release.
