@@ -65,3 +65,11 @@ queryable index, and a future public page needs data that provably holds no flag
   handled by the proxy; socket hosts are exempt from `require_tls`). `DATABASE_URL` uses the ingest IAM user and no
   password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; `iam_url` escapes the
   inner `@` for libpq.
+
+## Amendment: replay backup (2026-10-31)
+
+- `duel backup` (#213) copies finished, unlocked matches' `<id>.events.jsonl` and `<id>.json` to
+  `DUEL_REPLAY_BUCKET`, a private GCS bucket with public access prevention enforced. `*.secret` never leaves the box,
+  symlinked matches are skipped, file names reach `gcloud storage cp -I` on stdin only, and each file is scanned for
+  every flag variant of its match before upload (any hit refuses the whole run). It is a raw replay archive, not part
+  of the public export; the database and `public_v` rules above are unchanged.

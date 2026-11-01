@@ -82,7 +82,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 
 **Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. Every call is budget-capped and ledgered like a match; see [docs/design/benchmark.md](docs/design/benchmark.md).
 
-**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries, a retry hint and why a failed try was rejected, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less); any other `[rules]` field overrides it.
+**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries, a retry hint and why a failed try was rejected, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less; `ledger`: Sealed Ledger, 3 challenges per round, each attacker splits 12k attack tokens across the opponent's challenges as stakes, captures are discounted by stake, with a keystone and a spend tiebreak; `[rules.ledger]` and `[rules.scoring] kind = "ledger"` go together, so set `mode = "ledger"` rather than either alone); any other `[rules]` field overrides it.
 
 **Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
 
@@ -90,6 +90,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 |---|---|---|
 | `DUEL_SANDBOX` | `sandbox` (`auto`/`docker`/`subprocess`) | `auto` |
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
+| `DUEL_REPLAY_BUCKET` | `replay_bucket`: private `gs://` bucket for `duel backup` (public access prevention on) | unset |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
 | `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
@@ -99,7 +100,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
 | `DUEL_MAX_ATTEMPTS` | `[rules] max_attempts` | preset |
 | `DUEL_CHALLENGES_PER_ROUND` | `[rules] challenges_per_round` | preset |
-| `DUEL_MODE` | `[rules] mode` (`classic`/`quick`/`gated`) | `classic` |
+| `DUEL_MODE` | `[rules] mode`, a `domain/modes.py` preset (`classic`/`quick`/`gated`/`checked`/`efficiency`/`capped`/`blitz`/`ledger`) | `classic` |
 | `DUEL_TOKEN_BUDGET` | `[rules] attack_token_budget` | preset |
 | `DUEL_MATCH_MAX_USD` | `[budget] match_max_usd` | 0.25 |
 | `DUEL_RUN_MAX_USD` | `[budget] run_max_usd` | 0.50 |
