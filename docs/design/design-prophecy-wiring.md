@@ -98,7 +98,7 @@ Defaults (`ProphecyRule`): `max_per_round=2`, stakes 1–3 (`prophecy.py:38`), `
 ## 5. Mode and rules abstraction (ADR 0007)
 ```python
 class ProphecyRule(_Frozen):
-    tier: Literal["menu"] = "menu"  # "compose" is phase 5
+    # a `tier` field ("menu" or "compose") arrives with phase 5; one tier needs no field
     max_per_round: int = Field(default=2, ge=1, le=2)
     pool: int = Field(default=6, ge=1, le=20)
     round_cap: int = Field(default=3, ge=1, le=6)

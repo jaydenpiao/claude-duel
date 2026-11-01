@@ -126,7 +126,6 @@ class LedgerRule(_Frozen):
 class ProphecyRule(_Frozen):
     """Prophecy menu tier (design-prophecy-wiring.md 5): sealed forecasts about the opponent's next round."""
 
-    tier: Literal["menu"] = "menu"
     max_per_round: int = Field(default=2, ge=1, le=2)
     pool: int = Field(default=6, ge=1, le=20)  # per agent per match: total |swing| never exceeds it
     round_cap: int = Field(default=3, ge=1, le=6)  # also capped by the target's cheapest defense award
