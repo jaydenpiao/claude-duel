@@ -68,11 +68,21 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
 STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
 
 
+def _same_class(c: str) -> str:
+    """S11-1: a different char of c's class (digit, lower, upper, else printable)."""
+    for pool in ("0123456789", "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+        if c in pool:
+            return pool[(pool.index(c) + 1) % len(pool)]
+    return "#" if c != "#" else "%"
+
+
 def junk_inputs(payload: str) -> list[str]:
     """SV-3: fixed, free inputs that must not reveal the flag (besides empty input): degenerate acceptance fails."""
     p = payload.strip()
     tweak = (("b" if p[0] == "a" else "a") + p[1:]) if p else ""
-    probes = [" ", "a", "0", "\n", "A" * len(p), tweak, p[: len(p) // 2], p[len(p) // 2 + 1 :]]
+    mid = len(p) // 2
+    same_shape = [p[:i] + _same_class(p[i]) + p[i + 1 :] for i in dict.fromkeys((len(p) - 1, mid)) if p]
+    probes = [" ", "a", "0", "\n", "A" * len(p), tweak, *same_shape, p[:mid], p[mid + 1 :]]
     return list(dict.fromkeys(x for x in probes if x.strip() and x.strip() != p))
 
 
