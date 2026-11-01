@@ -20,9 +20,7 @@ from claude_duel.domain.policy import (
     RESTRICTED_MODULES,
 )
 
-SYSTEM = (
-    "You are a contestant in Claude Duel, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
-)
+SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 
 
 def system_prompt(framing_text: str) -> str:
