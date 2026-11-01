@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
+from claude_duel.app.engine import MatchEngine
 from claude_duel.domain import events as ev
 from claude_duel.domain import prophecy
 from claude_duel.domain.errors import EventLogCorruptError
@@ -21,6 +24,9 @@ from claude_duel.domain.modes import preset
 from claude_duel.domain.prophecy_state import artifacts_of, round_cap
 from claude_duel.domain.stakes import keystone_commit, keystone_salt
 from tests.unit.test_domain import spec
+
+NewState = Callable[..., MatchState]
+MakeEngine = Callable[..., MatchEngine]
 
 
 def test_prophecy_is_off_by_default_and_validates() -> None:
@@ -66,7 +72,7 @@ def test_round_cap_never_exceeds_the_cheapest_defense_nor_drops_below_one() -> N
     assert prophecy.round_cap(3, []) == 3
 
 
-def _state(new_state) -> MatchState:  # type: ignore[no-untyped-def]
+def _state(new_state) -> MatchState:
     state: MatchState = new_state()
     state.rules = preset("ledger_deep").model_copy(update={"rounds": 3})
     return state
@@ -78,7 +84,7 @@ def _seal(state: MatchState, p: prophecy.Prophecy, salt: str) -> None:
     )
 
 
-def test_seal_reveal_settle_round_trip(new_state) -> None:  # type: ignore[no-untyped-def]
+def test_seal_reveal_settle_round_trip(new_state: NewState) -> None:
     state, salt, p = _state(new_state), prophecy.prophecy_salt("", 1, "a", 0), prophecy.make("uses_vm", 2)
     _seal(state, p, salt)
     assert not state.prophecies["2:a:0"].revealed
@@ -103,7 +109,7 @@ def test_seal_reveal_settle_round_trip(new_state) -> None:  # type: ignore[no-un
         {"slot": 1},
     ],
 )
-def test_tampered_reveal_is_rejected(new_state, bad: dict[str, object]) -> None:  # type: ignore[no-untyped-def]
+def test_tampered_reveal_is_rejected(new_state: NewState, bad: dict[str, object]) -> None:
     state, salt = _state(new_state), prophecy.prophecy_salt("", 1, "a", 0)
     _seal(state, prophecy.make("uses_vm", 2), salt)
     data = {"agent": "a", "round": 2, "slot": 0, "template": "uses_vm", "stake": 2, "salt": salt} | bad
@@ -111,7 +117,7 @@ def test_tampered_reveal_is_rejected(new_state, bad: dict[str, object]) -> None:
         ev._prophecy_revealed(state, ev.ProphecyRevealed.model_validate(data))
 
 
-def test_seal_must_target_the_next_round(new_state) -> None:  # type: ignore[no-untyped-def]
+def test_seal_must_target_the_next_round(new_state: NewState) -> None:
     with pytest.raises(EventLogCorruptError, match="targets"):
         ev._prophecy_sealed(
             _state(new_state), ev.ProphecySealed(agent="a", round=1, target_round=3, slot=0, commit="0")
@@ -150,7 +156,7 @@ def _round2(state: MatchState) -> None:
     state.keystones["2:b"] = Keystone(commit=keystone_commit(0, salt), index=0, salt=salt, revealed=True)
 
 
-def test_artifacts_come_from_the_log(new_state) -> None:  # type: ignore[no-untyped-def]
+def test_artifacts_come_from_the_log(new_state: NewState) -> None:
     state = _state(new_state)
     _round2(state)
     art = artifacts_of(state, "b", 2)
@@ -163,7 +169,7 @@ def test_artifacts_come_from_the_log(new_state) -> None:  # type: ignore[no-unty
     assert prophecy.holds(prophecy.make("keystone_first", 1), art)
 
 
-def test_target_with_no_valid_challenge_is_void(new_state) -> None:  # type: ignore[no-untyped-def]
+def test_target_with_no_valid_challenge_is_void(new_state: NewState) -> None:
     state = _state(new_state)
     assert artifacts_of(state, "b", 2) is None
     _round2(state)
@@ -173,7 +179,7 @@ def test_target_with_no_valid_challenge_is_void(new_state) -> None:  # type: ign
     assert art.stakes == ()
 
 
-def test_round_one_defense_awards_do_not_mute_the_cap(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+def test_round_one_defense_awards_do_not_mute_the_cap(make_engine: MakeEngine, new_state: NewState) -> None:
     """Open question 5, on a real fake-provider ledger_deep match: round 1's cheapest defense award is >= 3."""
     state = new_state("p1")
     state.rules = preset("ledger_deep").model_copy(
@@ -187,7 +193,7 @@ def test_round_one_defense_awards_do_not_mute_the_cap(make_engine, new_state) ->
     assert any(artifacts_of(done, a, 1) is not None for a in ("alice", "bob"))
 
 
-def test_round_cap_without_a_prophecy_rule_uses_the_default(new_state) -> None:  # type: ignore[no-untyped-def]
+def test_round_cap_without_a_prophecy_rule_uses_the_default(new_state: NewState) -> None:
     state = _state(new_state)
     _round2(state)
     state.rules = Rules(rounds=3)
