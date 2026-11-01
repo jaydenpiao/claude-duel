@@ -16,7 +16,8 @@ jobs:
       contents: read
     strategy:
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        # stacked PRs (base is not main) run 3.12 only; main and PRs into main run all three (merge.sh needs all three)
+        python: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["3.12"]' || '["3.11", "3.12", "3.13"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
