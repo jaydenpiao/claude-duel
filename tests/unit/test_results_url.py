@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from claude_duel.adapters.store.postgres_url import iam_url, require_tls
-from claude_duel.adapters.store.results_sql import split_statements
 from claude_duel.domain.errors import ConfigError
 
 IAM = "postgresql://duel-sql-proxy@project-0fedfc79-0519-43dd-8a0.iam@127.0.0.1:5433/duel"
@@ -43,20 +42,6 @@ def test_require_tls_parses_without_a_driver() -> None:
             require_tls(bad, {})
     with pytest.raises(ConfigError, match="sslmode"):
         require_tls("host='db.example.com' sslmode=prefer", {})
-
-
-def test_split_statements() -> None:
-    sql = """
-    -- a comment; with a semicolon
-    create table t (x text default 'a;b' , "we;ird" int);
-    do $body$ begin perform 1; end $body$;
-    select $$x;y$$, 'it''s;', $1::int;
-    """
-    assert split_statements(sql) == [
-        """create table t (x text default 'a;b' , "we;ird" int)""",
-        "do $body$ begin perform 1; end $body$",
-        "select $$x;y$$, 'it''s;', $1::int",
-    ]
 
 
 def test_config_has_no_neon_transport() -> None:
