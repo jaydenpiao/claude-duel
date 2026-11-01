@@ -88,6 +88,6 @@ def test_a_check_that_hangs_on_wrong_input_is_rejected_fast(make_engine, new_sta
 
 def test_validation_over_its_time_budget_is_rejected(make_engine, new_state, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr("claude_duel.app.engine.VALIDATION_TIME_FACTOR", -1)
-    state, ch = run_bob(make_engine, new_state)
+    state, ch = run_bob(make_engine, new_state, source=HANGS, reference_payload="0000003")
     assert not state.validations[ch.id].valid
     assert any("time budget" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
