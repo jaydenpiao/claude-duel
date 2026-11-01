@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from claude_duel.domain.models import Event, MatchState, SandboxLimits
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
-Purpose = Literal["build", "attack"]
+Purpose = Literal["build", "attack", "allocate"]
 
 
 class CompletionRequest(BaseModel):

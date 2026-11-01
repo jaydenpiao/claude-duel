@@ -28,6 +28,15 @@ _GAP = r"[\W_]*"  # spaces, punctuation or newlines a challenge may put between 
 MIN_PART = 16  # halves of the 32-char digest are still a leak
 
 
+FRAGMENT = 8  # SV-2: a reference payload may not share this many digest chars in a row with the flag
+
+
+def shares_fragment(text: str, flag: str, size: int = FRAGMENT) -> bool:
+    """Whether ``text`` contains any ``size``-char window of the flag's digest (case-insensitive)."""
+    inner, low = _inner(flag).lower(), text.lower()
+    return any(inner[i : i + size] in low for i in range(len(inner) - size + 1))
+
+
 def derive_flag(secret: str, challenge_id: str) -> str:
     digest = hmac.new(secret.encode(), challenge_id.encode(), hashlib.sha256).hexdigest()
     return f"DUEL{{{digest[:32]}}}"
