@@ -26,6 +26,10 @@ duel tournament                     # round robin (<= 6) or Swiss over the confi
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match
 duel estimate [--mode capped]       # offline worst-case $ per match for each preset (no API calls)
 duel resume demo                    # continue a crashed or aborted match
+duel db migrate                     # apply results-DB migrations (MIGRATE_DATABASE_URL, owner; forward-only)
+duel sync [--rebuild]               # load verified event logs into the results DB (DATABASE_URL, ADR 0012)
+duel export [--out public.json]     # static public JSON via the read-only exporter role (EXPORT_DATABASE_URL)
+duel backup [--bucket gs://…]       # copy finished matches' logs + state (flag-scanned, never *.secret) to `DUEL_REPLAY_BUCKET` via gcloud
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
@@ -72,6 +76,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
 | Runaway spend | Budget circuit breaker + ledger ceiling |
+| Secrets reaching the results DB or a public page | `duel sync` never opens `*.secret`, stores only an allowlist of event fields (no source, payloads, solver output, notes, flags) run through `scrub`; `duel export` reads only `public_v` views as `duel_exporter` (read-only, no owner/writer rights, refused otherwise), keeps whitelisted columns and scans the result before writing. The database is not exposed publicly in v1 (ADR 0012) |
 
 **Experiments:** `duel experiment stakes --prereg docs/runs/stakes-prereg.md --seeds N` plays paired framing micro-matches (neutral, competitive, survival per seed) under one shared run cap. `--run-max-usd X --override-reason "..."` raises `run_max_usd` for that run only (ceiling $2.00, never below the default, within the lifetime cap); it is logged as a WARNING, recorded as a `budget_overridden` event and a $0 ledger row, and shown in the output. There is no config key or env var for it; see the stakes-modes design spec (design-stakes-modes.md).
 
@@ -106,7 +111,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_METRICS` | `metrics`: `log` (summary log line) or `jsonl` (also one line per metric in `<store>/metrics.jsonl`) | `log` |
 | `DUEL_DOCKER_RUNTIME` | `docker_runtime`, e.g. `runsc` for gVisor (ADR 0011); falls back to the daemon default if not registered | unset |
 
-`OPENAI_API_KEY` is read from the environment only.
+`OPENAI_API_KEY`, `DATABASE_URL` (a `duel_ingest` login for `duel sync`; must use `sslmode=require` or stricter for a non-local host; superuser/BYPASSRLS roles are refused), `MIGRATE_DATABASE_URL` (the schema owner, for `duel db migrate` and `duel sync --rebuild`; falls back to `DATABASE_URL`) and `EXPORT_DATABASE_URL` (the `duel_exporter` login, for `duel export`) are read from the environment only and never printed. In production `DATABASE_URL` points at `cloud-sql-proxy --auto-iam-authn` on a Unix socket in a 0700 directory, as the ingest IAM user with no password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; each role has its own IAM principal (ADR 0012).
 
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
