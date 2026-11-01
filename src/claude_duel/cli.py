@@ -118,9 +118,10 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
     stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
     stakes.add_argument("--format", choices=("text", "json"), default="text")
-    replay_p = sub.choices["replay"]
-    replay_p.add_argument("--transcript", action="store_true")
-    replay_p.add_argument("--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)")
+    sub.choices["replay"].add_argument("--transcript", action="store_true")
+    sub.choices["replay"].add_argument(
+        "--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)"
+    )
     return p
 
 
