@@ -17,7 +17,7 @@ from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
+from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.series import game_winner
 from claude_duel.observability import InMemoryMetrics
@@ -111,10 +111,23 @@ def test_estimate_ledger_bounded_by_stakes() -> None:
     assert row.tokens < plain.tokens
 
 
+LEDGER = ScoringRule(kind="ledger")
+
+
 def test_ledger_rules_reject_unfundable_k() -> None:
     with pytest.raises(ValidationError, match="min_alloc"):
-        Rules(challenges_per_round=4, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
-    assert Rules(challenges_per_round=3, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+        Rules(challenges_per_round=4, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
+    assert Rules(challenges_per_round=3, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+
+
+def test_ledger_scoring_needs_ledger_rules() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(scoring=LEDGER)
+
+
+def test_ledger_rules_need_ledger_scoring() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(ledger=LedgerRule())
 
 
 def _log_hash(event_log, match_id: str) -> str:  # type: ignore[no-untyped-def]

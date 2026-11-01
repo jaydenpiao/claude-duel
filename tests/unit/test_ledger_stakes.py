@@ -84,7 +84,7 @@ def test_fallback_when_even_share_is_below_min_alloc() -> None:
 def _tied(alice: Usage, bob: Usage) -> MatchState:
     state = MatchState(
         match_id="t", agents=(AgentSpec(name="alice"), AgentSpec(name="bob")),
-        rules=Rules(scoring=ScoringRule(kind="ledger")), limits=SandboxLimits(),
+        rules=Rules(scoring=ScoringRule(kind="ledger"), ledger=RULE), limits=SandboxLimits(),
         scores={"alice": 10, "bob": 10}, usage_by_agent={"alice": alice, "bob": bob},
     )  # fmt: skip
     return state
