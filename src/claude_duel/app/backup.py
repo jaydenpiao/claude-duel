@@ -15,11 +15,13 @@ import re
 from pathlib import Path
 
 from claude_duel.domain.errors import ConfigError, DuelError, FlagLeakError
-from claude_duel.domain.flags import assert_no_flag, match_flags
+from claude_duel.domain.flags import SECRET_PATTERNS, assert_no_flag, match_flags
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.state_machine import TERMINAL
 from claude_duel.ports import MatchStore, Uploader
 
+_KEYS = SECRET_PATTERNS[:2]  # scrub's sk-/sk-ant-/api_key= shapes; not the long-hex rule (event hashes match it)
+_MATCH_ID = re.compile(r"^[A-Za-z0-9-]+$")  # gcloud -I reads one path per line: no newlines or odd names
 _BUCKET = re.compile(r"^gs://[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](/[\w./-]*)?$")
 
 
@@ -41,22 +43,32 @@ def replay_files(store_dir: Path, store: MatchStore) -> list[Path]:
     out: list[Path] = []
     for secret in sorted(root.glob("*.secret")):
         mid = secret.name.removesuffix(".secret")
+        if not _MATCH_ID.match(mid):
+            continue
         paths = (secret, root / f"{mid}.events.jsonl", root / f"{mid}.json")
         if any(p.is_symlink() for p in paths):
             continue  # a planted link could point anywhere (another secret, gcloud credentials)
         files = [p for p in paths[1:] if p.is_file()]
         if not files or (state := _finished(store, mid)) is None:
             continue
-        flags = match_flags(state)
         for p in files:
-            text = p.read_text(encoding="utf-8", errors="replace")
-            for f in flags:
-                try:
-                    assert_no_flag(text, f, p.name)
-                except FlagLeakError as exc:
-                    raise FlagLeakError(f"{p.name}: flag variant found; not backed up") from exc
+            _scan(p, state)
         out += files
     return sorted(out)
+
+
+def _scan(path: Path, state: MatchState) -> None:
+    """Refuse a file holding a flag variant, an API-key shape or the match secret itself (S10-2)."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for f in match_flags(state):
+        try:
+            assert_no_flag(text, f, path.name)
+        except FlagLeakError as exc:
+            raise FlagLeakError(f"{path.name}: flag variant found; not backed up") from exc
+    if any(k.search(text) for k in _KEYS):
+        raise FlagLeakError(f"{path.name}: API-key-shaped text found; not backed up")
+    if state.secret and state.secret in text:
+        raise FlagLeakError(f"{path.name}: the match secret found; not backed up")
 
 
 def backup(store_dir: Path, store: MatchStore, uploader: Uploader, bucket: str | None) -> list[Path]:

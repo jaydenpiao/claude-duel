@@ -140,3 +140,32 @@ def test_backup_and_engine_share_one_flag_set(tmp_path: Path) -> None:
         backup(tmp_path, BUCKET, Gcloud())
     with pytest.raises(FlagLeakError):
         MatchEngine._no_flags(state, Event(seq=1, trace_id="t", type="note", data={"text": leak}))
+
+
+@pytest.mark.parametrize(
+    "leak",
+    ["sk-proj-" + "A" * 24, "sk-ant-api03-" + "B" * 24, "api_key=" + "c" * 12],
+    ids=["openai", "anthropic", "api-key-assignment"],
+)
+def test_an_api_key_shape_refuses_the_backup(tmp_path: Path, leak: str) -> None:
+    _match(tmp_path, "m1", log=f'{{"note": "{leak}"}}\n')
+    run = Gcloud()
+    with pytest.raises(FlagLeakError, match="API-key"):
+        backup(tmp_path, BUCKET, run)
+    assert run.calls == []
+
+
+def test_the_match_secret_refuses_the_backup(tmp_path: Path) -> None:
+    _match(tmp_path, "m1", log='{"note": "s3cret"}\n')
+    run = Gcloud()
+    with pytest.raises(FlagLeakError, match="secret"):
+        backup(tmp_path, BUCKET, run)
+    assert run.calls == []
+
+
+def test_odd_match_ids_are_never_listed(tmp_path: Path) -> None:
+    _match(tmp_path, "m1")
+    for ext in ("secret", "json", "events.jsonl"):  # the store would refuse this id, so plant the files by hand
+        (tmp_path / f"m_2.{ext}").write_bytes((tmp_path / f"m1.{ext}").read_bytes())
+    sent = backup(tmp_path, BUCKET, Gcloud())
+    assert {p.name for p in sent} == {"m1.events.jsonl", "m1.json"}
