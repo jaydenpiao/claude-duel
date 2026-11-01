@@ -117,6 +117,7 @@ class LedgerRule(_Frozen):
     keystone: bool = Field(
         default=True, description="each author commits to one challenge: defended x2, captured -base//2"
     )
+    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
@@ -361,6 +362,7 @@ class MatchState(BaseModel):
     challenges: dict[str, Challenge] = Field(default_factory=dict)
     stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
     keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
+    terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)
