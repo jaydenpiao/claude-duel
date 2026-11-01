@@ -1,13 +1,20 @@
 """Flag derivation, leak guards and the one shared redactor (``scrub``)."""
 
+from __future__ import annotations
+
 import base64
 import codecs
 import hashlib
 import hmac
 import re
+from collections.abc import Iterable
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from claude_duel.domain.errors import FlagLeakError
+
+if TYPE_CHECKING:
+    from claude_duel.domain.models import MatchState
 
 FLAG_PATTERN = re.compile(r"DUEL\{[0-9a-f]{8,64}\}")
 REDACTED = "DUEL{<redacted>}"
@@ -133,3 +140,18 @@ def scrub(text: str, flags: tuple[str, ...] = ()) -> str:
     for pat in SECRET_PATTERNS:
         text = pat.sub("<redacted>", text)
     return text
+
+
+def match_flags(state: MatchState, extra_cids: Iterable[str] = ()) -> list[str]:
+    """Every flag the match ever used: each challenge (plus ``extra_cids``), each repair try and the built epoch.
+
+    The one source for the engine's event guard and the backup scan (review M20)."""
+    if not state.secret:
+        return []
+    cids = set(state.challenges) | set(state.build_errors) | set(extra_cids)
+    out: list[str] = []
+    for cid in sorted(cids):
+        ch = state.challenges.get(cid)
+        last = max(len(state.build_errors.get(cid, [])), ch.flag_epoch if ch else 0)
+        out += [flag_of(state.secret, cid, epoch) for epoch in range(last + 1)]
+    return out

@@ -9,10 +9,12 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.store.file_store import FileMatchStore
-from claude_duel.app.backup import backup
+from claude_duel.adapters.store.gcs import GcloudUploader
+from claude_duel.app import backup as backup_mod
+from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.errors import ConfigError, FlagLeakError
-from claude_duel.domain.flags import flag_of
-from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits, Stage
+from claude_duel.domain.flags import flag_of, match_flags
+from claude_duel.domain.models import AgentSpec, Challenge, Event, MatchState, Rules, SandboxLimits, Stage
 
 BUCKET = "gs://project-0fedfc79-0519-43dd-8a0-duel-replays"
 
@@ -39,6 +41,10 @@ class Gcloud:
     def __call__(self, cmd: Sequence[str], stdin: str) -> int:
         self.calls.append((list(cmd), stdin.splitlines()))
         return self.code
+
+
+def backup(root: Path, bucket: str | None, run: Gcloud) -> list[Path]:
+    return backup_mod.backup(root, FileMatchStore(root.resolve()), GcloudUploader(run), bucket)
 
 
 def test_backup_sends_finished_matches_but_never_secrets(tmp_path: Path) -> None:
@@ -102,3 +108,35 @@ def test_backup_refuses_a_bad_bucket_or_a_failed_copy(tmp_path: Path) -> None:
         backup(tmp_path, BUCKET, Gcloud(1))
     assert backup(tmp_path / "empty", BUCKET, Gcloud(1)) == []
     assert os.access(tmp_path / "m1.secret", os.R_OK)
+
+
+def _rekeyed() -> MatchState:
+    """c1 was built on its third try, though only one repair error was kept (re-keyed epoch)."""
+    return MatchState(
+        match_id="m",
+        secret="s3cret",
+        agents=(AgentSpec(name="alice"), AgentSpec(name="bob")),
+        rules=Rules(rounds=1),
+        limits=SandboxLimits(),
+        challenges={"c1": Challenge(id="c1", round=1, author="alice", spec=None, flag_epoch=2)},
+        build_errors={"c1": ["x"], "c2": ["y", "z"]},
+    )
+
+
+def test_match_flags_cover_every_epoch_and_extra_ids() -> None:
+    flags = match_flags(_rekeyed(), ["c3"])
+    want = [flag_of("s3cret", "c1", e) for e in range(3)] + [flag_of("s3cret", "c2", e) for e in range(3)]
+    assert flags == [*want, flag_of("s3cret", "c3", 0)]
+    assert match_flags(_rekeyed().model_copy(update={"secret": ""})) == []
+
+
+def test_backup_and_engine_share_one_flag_set(tmp_path: Path) -> None:
+    """M20: the built epoch's flag refuses the backup and the engine's event guard alike."""
+    state = _rekeyed().model_copy(update={"stage": Stage.COMPLETE})
+    FileMatchStore(tmp_path).save(state)
+    leak = flag_of("s3cret", "c1", 2)
+    (tmp_path / "m.events.jsonl").write_text(leak + "\n")
+    with pytest.raises(FlagLeakError):
+        backup(tmp_path, BUCKET, Gcloud())
+    with pytest.raises(FlagLeakError):
+        MatchEngine._no_flags(state, Event(seq=1, trace_id="t", type="note", data={"text": leak}))

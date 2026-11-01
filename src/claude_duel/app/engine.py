@@ -15,7 +15,7 @@ from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, memory, policy, stakes, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, flag_of, redact, shares_fragment
+from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, shares_fragment
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -370,15 +370,10 @@ class MatchEngine:
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
         """Invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
-        if not state.secret:
-            return
         body = event.model_dump_json()
-        cids = set(state.challenges) | set(state.build_errors)
-        if isinstance(cid := event.data.get("challenge_id"), str):
-            cids.add(cid)
-        for cid in sorted(cids):
-            for epoch in range(len(state.build_errors.get(cid, [])) + 1):
-                assert_no_flag(body, flag_of(state.secret, cid, epoch), f"event {event.type}")
+        cid = event.data.get("challenge_id")
+        for flag in match_flags(state, [cid] if isinstance(cid, str) else []):
+            assert_no_flag(body, flag, f"event {event.type}")
 
     @staticmethod
     def _flag_for(state: MatchState, cid: str) -> str:
