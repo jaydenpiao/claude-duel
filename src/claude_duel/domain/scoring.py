@@ -40,7 +40,7 @@ def score_round(
         agents=tuple(agents),
         challenges=tuple(sorted((c for c in challenges if c.round == round_no), key=lambda c: c.id)),
         validations=validations,
-        attacks={a.challenge_id: a for a in attacks.values()},
+        attacks=by_challenge,
         keystones=keystones or {},
         heat=round_heat(challenges, validations, by_challenge, round_no, rules),
     )
@@ -139,32 +139,49 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     its author ``base // 2`` when captured. Heat is a separate penalty
     line on the author (``facts.heat``, ADR 0006 addendum); it never touches the defense award.
     """
+    _check_stakes(facts)
+    scores = classic(facts, rule)
+    _cool(facts, rule, scores)
+    _stake_discounts(facts, rule, scores)
+    _keystone_bets(facts, rule, scores)
+    return scores
+
+
+def _check_stakes(facts: RoundFacts) -> None:
+    """A capture with no stake, or on a 0-stake (skipped) challenge, is a corrupt or tampered log."""
     for a in facts.attacks.values():
         if a.solved and a.stake is None:
             raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
         if a.solved and a.stake == 0:
             raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
-    scores = classic(facts, rule)
-    _cool(facts, rule, scores)
+
+
+def _stake_discounts(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """Each valid capture pays ``stake_award`` instead of the full classic award."""
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
             scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
-    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
-    # heat line: the keystone bet and the novelty penalty stay independent.
-    for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
+
+
+def _keystone_bets(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """A revealed keystone: a defender-side bet (ADR 0006 holds); an invalid keystone forfeits.
+
+    Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    heat line: the keystone bet and the novelty penalty stay independent.
+    """
+    for author, cid in facts.keystones.items():
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
         if stone is None or stone.spec is None or ok is None or not ok.valid:
-            continue  # an invalid keystone forfeits
+            continue
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
             scores[author] += _defense(stone, facts.round_no, rule)
-    return scores
 
 
 def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
