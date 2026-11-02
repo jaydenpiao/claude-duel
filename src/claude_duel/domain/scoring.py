@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.heat import heat_lines
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -17,6 +18,7 @@ class RoundFacts:
     validations: Mapping[str, Validation]
     attacks: Mapping[str, Attack]  # by challenge id
     keystones: Mapping[str, str] = field(default_factory=dict)  # author -> revealed keystone challenge id (ledger)
+    heat: Mapping[str, int] = field(default_factory=dict)  # challenge id -> heat_penalty line (ledger, ADR 0006 add.)
 
 
 Scorer = Callable[[RoundFacts, ScoringRule], dict[str, int]]
@@ -31,6 +33,8 @@ def score_round(
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
+    challenges = list(challenges)
+    by_challenge = {a.challenge_id: a for a in attacks.values()}
     facts = RoundFacts(
         round_no=round_no,
         agents=tuple(agents),
@@ -38,8 +42,30 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
+        heat=round_heat(challenges, validations, by_challenge, round_no, rules),
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
+
+
+def round_heat(
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    attacks: Mapping[str, Attack],
+    round_no: int,
+    rules: Rules,
+) -> dict[str, int]:
+    """The round's ``heat_penalty`` lines (challenge id -> points), logged in ``round_scored.heat``; {} off ledger."""
+    if rules.ledger is None:
+        return {}
+    return heat_lines(
+        challenges, validations, attacks, round_no, rules.ledger, lambda ch: _defense(ch, round_no, rules.scoring)
+    )
+
+
+def heat_of_state(state: MatchState, round_no: int) -> dict[str, int]:
+    """``round_heat`` for a folded match: what ``round_scored.heat`` records (and replay recomputes)."""
+    attacks = {a.challenge_id: a for a in state.attacks.values()}
+    return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules)
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
@@ -67,6 +93,7 @@ def _discounted(
 ) -> dict[str, int]:
     """Classic, with each capture's value replaced by ``award(full, cost(attack), rule)``; defenses unchanged."""
     scores = classic(facts, rule)
+    _cool(facts, rule, scores)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
@@ -109,7 +136,8 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     A stake of 0 means the attacker skipped the challenge, so it scores as a defense; a recorded capture on a
     0-stake challenge, or one with no stake, is a corrupt or tampered log and raises. Discount is 0..50%, never
     below 1, so defense >= capture (ADR 0006) still holds. A revealed keystone doubles its defense award, or costs
-    its author ``base // 2`` when captured.
+    its author ``base // 2`` when captured. Heat is a separate penalty
+    line on the author (``facts.heat``, ADR 0006 addendum); it never touches the defense award.
     """
     for a in facts.attacks.values():
         if a.solved and a.stake is None:
@@ -117,12 +145,15 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if a.solved and a.stake == 0:
             raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
     scores = classic(facts, rule)
+    _cool(facts, rule, scores)
     for ch in facts.challenges:
         atk = facts.attacks.get(ch.id)
         v = facts.validations.get(ch.id)
         if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
             full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
             scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    # heat line: the keystone bet and the novelty penalty stay independent.
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
@@ -132,9 +163,23 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
-            award = defense_award(stone.spec, facts.round_no, rule)
-            scores[author] += award // 2 if stone.probe_solved else award
+            scores[author] += _defense(stone, facts.round_no, rule)
     return scores
+
+
+def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """Heat penalty lines: charged to the author, never credited to the opponent (ADR 0006 addendum)."""
+    authors = {c.id: c.author for c in facts.challenges}
+    for cid, pts in sorted(facts.heat.items()):
+        if cid in authors:
+            scores[authors[cid]] -= pts
+
+
+def _defense(ch: Challenge, round_no: int, rule: ScoringRule) -> int:
+    """What classic pays a defended challenge: halved when the build probe solved it."""
+    assert ch.spec is not None
+    award = defense_award(ch.spec, round_no, rule)
+    return award // 2 if ch.probe_solved else award
 
 
 def stake_award(full: int, used: int, stake: int) -> int:
