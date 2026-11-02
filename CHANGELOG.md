@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only.
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
@@ -37,9 +38,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - CI requires real-Docker sandbox tests (`DUEL_REQUIRE_DOCKER=1`).
 - `duel experiment`: stakes experiment arms with a run-cap override (finite values only).
 - Match caps: a match-scoped cap hit ends the match `CAPPED` (void, not resumable; ADR 0014).
-- Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
+- Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak; arena wiring in #192.
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
+- Ledger keystone commit-reveal: each author seals one challenge (#193).
+- Ledger seeded terrain: a public stdin transform per challenge, drawn before allocation (#194).
+- Ledger novelty heat: an author's challenge close to their own recent ones earns less defense (#198).
 
 ## [0.1.0]
 First public release.
