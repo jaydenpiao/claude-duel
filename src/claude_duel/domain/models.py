@@ -117,6 +117,10 @@ class LedgerRule(_Frozen):
     keystone: bool = Field(
         default=True, description="each author commits to one challenge: defended x2, captured -base//2"
     )
+    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
+    heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
@@ -361,6 +365,7 @@ class MatchState(BaseModel):
     challenges: dict[str, Challenge] = Field(default_factory=dict)
     stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
     keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
+    terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)

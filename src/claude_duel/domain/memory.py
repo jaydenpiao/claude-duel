@@ -9,7 +9,9 @@ import ast
 from collections import Counter
 
 from claude_duel.domain.flags import redact
+from claude_duel.domain.heat import heat
 from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
+from claude_duel.domain.scoring import heat_of_state
 from claude_duel.domain.stakes import keystone_targets
 
 OMITTED = "[older rounds omitted]"
@@ -64,11 +66,14 @@ def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) 
 def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attack], rule: MemoryRule) -> str:
     lines = [f"Round {r}:"]
     stones = set(keystone_targets(state, r).values())  # revealed only, so past rounds never leak a sealed pick
+    hot = heat(state.challenges.values(), state.validations, r, state.rules.ledger) if state.rules.ledger else {}
+    penalties = heat_of_state(state, r) if r in state.scored_rounds else {}
     for ch in sorted(state.round_challenges(r), key=lambda c: c.id):
         atk = attacks.get(ch.id)
         mark = " (keystone)" if ch.id in stones else ""
         if ch.author == agent:
-            lines.append(f"- yours{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=True)}")
+            warm = f" (heat {hot[ch.id]}%, penalty {penalties.get(ch.id, 0)})" if ch.id in hot else ""
+            lines.append(f"- yours{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=True)}{warm}")
         else:
             lines.append(f"- theirs{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=False)}")
             if ch.spec is not None:
