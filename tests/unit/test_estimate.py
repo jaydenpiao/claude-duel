@@ -7,7 +7,7 @@ import pytest
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits
 from claude_duel.app.estimate import IN_TOKENS, OUT_TOKENS, estimate
 from claude_duel.cli import main
-from claude_duel.domain.models import Rules, WalletRule
+from claude_duel.domain.models import AgentSpec, Rules, WalletRule
 from claude_duel.domain.modes import MODES, preset
 
 MODEL = "gpt-4o-mini"
@@ -55,3 +55,18 @@ def test_cli_prints_a_row_per_mode(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["estimate", "--mode", "nope"]) == 2
     assert "unknown mode" in capsys.readouterr().err
     assert main(["estimate", "--model", "gpt-9"]) == 2
+
+
+def test_agent_output_cap_raises_the_estimate() -> None:
+    """A 16k per-agent cap (thinking model) is priced, not the 400-token default; the wallet still lowers it."""
+    lim = BudgetLimits(match_max_usd=1e6, match_max_tokens=10**9)
+    rules = Rules()
+    base = estimate(rules, MODEL, lim)
+    agents = (AgentSpec(name="a", max_output_tokens=16_000), AgentSpec(name="b"))
+    big = estimate(rules, MODEL, lim, agents)
+    assert big.calls == base.calls
+    assert big.tokens == base.calls * (IN_TOKENS + 16_000)
+    assert big.usd > 10 * base.usd
+    walled = estimate(Rules(wallet=WalletRule(max_output_tokens=1000)), MODEL, lim, agents)
+    assert walled.tokens == walled.calls * (IN_TOKENS + 1000)
+    assert estimate(rules, MODEL, lim, (AgentSpec(name="a"), AgentSpec(name="b"))) == base

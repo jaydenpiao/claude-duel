@@ -3,20 +3,26 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, edited]  # edited: a stacked PR retargeted to main reruns the full matrix
 permissions: {}
 concurrency:  # a new push to a PR cancels its older run; main runs are never cancelled
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # a title/body edit gets its own group so it never cancels a real run (its check job is skipped below)
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository  # no fork PRs on self-hosted
+    # no fork PRs on self-hosted; an edit only counts when it changed the base
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: [self-hosted, box]
     timeout-minutes: 30  # a lost runner fails fast instead of holding the queue for 6h
     permissions:
       contents: read
     strategy:
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        # stacked PRs (base is not main) run 3.12 only; main and PRs into main run all three (merge.sh needs all three)
+        python: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["3.12"]' || '["3.11", "3.12", "3.13"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,7 +36,7 @@ jobs:
       - run: .venv/bin/python scripts/check_docs.py
       - run: .venv/bin/vulture
       - run: .venv/bin/pylint src tests
-      - run: docker pull -q python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2
+      - run: docker pull -q python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
       - name: throwaway postgres for results-db tests (ADR 0012)
         run: |
           # pinned by digest (postgres:17-alpine); a fresh random password per job, masked in logs
@@ -40,7 +46,7 @@ jobs:
           echo "PG_CID=$cid" >> "$GITHUB_ENV"
           for _ in $(seq 60); do docker exec "$cid" psql -h 127.0.0.1 -U postgres -c 'select 1' >/dev/null 2>&1 && break; sleep 1; done
           echo "DUEL_TEST_DATABASE_URL=postgresql://postgres:$pw@127.0.0.1:$(docker port "$cid" 5432/tcp | head -1 | cut -d: -f2)/postgres" >> "$GITHUB_ENV"
-      - run: .venv/bin/pytest
+      - run: .venv/bin/pytest -n 4 --dist loadgroup  # 4 workers per job (4 runners share the VM); results-db tests stay on one
         env:
           DUEL_REQUIRE_DOCKER: "1"  # the real-docker sandbox tests must run here, not skip
       - if: always() && env.PG_CID != ''

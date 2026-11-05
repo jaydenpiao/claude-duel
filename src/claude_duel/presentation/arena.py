@@ -252,6 +252,13 @@ class ArenaView(MatchFold):
         delta = cast("dict[str, int]", e.data["delta"])
         for p in self.model.players:
             p.rounds.append(int(delta.get(p.name, 0)))
+        for cid, pts in cast("dict[str, int]", e.data.get("points", {})).items():
+            ch = s.challenges.get(cid)
+            atk = next((a for a in s.attacks.values() if a.challenge_id == cid), None)
+            if ch is None or atk is None:  # only a forged log names a capture that never happened
+                continue
+            title = scrub(ch.spec.title) if ch.spec else "forfeit"
+            self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
 
