@@ -5,6 +5,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Replay no longer flags ledger logs written before #199 (no round points) as tampered.
+
 ### Changed
 - `duel estimate` prices an agent's own `max_output_tokens` (wallet cap still lowers it), so thinking-model runs are not understated.
 - `[[agents]] max_output_tokens` sets one agent's per-call output cap (thinking models), overriding `[rules] max_output_tokens`; the wallet cap still lowers it.
@@ -28,6 +31,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
 - Ledger rejection of malformed stakes (#208).
 - Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
