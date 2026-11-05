@@ -7,6 +7,8 @@ alice ━━━━━━━━━━━━━━━━━━━━━━━━�
 
 alice: in 13,115 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defe…
 bob: in 11,770 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice: r2 stakes 0·6k·6k (fallback) · keystone #1
+bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
 🛡 bob defended 'Mirror' +20
