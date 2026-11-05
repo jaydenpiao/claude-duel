@@ -41,6 +41,9 @@ class AgentSpec(_Frozen):
     model: str | None = Field(default=None, description="None means the provider's configured default")
     skill: int = Field(default=2, ge=0, description="fake provider only")
     handicap: Handicap = Handicap()
+    max_output_tokens: int | None = Field(
+        default=None, ge=64, le=64_000, description="per-call output cap for this agent (thinking models); None: rules"
+    )
 
 
 class SandboxLimits(_Frozen):
@@ -161,7 +164,7 @@ class Rules(_Frozen):
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
     )
     max_output_tokens: int = Field(
-        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; same for every agent"
+        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
@@ -218,6 +221,12 @@ class Rules(_Frozen):
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""
         return self.max_source_bytes_base * round_no
+
+    def output_cap(self, own: int | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
+        tokens = self.max_output_tokens if own is None else own
+        cap = self.wallet.max_output_tokens
+        return tokens if cap is None else min(tokens, cap)
 
 
 class ChallengeSpec(_Frozen):
