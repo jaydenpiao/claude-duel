@@ -5,6 +5,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Replay no longer flags ledger logs written before #199 (no round points) as tampered.
+
 ### Changed
 - CI runs pytest in parallel with pytest-xdist (4 workers); results-db tests share one worker (from #177).
 - CI: stacked PRs (base not main) run the 3.12 check only; PRs into main and main pushes run 3.11, 3.12 and 3.13, which merge.sh requires. Retargeting a PR reruns the check.
