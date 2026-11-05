@@ -363,3 +363,15 @@ def test_ledger_preset_turns_the_features_on() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
     assert (rule.keystone, rule.terrain, rule.heat_window) == (True, "seeded", 2)
+def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """A ledger log from before #199 has no round_scored points: replay skips that check, not flags it."""
+    state = make_engine().run(_ledger(new_state))
+    old = [
+        e.model_copy(update={"data": {k: v for k, v in e.data.items() if k != "points"}})
+        if e.type == ev.ROUND_SCORED
+        else e
+        for e in event_log.read("l1")
+    ]
+    assert any(a.solved and a.stake for a in state.attacks.values())
+    result = replay(state, old)
+    assert result.consistent, result.mismatches

@@ -5,6 +5,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Replay no longer flags ledger logs written before #199 (no round points) as tampered.
+
 ### Changed
 - Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
 - CI runs pytest in parallel with pytest-xdist (4 workers); results-db tests share one worker (from #177).
@@ -27,6 +30,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
 - Ledger rejection of malformed stakes (#208).
 - Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
