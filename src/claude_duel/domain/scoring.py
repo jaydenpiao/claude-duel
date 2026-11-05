@@ -47,6 +47,42 @@ def score_round(
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
 
+def capture_points(
+    round_no: int,
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    attacks: Mapping[str, Attack],
+    rules: Rules,
+) -> dict[str, int]:
+    """Ledger: what each staked capture of the round paid its attacker, by challenge id (logged, never folded)."""
+    if rules.ledger is None:
+        return {}
+    by_cid = {a.challenge_id: a for a in attacks.values()}
+    mine = [c for c in challenges if c.round == round_no]
+    return {
+        cid: paid for cid, (_, _, paid) in sorted(_captures(mine, validations, by_cid, round_no, rules.scoring).items())
+    }
+
+
+def _captures(
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    attacks: Mapping[str, Attack],
+    round_no: int,
+    rule: ScoringRule,
+) -> dict[str, tuple[str, int, int]]:
+    """Staked captures: challenge id -> (attacker, full solve award, what the stake paid). The one source for both
+    the ledger scorer's discount and the logged ``points``."""
+    out = {}
+    for ch in challenges:
+        atk = attacks.get(ch.id)
+        v = validations.get(ch.id)
+        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
+            full = solve_award(ch.spec, round_no, atk.attempts, rule)
+            out[ch.id] = (atk.attacker, full, stake_award(full, atk.tokens_used, atk.stake))
+    return out
+
+
 def round_heat(
     challenges: Iterable[Challenge],
     validations: Mapping[str, Validation],
@@ -157,13 +193,11 @@ def _check_stakes(facts: RoundFacts) -> None:
 
 
 def _stake_discounts(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
-    """Each valid capture pays ``stake_award`` instead of the full classic award."""
-    for ch in facts.challenges:
-        atk = facts.attacks.get(ch.id)
-        v = facts.validations.get(ch.id)
-        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
-            full = solve_award(ch.spec, facts.round_no, atk.attempts, rule)
-            scores[atk.attacker] -= full - stake_award(full, atk.tokens_used, atk.stake)
+    """Each valid capture pays its discounted award (``_captures``) instead of the full classic award."""
+    for attacker, full, paid in _captures(
+        facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
+    ).values():
+        scores[attacker] -= full - paid
 
 
 def _keystone_bets(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:

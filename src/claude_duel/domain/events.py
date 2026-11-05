@@ -201,6 +201,7 @@ class KeystoneRevealed(_Payload):
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+    points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
     heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
 
 
