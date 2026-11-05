@@ -74,6 +74,10 @@ def tug(a: int, b: int, width: int) -> str:
     return "━" * pos + "◆" + "━" * (width - 1 - pos)
 
 
+def _k(tokens: int) -> str:
+    return f"{tokens / 1000:g}k" if tokens >= 1000 else str(tokens)
+
+
 @dataclass
 class Player:
     name: str
@@ -96,6 +100,7 @@ class ArenaModel:
     spend: str = ""
     banner: str = ""
     ghosts: str = ""  # deep layer: "GHOSTS" row, "" when ghosts are off
+    ledger: dict[str, str] = field(default_factory=dict)  # player -> "stakes 4k·4k·4k · keystone #2"
 
     def log(self, line: str) -> None:
         self.ticker = [*self.ticker, line][-TICKER_LINES:]
@@ -146,6 +151,11 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
     )
     if m.ghosts:
         parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
+    parts.extend(
+        Text(f"{p.name}: {m.ledger[p.name]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
+        for i, p in enumerate(m.players)
+        if m.ledger.get(p.name)
+    )
     parts.append(now)
     if m.flash:
         parts.append(Text(m.flash, style="bold", no_wrap=True, overflow="ellipsis"))
@@ -300,13 +310,24 @@ class ArenaView(MatchFold):
         drawn = cast("dict[str, str]", e.data["terrains"])
         rnd = int(str(e.data["round"]))
         per: dict[str, list[str]] = {}
-        for cid, t in drawn.items():  # every challenge's terrain, by its keystone number: "alice #3 swapcase"
+        for cid, t in drawn.items():  # every challenge's terrain, by its keystone number: "author #3 swapcase"
             ch = s.challenges.get(cid)
             if ch is not None:
                 n = next(i for i, c in enumerate(own_challenges(s.challenges, rnd, ch.author), 1) if c.id == cid)
                 per.setdefault(ch.author, []).append(f"#{n} {t.partition(':')[0]}")
         parts = [f"{a} {', '.join(sorted(ts, key=lambda x: int(x[1:].split()[0])))}" for a, ts in sorted(per.items())]
         self.model.log(f"terrain r{rnd}: {' · '.join(parts) or 'none'}")
+
+    def _staked(self, s: MatchState, e: Event) -> None:
+        stakes = "·".join(_k(int(x)) for x in cast("list[int]", e.data["stakes"]))
+        note = " (fallback)" if e.data.get("fallback") else ""
+        self.model.ledger[str(e.data["agent"])] = f"r{e.data['round']} stakes {stakes}{note}"
+
+    def _revealed(self, s: MatchState, e: Event) -> None:
+        idx = e.data.get("index")
+        key = f"keystone #{cast('int', idx) + 1}" if idx is not None else "no keystone"
+        agent = str(e.data["agent"])
+        self.model.ledger[agent] = " · ".join(x for x in (self.model.ledger.get(agent, ""), key) if x)
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self.model.log("resuming where the match stopped")
