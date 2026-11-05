@@ -30,7 +30,7 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import match_stats, score_round
+from claude_duel.domain.scoring import capture_points, heat_of_state, match_stats, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
 from claude_duel.ports import (
@@ -422,14 +422,14 @@ class MatchEngine:
         """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
         A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``.
         ``left`` (ledger: stake tokens left) fits max_tokens to the stake; no repair call below ``STAKE_FLOOR``."""
-        completion = self._call(state, agent, self._request(state, prompt, purpose, left))
+        completion = self._call(state, agent, self._request(state, agent, prompt, purpose, left))
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
             repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
             rest = None if left is None else left - completion.total_tokens
             if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
                 return completion
-            completion = self._call(state, agent, self._request(state, repair, purpose, rest))
+            completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
         return completion
 
     @staticmethod
@@ -438,9 +438,16 @@ class MatchEngine:
         system = agents.system_prompt(state.framing_text)
         return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
 
-    def _request(self, state: MatchState, prompt: str, purpose: Purpose, left: int | None = None) -> CompletionRequest:
-        cap = state.rules.wallet.max_output_tokens
-        tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+    @staticmethod
+    def _output_cap(state: MatchState, agent: str) -> int:
+        """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
+        own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
+        return state.rules.output_cap(own)
+
+    def _request(
+        self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
+    ) -> CompletionRequest:
+        tokens = self._output_cap(state, agent)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
@@ -461,7 +468,7 @@ class MatchEngine:
         if not state.rules.difficulty_gate:
             return None, False
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
-        completion = self._call(state, GATE, self._request(state, prompt, "attack"))
+        completion = self._call(state, GATE, self._request(state, GATE, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
@@ -757,7 +764,10 @@ class MatchEngine:
             state.rules,
             stakes.keystone_targets(state, state.round),
         )
-        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
+        points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
+        lines = heat_of_state(state, state.round)
+        extra = {"heat": lines} if lines else {}
+        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
 
 
 def _with_terrain(text: str, ground: str | None) -> str:
