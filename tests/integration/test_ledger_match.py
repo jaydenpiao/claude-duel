@@ -342,3 +342,17 @@ def test_stake_overshoot_records_the_estimate_gap(make_engine, new_state, event_
     assert all(a.stake_overshoot == max(0, a.tokens_used - 3000) for a in staked)
     assert any(a.stake_overshoot > 0 for a in staked)
     assert replay(state, event_log.read("l1")).consistent
+
+
+def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """A ledger log from before #199 has no round_scored points: replay skips that check, not flags it."""
+    state = make_engine().run(_ledger(new_state))
+    old = [
+        e.model_copy(update={"data": {k: v for k, v in e.data.items() if k != "points"}})
+        if e.type == ev.ROUND_SCORED
+        else e
+        for e in event_log.read("l1")
+    ]
+    assert any(a.solved and a.stake for a in state.attacks.values())
+    result = replay(state, old)
+    assert result.consistent, result.mismatches
