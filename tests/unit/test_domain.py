@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -240,6 +241,19 @@ class TestScorerInvariants:
         held = SCORERS[kind](_facts([("held", difficulty, attempts)], round_no), ScoringRule())["a"]
         captured = SCORERS[kind](_facts([("captured", difficulty, attempts)], round_no), ScoringRule())["b"]
         assert held >= captured
+
+    @given(st.sampled_from(["held", "captured"]), st.integers(1, 3), st.integers(1, 5), st.integers(0, 100))
+    def test_heat_is_a_separate_bounded_defender_line(
+        self, kind: str, outcome: str, difficulty: int, round_no: int, pct: int
+    ) -> None:
+        """ADR 0006 addendum: a heat line never touches awards, never credits the opponent, stays within its cap."""
+        facts = _facts([(outcome, difficulty, 3)], round_no)
+        cap = defense_award(spec(difficulty=difficulty), round_no, ScoringRule()) * 50 // 100
+        line = cap * pct // 100
+        plain = SCORERS[kind](facts, ScoringRule())
+        hot = SCORERS[kind](dataclasses.replace(facts, heat={"c0": line}), ScoringRule())
+        assert hot["b"] == plain["b"]  # the attacker's capture award is unchanged
+        assert plain["a"] - line <= hot["a"] <= plain["a"]
 
     @given(st.sampled_from(["invalid", "forfeit"]), st.integers(1, 5))
     def test_invalid_never_pays_author(self, kind: str, outcome: str, round_no: int) -> None:
