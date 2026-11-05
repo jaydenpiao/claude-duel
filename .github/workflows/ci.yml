@@ -46,7 +46,7 @@ jobs:
           echo "PG_CID=$cid" >> "$GITHUB_ENV"
           for _ in $(seq 60); do docker exec "$cid" psql -h 127.0.0.1 -U postgres -c 'select 1' >/dev/null 2>&1 && break; sleep 1; done
           echo "DUEL_TEST_DATABASE_URL=postgresql://postgres:$pw@127.0.0.1:$(docker port "$cid" 5432/tcp | head -1 | cut -d: -f2)/postgres" >> "$GITHUB_ENV"
-      - run: .venv/bin/pytest
+      - run: .venv/bin/pytest -n 4 --dist loadgroup  # 4 workers per job (4 runners share the VM); results-db tests stay on one
         env:
           DUEL_REQUIRE_DOCKER: "1"  # the real-docker sandbox tests must run here, not skip
       - if: always() && env.PG_CID != ''
