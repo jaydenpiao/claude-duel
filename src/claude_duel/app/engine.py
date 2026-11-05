@@ -30,7 +30,7 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import match_stats, score_round
+from claude_duel.domain.scoring import capture_points, heat_of_state, match_stats, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
 from claude_duel.ports import (
@@ -757,7 +757,10 @@ class MatchEngine:
             state.rules,
             stakes.keystone_targets(state, state.round),
         )
-        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
+        points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
+        lines = heat_of_state(state, state.round)
+        extra = {"heat": lines} if lines else {}
+        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
 
 
 def _with_terrain(text: str, ground: str | None) -> str:

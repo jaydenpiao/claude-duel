@@ -8,6 +8,7 @@ import re
 
 import pytest
 from pydantic import ValidationError
+from rich.console import Console
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
@@ -20,9 +21,11 @@ from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
 from claude_duel.domain.modes import preset
+from claude_duel.domain.scoring import capture_points
 from claude_duel.domain.series import game_winner
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
+from claude_duel.presentation.arena import ArenaView
 from tests.helpers import any_source
 
 
@@ -288,6 +291,37 @@ def test_terrain_none_logs_nothing(make_engine, new_state, event_log) -> None:  
     state = make_engine().run(st0.model_copy(update={"rules": rules}))
     assert not state.terrains
     assert ev.TERRAIN_DRAWN not in [e.type for e in event_log.read("l1")]
+
+
+def test_round_scored_logs_points_per_capture(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Each staked capture's points are on round_scored; replay rejects a forged value."""
+    state = make_engine().run(_ledger(new_state))
+    log = event_log.read("l1")
+    points = {cid: p for e in log if e.type == ev.ROUND_SCORED for cid, p in e.data["points"].items()}
+    assert set(points) == {a.challenge_id for a in state.attacks.values() if a.solved and a.stake}
+    assert points
+    assert all(p >= 1 for p in points.values())
+    assert replay(state, log).consistent
+    forged = [
+        e.model_copy(update={"data": {**e.data, "points": {k: v + 1 for k, v in e.data["points"].items()}}})
+        if e.type == ev.ROUND_SCORED
+        else e
+        for e in log
+    ]
+    assert "round 1 points tampered" in replay(state, forged).mismatches
+
+
+def test_arena_skips_a_forged_capture_line(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """A points entry naming a challenge with no attack (only a forged log) is skipped, not a crash."""
+    make_engine().run(_ledger(new_state))
+    view = ArenaView(Console(record=True, width=100), "l1", 50.0, lambda: 0.0, pace=0.001)
+    for e in event_log.read("l1"):
+        view(e.model_copy(update={"data": {**e.data, "points": {"nope": 3}}}) if e.type == ev.ROUND_SCORED else e)
+    view.close()
+
+
+def test_no_capture_points_outside_ledger() -> None:
+    assert capture_points(1, [], {}, {}, Rules()) == {}
 
 
 class Heavy(Allocating):
