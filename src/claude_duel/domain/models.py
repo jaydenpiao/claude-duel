@@ -199,6 +199,12 @@ class Rules(_Frozen):
         """Escalation: authors get more room every round."""
         return self.max_source_bytes_base * round_no
 
+    def output_cap(self, own: int | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
+        tokens = self.max_output_tokens if own is None else own
+        cap = self.wallet.max_output_tokens
+        return tokens if cap is None else min(tokens, cap)
+
 
 class ChallengeSpec(_Frozen):
     """What an author submits."""

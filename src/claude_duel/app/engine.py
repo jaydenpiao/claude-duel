@@ -442,9 +442,7 @@ class MatchEngine:
     def _output_cap(state: MatchState, agent: str) -> int:
         """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
         own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
-        tokens = state.rules.max_output_tokens if own is None else own
-        cap = state.rules.wallet.max_output_tokens
-        return tokens if cap is None else min(tokens, cap)
+        return state.rules.output_cap(own)
 
     def _request(
         self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
