@@ -27,7 +27,10 @@ from claude_duel.domain.errors import ConfigError, ResultsDbError
 from claude_duel.domain.flags import assert_no_flag, flag_of
 
 ADMIN = os.environ.get("DUEL_TEST_DATABASE_URL", "")
-pytestmark = pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set")
+pytestmark = [
+    pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set"),
+    pytest.mark.xdist_group("results_db"),  # roles are cluster-wide; keep these on one xdist worker
+]
 OWNER_PW = "owner-test-only"
 EXPORTER_PW = "exporter-test-only"
 INGEST_PW = "ingest-test-only"
