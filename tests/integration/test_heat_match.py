@@ -35,4 +35,4 @@ def test_heat_lines_are_logged_replayed_and_shown_in_memory(make_engine, new_sta
         else e
         for e in events
     ]
-    assert any(m.endswith(" heat") for m in replay(state, forged).mismatches)
+    assert any(m.endswith(" heat tampered") for m in replay(state, forged).mismatches)
