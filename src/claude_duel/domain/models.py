@@ -375,6 +375,7 @@ class MatchState(BaseModel):
     round: int = 0
     challenges: dict[str, Challenge] = Field(default_factory=dict)
     stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
+    allocate_started: list[str] = Field(default_factory=list)  # "<round>:<attacker>" after ALLOCATE_STARTED (#254)
     keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
     terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
