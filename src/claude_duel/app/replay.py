@@ -79,7 +79,8 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")
         points = capture_points(r, folded.challenges.values(), folded.validations, folded.attacks, folded.rules)
-        if points != event.data.get("points", {}):
+        # logs written before #199 carry no points; the delta check above still covers their score
+        if "points" in event.data and points != event.data["points"]:
             mismatches.append(f"round {r} points tampered")
         if heat_of_state(folded, r) != event.data.get("heat", {}):
             mismatches.append(f"round {r} heat tampered")
