@@ -26,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
 - Ledger rejection of malformed stakes (#208).
 - Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
