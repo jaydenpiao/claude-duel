@@ -639,10 +639,15 @@ class MatchEngine:
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
     def _allocate(self, state: MatchState, attacker: str) -> None:
-        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split."""
+        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split.
+
+        ALLOCATE_STARTED is checkpointed before the paid call. A crash after the charge but before STAKES_SET
+        resumes with an even-split fallback and does not re-pay (#254).
+        """
         rule = state.rules.ledger
         assert rule is not None
-        if f"{state.round}:{attacker}" in state.stakes:
+        key = f"{state.round}:{attacker}"
+        if key in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
         hits = ghosts.round_hits(state, state.round)
@@ -663,32 +668,38 @@ class MatchEngine:
             if rule.keystone
             else None
         )
-        prompt = agents.allocate_prompt(
-            attacker,
-            state.round,
-            rule.attack_tokens,
-            rule.min_alloc,
-            rows,
-            self._memory(state, attacker),
-            own_rows,
-            {i: hits[targets[i].id] for i in sorted(ghosted)},
-        )
-        for cid in state.challenges:
-            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
         raw: object = None
         pick: object = None
-        if allowance.empty(state, attacker) is None:
-            completion = self._complete(state, attacker, prompt, "allocate")
-            try:
-                if not completion.truncated:
-                    move = agents.parse_allocation(completion.text)
-                    raw, pick = move.stakes, move.keystone
-            except MalformedOutputError:
-                self._metrics.incr("model.malformed", purpose="allocate")
+        if key in state.allocate_started:
+            # already paid or started; settle without a second call (#254)
+            pass
+        else:
+            prompt = agents.allocate_prompt(
+                attacker,
+                state.round,
+                rule.attack_tokens,
+                rule.min_alloc,
+                rows,
+                self._memory(state, attacker),
+                own_rows,
+                {i: hits[targets[i].id] for i in sorted(ghosted)},
+            )
+            for cid in state.challenges:
+                assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+            self._checkpoint(state, ev.ALLOCATE_STARTED, agent=attacker, round=state.round)
+            if allowance.empty(state, attacker) is None:
+                completion = self._complete(state, attacker, prompt, "allocate")
+                try:
+                    if not completion.truncated:
+                        move = agents.parse_allocation(completion.text)
+                        raw, pick = move.stakes, move.keystone
+                except MalformedOutputError:
+                    self._metrics.incr("model.malformed", purpose="allocate")
         chosen, fallback = stakes.settle_stakes(raw, len(targets), rule, ghosted)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
-        if rule.keystone:  # sealed with the allocation: same call, so it costs nothing extra
+        # sealed with the allocation: same call, so it costs nothing extra
+        if rule.keystone and key not in state.keystones:
             index = stakes.pick_keystone(pick, own, valid)
             salt = stakes.keystone_salt(state.seed, state.round, attacker)
             commit = stakes.keystone_commit(index, salt)
