@@ -207,6 +207,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd in handlers:
         return handlers[args.cmd]()
     report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
@@ -264,7 +266,7 @@ def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
-        rows = [estimate(preset(n), chosen, settings.budget) for n in names]
+        rows = [estimate(preset(n), chosen, settings.budget, settings.agents) for n in names]
     except KeyError as exc:
         raise ConfigError(str(exc.args[0])) from exc
     print(render(rows))
