@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
