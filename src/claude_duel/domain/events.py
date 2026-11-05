@@ -43,6 +43,7 @@ BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
 CHALLENGE_VALIDATED = "challenge_validated"
 ATTACK_STARTED = "attack_started"
+ALLOCATE_STARTED = "allocate_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
@@ -137,6 +138,13 @@ class AttackStarted(_Payload):
 
     key: str
     try_no: int
+
+
+class AllocateStarted(_Payload):
+    """Ledger allocate is about to be paid; resume settles even-split if stakes never landed (#254)."""
+
+    agent: str
+    round: int
 
 
 class AttackAttempted(_Payload):
@@ -270,6 +278,12 @@ def _started(state: MatchState, p: AttackStarted) -> None:
     return None  # no state change: replay of logs with or without it is identical
 
 
+def _allocate_started(state: MatchState, p: AllocateStarted) -> None:
+    key = f"{p.round}:{p.agent}"
+    if key not in state.allocate_started:
+        state.allocate_started.append(key)
+
+
 def _attempted(state: MatchState, p: AttackAttempted) -> None:
     state.attempts.setdefault(p.key, []).append(p.attempt)
 
@@ -322,6 +336,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
     ATTACK_STARTED: (AttackStarted, _started),
+    ALLOCATE_STARTED: (AllocateStarted, _allocate_started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
