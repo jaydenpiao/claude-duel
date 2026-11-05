@@ -114,6 +114,13 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    keystone: bool = Field(
+        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+    )
+    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
+    heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
@@ -325,6 +332,20 @@ class Event(_Frozen):
     data: dict[str, object]
 
 
+class Keystone(_Frozen):
+    """An author's committed keystone (design-core-logic.md 4.2): ``commit = sha256("<index>:<salt>")``.
+
+    ``index`` is positional over the author's own challenges of the round, sorted by id; None = forfeited (no or
+    invalid pick); it stays None until ``revealed``, since the seal event logs only the commit. The commit is
+    integrity-only (the log can't be rewritten after the fact); the index is recoverable from the seeded salt.
+    """
+
+    commit: str
+    index: int | None = None
+    salt: str = ""  # set at reveal
+    revealed: bool = False
+
+
 class MatchState(BaseModel):
     """Mutable aggregate; persisted after every unit of work."""
 
@@ -343,6 +364,8 @@ class MatchState(BaseModel):
     round: int = 0
     challenges: dict[str, Challenge] = Field(default_factory=dict)
     stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
+    keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
+    terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)

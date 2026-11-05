@@ -13,9 +13,7 @@ from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.models import ChallengeSpec, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
-SYSTEM = (
-    "You are a contestant in Claude Duel, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
-)
+SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 
 
 def system_prompt(framing_text: str) -> str:
@@ -39,6 +37,7 @@ class AttackMove(BaseModel):
 class AllocationMove(BaseModel):
     model_config = ConfigDict(extra="ignore")
     stakes: list[object] = Field(max_length=10)  # checked by domain/stakes.settle_stakes, not here
+    keystone: object = None  # checked by domain/stakes.pick_keystone
 
 
 EXAMPLE_CHALLENGE = {
@@ -151,6 +150,18 @@ class _BuildAnswer(ChallengeSpec):
     difficulty: int = Field(default=2, ge=1, le=3)
 
 
+def heat_rule(rules: Rules) -> list[str]:
+    """Forge-prompt disclosure of novelty heat (design-core-logic.md 4.3); [] when heat is off."""
+    led = rules.ledger
+    if led is None or not led.heat_window:
+        return []
+    return [
+        f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
+        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
+        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+    ]
+
+
 def build_prompt(
     agent: str,
     round_no: int,
@@ -171,6 +182,7 @@ def build_prompt(
         *(_program_rules(rules, round_no) if rules.challenge_form == "program" else _check_rules(rules, round_no)),
     ]
     lines += variety
+    lines += heat_rule(rules)
     lines += memory_lines(memory, scratchpad)
     if previous is not None:
         lines.append(
@@ -303,7 +315,13 @@ def attack_prompt(
 
 
 def allocate_prompt(
-    agent: str, round_no: int, budget: int, min_alloc: int, targets: list[tuple[str, str, str, bool]], memory: str = ""
+    agent: str,
+    round_no: int,
+    budget: int,
+    min_alloc: int,
+    targets: list[tuple[str, str, str, bool]],
+    memory: str = "",
+    own: list[tuple[str, str, bool]] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -323,12 +341,25 @@ def allocate_prompt(
         f"author), otherwise at least {min_alloc}. Stakes must sum to at most {budget}. A capture that uses less of "
         "its stake scores more. An invalid answer falls back to an even split."
     )
-    lines.append('Return JSON: {"stakes": [<int>, ...]} with one stake per challenge, in order.')
+    if own:
+        lines.append("Your own challenges this round (pick one as your keystone; your opponent sees only a hash):")
+        lines += [
+            f"  keystone {i}: {fence(title)} [{'valid' if ok else 'INVALID'}]\n{fence(src)}"
+            for i, (title, src, ok) in enumerate(own)
+        ]
+        lines.append(
+            "Keystone: if it survives, its defense pays double; if captured, you lose half its capture value. "
+            "An invalid or out-of-range pick forfeits the keystone."
+        )
+    lines.append(
+        'Return JSON: {"stakes": [<int>, ...], "keystone": <int>} with one stake per challenge, in order '
+        "(keystone: an index above; 0 if there are none)."
+    )
     return "\n".join(lines)
 
 
-def parse_allocation(text: str) -> list[object]:
-    return parse(text, AllocationMove).stakes
+def parse_allocation(text: str) -> AllocationMove:
+    return parse(text, AllocationMove)
 
 
 SOLVER_HINT = (
@@ -413,8 +444,8 @@ ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
     "attack": _strict({"payload": _TEXT, "notes": _TEXT}),
     "allocate": {
         "type": "object",
-        "properties": {"stakes": {"type": "array", "items": {"type": "integer"}}},
-        "required": ["stakes"],
+        "properties": {"stakes": {"type": "array", "items": {"type": "integer"}}, "keystone": {"type": "integer"}},
+        "required": ["stakes", "keystone"],
         "additionalProperties": False,
     },
     "attack_solver": _strict({"payload": _TEXT, "solver": _TEXT, "notes": _TEXT}),  # Rules.attacker_solver

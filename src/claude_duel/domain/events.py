@@ -6,10 +6,11 @@ The engine records an event and applies it; replay folds the same events from sc
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable, Iterable
 from typing import Any, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
@@ -20,6 +21,7 @@ from claude_duel.domain.models import (
     Challenge,
     Event,
     Finding,
+    Keystone,
     MatchState,
     Rules,
     SandboxLimits,
@@ -28,6 +30,7 @@ from claude_duel.domain.models import (
     Validation,
 )
 from claude_duel.domain.scoring import add_scores
+from claude_duel.domain.stakes import keystone_commit
 from claude_duel.domain.state_machine import recover, transition
 
 MATCH_CREATED = "match_created"
@@ -47,6 +50,9 @@ FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
 BUDGET_OVERRIDDEN = "budget_overridden"
 STAKES_SET = "stakes_set"
+KEYSTONE_SEALED = "keystone_sealed"
+KEYSTONE_REVEALED = "keystone_revealed"
+TERRAIN_DRAWN = "terrain_drawn"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -77,6 +83,7 @@ class _Payload(BaseModel):
 
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
+    python: str = ""  # interpreter version that parsed sources for heat (ast is version-pinned); absent before heat
     framing_text: str = ""  # absent before framings
     created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
@@ -161,6 +168,13 @@ class NoteRecorded(_Payload):
     text: str
 
 
+class TerrainDrawn(_Payload):
+    """Ledger: the round's public stdin transform per valid challenge (challenge id -> terrain)."""
+
+    round: int
+    terrains: dict[str, str]
+
+
 class StakesSet(_Payload):
     """An attacker's settled ledger stakes for one round; ``fallback`` = its answer was invalid (alloc_fallback)."""
 
@@ -170,9 +184,26 @@ class StakesSet(_Payload):
     fallback: bool = False
 
 
+class KeystoneSealed(_Payload):
+    """An author's keystone commit only; the index is logged at reveal (KeystoneRevealed)."""
+
+    agent: str
+    round: int
+    commit: str
+
+
+class KeystoneRevealed(_Payload):
+    agent: str
+    round: int
+    index: int | None = None
+    salt: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+    points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
+    heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
 
 
 class FindingFlagged(_Payload):
@@ -260,6 +291,22 @@ def _staked(state: MatchState, p: StakesSet) -> None:
     state.stakes[f"{p.round}:{p.agent}"] = list(p.stakes)
 
 
+def _terrain(state: MatchState, p: TerrainDrawn) -> None:
+    state.terrains.update(p.terrains)
+
+
+def _sealed(state: MatchState, p: KeystoneSealed) -> None:
+    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit)
+
+
+def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
+    key = f"{p.round}:{p.agent}"
+    sealed = state.keystones.get(key)
+    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt):
+        raise EventLogCorruptError(f"tampered: keystone reveal for {key} does not match its commit")
+    state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -283,6 +330,9 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     NOTE_RECORDED: (NoteRecorded, _noted),
     BUDGET_OVERRIDDEN: (BudgetOverridden, _overridden),
     STAKES_SET: (StakesSet, _staked),
+    KEYSTONE_SEALED: (KeystoneSealed, _sealed),
+    KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
+    TERRAIN_DRAWN: (TerrainDrawn, _terrain),
 }
 
 
@@ -304,6 +354,7 @@ def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
         "seed": state.seed,
+        "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
