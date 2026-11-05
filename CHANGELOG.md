@@ -55,7 +55,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 First public release.
 
 ### Added
-- Deep layer phase 1: Ghost Codex replay (`ledger_deep` preset, `ghost_run` events, ghost captures pay max(1, full // 4); #210).
 - `duel run` / `resume` / `replay`: staged agent-vs-agent CTF matches (build, validate, attack, score) with an
   event-sourced, hash-chained log; replay recomputes every score and reports mismatches.
 - Sandboxes: subprocess (rlimits) and Docker (no network, read-only, pids/memory caps; gVisor runtime).
