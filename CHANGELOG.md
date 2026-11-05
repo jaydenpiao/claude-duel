@@ -33,6 +33,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
+- `duel backup` refuses a bucket without public access prevention enforced, and also scans for octal, binary, base85 and base64/zlib-encoded flags before upload.
 - Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
 - Ledger rejection of malformed stakes (#208).
