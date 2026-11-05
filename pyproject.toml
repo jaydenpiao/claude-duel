@@ -88,6 +88,7 @@ paths = ["src", "tests"]
 # framework hooks (pydantic, pytest, logging.Formatter) and persisted match facts read by replay/later modes
 ignore_names = ["model_config", "pytestmark", "format", "tokens_used", "elapsed_ms", "rules_version",
     "_no_real_database",  # pytest autouse: strips a developer's real results-db URLs
+    "_bucket_is_private",  # pytest autouse: backup tests see a bucket with public access prevention enforced
     # results row fields written to Postgres via dataclasses.asdict
     "prev_hash", "bt_lo", "bt_hi", "elo_k", "through_match", "agent_name", "event_count", "head_hash", "is_fake"]
 ignore_decorators = ["@model_validator", "@field_validator"]
