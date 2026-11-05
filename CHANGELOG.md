@@ -5,13 +5,40 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Replay no longer flags ledger logs written before #199 (no round points) as tampered.
+
 ### Changed
+- `duel estimate` prices an agent's own `max_output_tokens` (wallet cap still lowers it), so thinking-model runs are not understated.
+- `[[agents]] max_output_tokens` sets one agent's per-call output cap (thinking models), overriding `[rules] max_output_tokens`; the wallet cap still lowers it.
+- CI runs pytest in parallel with pytest-xdist (4 workers); results-db tests share one worker (from #177).
+- CI: stacked PRs (base not main) run the 3.12 check only; PRs into main and main pushes run 3.11, 3.12 and 3.13, which merge.sh requires. Retargeting a PR reruns the check.
+- Base and sandbox image python:3.12-slim re-pinned for apt 3.0.4 (CVE-2026-109518).
+- The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only.
+- Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
+- Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
 - `scoring = "ledger"` refused until the arena wiring lands (#208).
 - `gpt-4.1-nano` dropped from the allowlist; gpt-5-nano is the low default (#209).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
+- Default model is gpt-5-nano; the code default lifetime cap is $33.
+- Hypothesis runs without a per-example deadline in CI.
+- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
+- Shared driver helpers for match, series and tournament drivers.
+- Public-facing repo docs (security policy, code owners, issue templates).
+- Review-code gate is case-insensitive and covers `docs/`.
+- Results index is Cloud SQL only (`results_sql`, IAM via cloud-sql-proxy Unix socket); Neon dropped (#156).
+- Provider registry: vendors and factories behind one table (#154).
+- gpt-4.1-nano removed from the allowlist (#209).
+- SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
+- `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
+- Ledger rejection of malformed stakes (#208).
+- Launch preregistration `docs/runs/launch-prereg.md` and `launch.toml` (#149).
+- `open_match` helper for drivers (#185).
+- PROPHECY core (#214; engine wiring follows).
 - Driver locks: a second series/tournament driver on the same id fails fast (`MatchLockedError`).
 - Series ids from entrant indexes, so look-alike names never share a series log.
 - Flag-form detection covers split and shifted encodings in the redactor.
@@ -27,14 +54,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Results index on Cloud SQL: `duel sync`, `duel db migrate` and `duel export` (ADR 0012, #151).
 - Provider registry: vendors declared once, shared HTTP error mapping, Anthropic adapter (ADR 0013, #154).
 - SECURITY.md interim private contact (#215).
-
-### Changed
-- Default model is gpt-5-nano; the code default lifetime cap is $33.
-- Hypothesis runs without a per-example deadline in CI.
-- Spend line shows the lifetime cap; every config profile caps lifetime spend at $33.
-- Shared driver helpers for match, series and tournament drivers.
-- Public-facing repo docs (security policy, code owners, issue templates).
-- Review-code gate is case-insensitive and covers `docs/`.
 
 ## [0.1.0]
 First public release.

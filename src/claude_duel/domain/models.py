@@ -41,6 +41,9 @@ class AgentSpec(_Frozen):
     model: str | None = Field(default=None, description="None means the provider's configured default")
     skill: int = Field(default=2, ge=0, description="fake provider only")
     handicap: Handicap = Handicap()
+    max_output_tokens: int | None = Field(
+        default=None, ge=64, le=64_000, description="per-call output cap for this agent (thinking models); None: rules"
+    )
 
 
 class SandboxLimits(_Frozen):
@@ -109,6 +112,20 @@ class MemoryRule(_Frozen):
     source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
 
 
+class LedgerRule(_Frozen):
+    """Sealed Ledger stakes (design-core-logic.md): tokens an attacker splits across the opponent's challenges."""
+
+    attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
+    min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    keystone: bool = Field(
+        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+    )
+    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
+    heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+
+
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
 
 
@@ -130,7 +147,7 @@ class Rules(_Frozen):
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
     )
     max_output_tokens: int = Field(
-        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; same for every agent"
+        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
@@ -148,6 +165,7 @@ class Rules(_Frozen):
     scoring: ScoringRule = ScoringRule()
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
+    ledger: LedgerRule | None = Field(default=None, description="Sealed Ledger stakes (mode ledger); None = off")
     wallet: WalletRule = WalletRule()
     clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
@@ -170,9 +188,25 @@ class Rules(_Frozen):
         data["scoring"] = base | moved  # an explicit legacy override wins (e.g. over a preset's scoring)
         return data
 
+    @model_validator(mode="after")
+    def _ledger_k_fits(self) -> Rules:
+        """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
+        if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
+            raise ValueError(
+                f"ledger: {self.challenges_per_round} challenges per round cannot each get min_alloc "
+                f"{self.ledger.min_alloc} from attack_tokens {self.ledger.attack_tokens}"
+            )
+        return self
+
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""
         return self.max_source_bytes_base * round_no
+
+    def output_cap(self, own: int | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
+        tokens = self.max_output_tokens if own is None else own
+        cap = self.wallet.max_output_tokens
+        return tokens if cap is None else min(tokens, cap)
 
 
 class ChallengeSpec(_Frozen):
@@ -249,6 +283,7 @@ class Attack(_Frozen):
     reason: str
     usd_micros: int = 0
     stake: int | None = Field(default=None, ge=0)  # ledger mode: tokens the attacker allocated here (0 = skipped)
+    stake_overshoot: int = Field(default=0, ge=0)  # ledger: tokens past the stake (input estimate gap only)
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
@@ -306,6 +341,20 @@ class Event(_Frozen):
     data: dict[str, object]
 
 
+class Keystone(_Frozen):
+    """An author's committed keystone (design-core-logic.md 4.2): ``commit = sha256("<index>:<salt>")``.
+
+    ``index`` is positional over the author's own challenges of the round, sorted by id; None = forfeited (no or
+    invalid pick); it stays None until ``revealed``, since the seal event logs only the commit. The commit is
+    integrity-only (the log can't be rewritten after the fact); the index is recoverable from the seeded salt.
+    """
+
+    commit: str
+    index: int | None = None
+    salt: str = ""  # set at reveal
+    revealed: bool = False
+
+
 class MatchState(BaseModel):
     """Mutable aggregate; persisted after every unit of work."""
 
@@ -323,6 +372,9 @@ class MatchState(BaseModel):
     stage: Stage = Stage.PENDING
     round: int = 0
     challenges: dict[str, Challenge] = Field(default_factory=dict)
+    stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
+    keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
+    terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
     attacks: dict[str, Attack] = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)

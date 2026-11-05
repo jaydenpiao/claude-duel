@@ -41,9 +41,10 @@ class Settings(BaseModel):
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
-    docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
+    docker_image: str = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
+    replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)
 
     @model_validator(mode="before")
     @classmethod
@@ -71,14 +72,15 @@ class Settings(BaseModel):
         return agent.model or self.default_model(agent.provider)
 
 
-# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger: #192).
-UNAVAILABLE_SCORING = frozenset({"ledger"})
+# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger was, until #192).
+UNAVAILABLE_SCORING: frozenset[str] = frozenset()
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
     "DUEL_METRICS": "metrics",
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
+    "DUEL_REPLAY_BUCKET": "replay_bucket",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
@@ -138,8 +140,7 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
 def _check_scoring_available(rules: Rules) -> None:
     if rules.scoring.kind in UNAVAILABLE_SCORING:
         raise ConfigError(
-            f"scoring kind {rules.scoring.kind!r} is not available yet (stakes are not wired into matches"
-            " until #192); use classic, efficiency or timed"
+            f"scoring kind {rules.scoring.kind!r} is not available yet; use classic, efficiency, timed or ledger"
         )
 
 
