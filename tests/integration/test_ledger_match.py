@@ -369,3 +369,52 @@ def test_missing_stakes_skip_attack_not_unlimited(make_engine, new_state, event_
     assert all(a.stake == 0 and a.attempts == 0 and a.reason == "skipped: stake 0" for a in state.attacks.values())
     # no attack calls: every challenge was skipped at stake 0
     assert not any(e.type == ev.ATTACK_STARTED for e in event_log.read("no-stakes"))
+
+
+def test_resume_does_not_repay_allocate(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Crash after allocate is charged but before stakes land: resume settles even-split, no second pay (#254)."""
+    counts: dict[str, int] = {"alice": 0, "bob": 0}
+
+    class Counting(Allocating):
+        def __init__(self, name: str, text: str) -> None:
+            super().__init__(text)
+            self.who = name
+
+        def complete(self, request: CompletionRequest) -> Completion:
+            if request.purpose == "allocate":
+                counts[self.who] += 1
+            return super().complete(request)
+
+    text = '{"stakes": [4000, 4000, 4000]}'
+    eng = make_engine(providers={"alice": Counting("alice", text), "bob": Counting("bob", text)})
+    orig = eng._checkpoint
+    stakes_seen = {"n": 0}
+
+    def boom(state: MatchState, kind: str, **data: object) -> None:
+        if kind == ev.STAKES_SET:
+            stakes_seen["n"] += 1
+            if stakes_seen["n"] == 1:
+                raise RuntimeError("crash after allocate paid")
+        orig(state, kind, **data)
+
+    eng._checkpoint = boom  # type: ignore[method-assign]
+    state0 = _ledger(new_state, "resume-alloc")
+    state0.rules = state0.rules.model_copy(update={"rounds": 1})
+    with pytest.raises(RuntimeError, match="crash after allocate paid"):
+        eng.run(state0)
+    saved = store.load("resume-alloc")
+    assert "1:alice" in saved.allocate_started
+    assert "1:alice" not in saved.stakes
+    assert counts["alice"] == 1
+    done = make_engine(providers={"alice": Counting("alice", text), "bob": Counting("bob", text)}).run(saved)
+    assert done.stage is Stage.COMPLETE
+    assert counts["alice"] == 1  # no second allocate pay for alice
+    assert "1:alice" in done.stakes
+    alice_r1 = next(
+        e
+        for e in event_log.read("resume-alloc")
+        if e.type == ev.STAKES_SET and e.data["agent"] == "alice" and e.data["round"] == 1
+    )
+    assert alice_r1.data["fallback"] is True
+    assert alice_r1.data["stakes"] == [4000, 4000, 4000]
+    assert replay(done, event_log.read("resume-alloc")).consistent
