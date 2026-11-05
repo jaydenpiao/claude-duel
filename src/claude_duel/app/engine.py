@@ -422,14 +422,14 @@ class MatchEngine:
         """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
         A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``.
         ``left`` (ledger: stake tokens left) fits max_tokens to the stake; no repair call below ``STAKE_FLOOR``."""
-        completion = self._call(state, agent, self._request(state, prompt, purpose, left))
+        completion = self._call(state, agent, self._request(state, agent, prompt, purpose, left))
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
             repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
             rest = None if left is None else left - completion.total_tokens
             if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
                 return completion
-            completion = self._call(state, agent, self._request(state, repair, purpose, rest))
+            completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
         return completion
 
     @staticmethod
@@ -438,9 +438,16 @@ class MatchEngine:
         system = agents.system_prompt(state.framing_text)
         return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
 
-    def _request(self, state: MatchState, prompt: str, purpose: Purpose, left: int | None = None) -> CompletionRequest:
-        cap = state.rules.wallet.max_output_tokens
-        tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+    @staticmethod
+    def _output_cap(state: MatchState, agent: str) -> int:
+        """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
+        own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
+        return state.rules.output_cap(own)
+
+    def _request(
+        self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
+    ) -> CompletionRequest:
+        tokens = self._output_cap(state, agent)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
@@ -461,7 +468,7 @@ class MatchEngine:
         if not state.rules.difficulty_gate:
             return None, False
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
-        completion = self._call(state, GATE, self._request(state, prompt, "attack"))
+        completion = self._call(state, GATE, self._request(state, GATE, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
@@ -597,10 +604,15 @@ class MatchEngine:
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
     def _allocate(self, state: MatchState, attacker: str) -> None:
-        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split."""
+        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split.
+
+        ALLOCATE_STARTED is checkpointed before the paid call. A crash after the charge but before STAKES_SET
+        resumes with an even-split fallback and does not re-pay (#254).
+        """
         rule = state.rules.ledger
         assert rule is not None
-        if f"{state.round}:{attacker}" in state.stakes:
+        key = f"{state.round}:{attacker}"
+        if key in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
         rows = [
@@ -619,25 +631,31 @@ class MatchEngine:
             if rule.keystone
             else None
         )
-        prompt = agents.allocate_prompt(
-            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
-        )
-        for cid in state.challenges:
-            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
         raw: object = None
         pick: object = None
-        if allowance.empty(state, attacker) is None:
-            completion = self._complete(state, attacker, prompt, "allocate")
-            try:
-                if not completion.truncated:
-                    move = agents.parse_allocation(completion.text)
-                    raw, pick = move.stakes, move.keystone
-            except MalformedOutputError:
-                self._metrics.incr("model.malformed", purpose="allocate")
+        if key in state.allocate_started:
+            # already paid or started; settle without a second call (#254)
+            pass
+        else:
+            prompt = agents.allocate_prompt(
+                attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
+            )
+            for cid in state.challenges:
+                assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+            self._checkpoint(state, ev.ALLOCATE_STARTED, agent=attacker, round=state.round)
+            if allowance.empty(state, attacker) is None:
+                completion = self._complete(state, attacker, prompt, "allocate")
+                try:
+                    if not completion.truncated:
+                        move = agents.parse_allocation(completion.text)
+                        raw, pick = move.stakes, move.keystone
+                except MalformedOutputError:
+                    self._metrics.incr("model.malformed", purpose="allocate")
         chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
-        if rule.keystone:  # sealed with the allocation: same call, so it costs nothing extra
+        # sealed with the allocation: same call, so it costs nothing extra
+        if rule.keystone and key not in state.keystones:
             index = stakes.pick_keystone(pick, own, valid)
             salt = stakes.keystone_salt(state.seed, state.round, attacker)
             commit = stakes.keystone_commit(index, salt)

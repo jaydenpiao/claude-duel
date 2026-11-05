@@ -263,7 +263,7 @@ def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
-        rows = [estimate(preset(n), chosen, settings.budget) for n in names]
+        rows = [estimate(preset(n), chosen, settings.budget, settings.agents) for n in names]
     except KeyError as exc:
         raise ConfigError(str(exc.args[0])) from exc
     print(render(rows))
