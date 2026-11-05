@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed

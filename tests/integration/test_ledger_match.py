@@ -356,3 +356,16 @@ def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) 
     assert any(a.solved and a.stake for a in state.attacks.values())
     result = replay(state, old)
     assert result.consistent, result.mismatches
+
+
+def test_missing_stakes_skip_attack_not_unlimited(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Ledger with no stakes for an attacker must skip attacks (stake 0), not leave them uncapped (#255)."""
+    eng = make_engine()
+    eng._allocate = lambda state, attacker: None  # type: ignore[method-assign]
+    state = eng.run(_ledger(new_state, "no-stakes"))
+    assert state.stage is Stage.COMPLETE
+    assert state.stakes == {}
+    assert state.attacks
+    assert all(a.stake == 0 and a.attempts == 0 and a.reason == "skipped: stake 0" for a in state.attacks.values())
+    # no attack calls: every challenge was skipped at stake 0
+    assert not any(e.type == ev.ATTACK_STARTED for e in event_log.read("no-stakes"))
