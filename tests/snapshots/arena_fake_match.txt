@@ -5,6 +5,16 @@ fake-1 (A) ███████████████████████
 fake-1 (B) ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
 fake-1 (A) ━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fake-1 (B)
 
+fake-1 (A) · done · in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · …
+  ▣ Knock: Find the input that reveals the flag (b64).
+  ▸ try 3 on 'Maze' → missed
+  ▸ attack: 247 in / 8 out · $0.0000 · 0.0s
+  ▸ try 4 on 'Maze' → missed
+fake-1 (B) · done · in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · …
+  ▣ Maze: Find the input that reveals the flag (password).
+  ▸ try 3 on 'Knock' → missed
+  ▸ attack: 237 in / 8 out · $0.0000 · 0.0s
+  ▸ try 4 on 'Knock' → missed
 fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/…
 fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/…
 now: match over

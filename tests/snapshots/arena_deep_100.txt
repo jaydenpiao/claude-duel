@@ -5,6 +5,16 @@ fake-1 (A) ███████████████████████
 fake-1 (B) ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
 fake-1 (A) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fake-1 (B)
 
+fake-1 (A) · done · in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+  ▣ Maze: Find the input that reveals the flag (password).
+  ▸ try 2 on 'Mirror' → missed
+  ▸ attack: 576 in / 8 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Mirror' → missed
+fake-1 (B) · done · in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+  ▣ Mirror: Find the input that reveals the flag (reverse).
+  ▸ try 2 on 'Knock' → missed
+  ▸ attack: 610 in / 7 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Knock' → missed
 fake-1 (A): in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
 fake-1 (B): in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
 fake-1 (A): r2 stakes 0·6k·6k (fallback) · keystone #1

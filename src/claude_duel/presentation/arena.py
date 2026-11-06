@@ -18,6 +18,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from claude_duel.domain.events import CallCharged
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.domain.moments import moment_of
@@ -37,6 +38,9 @@ from claude_duel.presentation.common import (
 
 SPARKS = "▁▂▃▄▅▆▇█"
 TICKER_LINES = 5
+LANE_LINES = 3  # recent actions shown per side
+PREVIEW_CHARS = 60
+PHASE = {"build": "designing", "repair": "designing", "attack": "attacking"}
 REFRESH_PER_SECOND = 4
 MIN_BAR = 4
 COLORS = ("cyan", "magenta")
@@ -85,6 +89,13 @@ class Player:
     rounds: list[int] = field(default_factory=list)
     cost: str = ""  # live tokens in/out and $ (common.agent_cost)
     key: str = ""  # agent name in the match state (the label above is what is shown)
+    phase: str = ""  # designing / testing / attacking / defending
+    preview: str = ""  # the challenge it last built: title and first line, scrubbed
+    actions: list[str] = field(default_factory=list)  # live tail of its calls and results
+    thought: str = ""  # last reasoning summary the vendor returned (already redacted in the log)
+
+    def act(self, line: str) -> None:
+        self.actions = [*self.actions, line][-LANE_LINES:]
 
 
 @dataclass
@@ -132,6 +143,27 @@ def _tug_line(m: ArenaModel, width: int) -> Text:
     return line
 
 
+def _lane(p: Player, style: str) -> list[Text]:
+    """One side's live lane: phase and cost, what it built, its last actions, its last reasoning summary."""
+
+    def line(text: str, extra: str = "") -> Text:
+        return Text(text, style=f"{extra} {style}".strip(), no_wrap=True, overflow="ellipsis")
+
+    head = f"{p.name}" + (f" · {p.phase}" if p.phase else "") + (f" · {p.cost}" if p.cost else "")
+    rows = [line(head, "bold")]
+    if p.preview:
+        rows.append(line(f"  ▣ {p.preview}", "dim"))
+    rows.extend(line(f"  ▸ {a}", "dim") for a in p.actions)
+    if p.thought:
+        rows.append(line(f"  💭 {p.thought}", "italic dim"))
+    return rows if len(rows) > 1 or p.cost or p.phase else []
+
+
+def _short(text: str, n: int = PREVIEW_CHARS) -> str:
+    one = " ".join(scrub(text).split())
+    return one if len(one) <= n else one[: n - 1] + "…"
+
+
 def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> Group:
     """Pure: one full screen for ``m`` at ``width`` columns."""
     width = max(width, 20)
@@ -144,6 +176,8 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         now = Table.grid()
         now.add_row(spinner, Text(f" {m.now}", no_wrap=True, overflow="ellipsis"))
     parts: list[RenderableType] = [header, sub, Text(""), _player_rows(m, bar), _tug_line(m, width), Text("")]
+    for i, p in enumerate(m.players):
+        parts.extend(_lane(p, COLORS[i % len(COLORS)]))
     parts.extend(
         Text(f"{p.name}: {p.cost}", style=f"dim {COLORS[i % len(COLORS)]}", no_wrap=True, overflow="ellipsis")
         for i, p in enumerate(m.players)
@@ -197,6 +231,7 @@ class ArenaView(MatchFold):
         self._lifetime = lifetime_usd
         self._pace = pace
         self._spinner = Spinner("dots")
+        self._last_caller = ""
         self._live = Live(console=console, refresh_per_second=REFRESH_PER_SECOND, get_renderable=self._draw)
 
     def _draw(self) -> RenderableType:
@@ -227,6 +262,38 @@ class ArenaView(MatchFold):
         m.spend = spend(s, self._lifetime(), self._cap)
         m.ghosts = ghost_row(s)
 
+    def _player(self, key: str) -> Player | None:
+        return next((p for p in self.model.players if p.key == key), None)
+
+    def _phases(self, s: MatchState, attacker: str | None = None) -> None:
+        for p in self.model.players:
+            if s.stage is Stage.VALIDATE:
+                p.phase = "testing"
+            elif attacker is not None:
+                p.phase = "attacking" if p.key == attacker else "defending"
+
+    def _charged(self, s: MatchState, e: Event) -> None:
+        d = CallCharged.model_validate(e.data)
+        p = self._player(d.agent)
+        if p is None:
+            return
+        purpose = d.purpose or {Stage.BUILD: "build", Stage.ATTACK: "attack"}.get(s.stage, "call")  # older logs
+        if purpose in PHASE and s.stage is not Stage.ATTACK:
+            p.phase = PHASE[purpose]
+        cut = " · cut off at max tokens" if d.truncated else ""
+        p.act(
+            f"{purpose}: {d.input_tokens:,} in / {d.output_tokens:,} out · "
+            f"${d.usd:.4f} · {d.elapsed_ms / 1000:.1f}s{cut}"
+        )
+        if d.summary:
+            p.thought = _short(d.summary, 120)
+        self._last_caller = p.key
+
+    def _rejected(self, s: MatchState, e: Event) -> None:
+        p = self._player(self._last_caller)
+        if p is not None:
+            p.act(f"build rejected ✗ {_short(str(e.data['error']))}")
+
     def _created(self, s: MatchState, e: Event) -> None:
         self.model.players = [Player(who(s, a.name), a.model or "default", key=a.name) for a in s.agents]
 
@@ -234,6 +301,8 @@ class ArenaView(MatchFold):
         if s.stage is Stage.COMPLETE:
             self.model.busy = False
             self.model.now = "match over"
+            for p in self.model.players:
+                p.phase = "done"
             self.model.banner = result(s)
         elif s.stage in STAGE_NOW:
             self.model.now = STAGE_NOW[s.stage]
@@ -244,16 +313,24 @@ class ArenaView(MatchFold):
         ch = Challenge.model_validate(e.data["challenge"])
         what = f"built {scrub(ch.spec.title)!r}" if ch.spec else "forfeited a trap"
         self.model.log(f"{who(s, ch.author)} {what}")
+        p = self._player(ch.author)
+        if p is not None and ch.spec:
+            p.preview = _short(f"{ch.spec.title}: {ch.spec.description}", 90)
 
     def _validated(self, s: MatchState, e: Event) -> None:
         ch, title, _ = verdict(s, e)
         self.model.log(f"check {who(s, ch.author)}'s {title!r}: {verdict_text(s, e)}")
+        self._phases(s)
+        p = self._player(ch.author)
+        if p is not None:
+            p.act(f"arena check {title!r}: {_short(verdict_text(s, e))}")
 
     def _started(self, s: MatchState, e: Event) -> None:
         cid, _, attacker = str(e.data["key"]).rpartition(":")
         ch = s.challenges[cid]
         title = scrub(ch.spec.title) if ch.spec else "forfeit"
         self.model.busy = True
+        self._phases(s, attacker)
         self.model.now = (
             f"{who(s, attacker)} attacking {who(s, ch.author)}'s {title!r}... "
             f"try {e.data['try_no']}/{s.max_attempts(attacker)}"
@@ -265,6 +342,9 @@ class ArenaView(MatchFold):
             f"{who(s, a.attacker)} attacking {who(s, a.author)}'s {a.title!r} "
             f"(try {a.try_no}/{s.max_attempts(a.attacker)})"
         )
+        p = self._player(a.attacker)
+        if p is not None:
+            p.act(f"try {a.try_no} on {a.title!r} → {'captured ✓' if a.captured else 'missed'}")
         if a.captured:
             self.model.flash = f"⚔ {who(s, a.attacker)} captured {who(s, a.author)}'s flag ✓ +{a.award}"
             self.model.log(self.model.flash)

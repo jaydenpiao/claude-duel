@@ -129,4 +129,11 @@ def _parse_responses(data: Any) -> Completion:
         output_tokens=int(usage.get("output_tokens", 0)),
         reasoning_tokens=int((usage.get("output_tokens_details") or {}).get("reasoning_tokens", 0)),
         truncated=data.get("status") == "incomplete" and reason == "max_output_tokens",
+        reasoning_summary=" ".join(
+            part.get("text", "")
+            for item in items
+            if item.get("type") == "reasoning"
+            for part in item.get("summary") or []
+            if part.get("type") == "summary_text"
+        ),
     )
