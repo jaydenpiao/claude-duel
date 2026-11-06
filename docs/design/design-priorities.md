@@ -1,7 +1,7 @@
 # Design priorities, round 2 (design check 2026-10-22, 11:10 AM PDT)
 Items 2-11 and 4a/4b/10a of round 1 below are built and merged (see the "Built" notes in each spec, synced from `docs/design/`). Next, in priority order:
 
-1. **Match-cap hit becomes a terminal `CAPPED` outcome + prereg void-seed rule** (design-match-caps.md, ADR 0013 draft). Blocks the launch run: today a match that crosses `match_max_usd` fails and can never resume, which stalls its series, and the launch caps sit far below the prereg's own worst case. $0.
+1. **Match-cap hit becomes a terminal `CAPPED` outcome + prereg void-seed rule** (ADR 0014). Blocks the launch run: today a match that crosses `match_max_usd` fails and can never resume, which stalls its series, and the launch caps sit far below the prereg's own worst case. $0.
 2. **Elo in recorded play order** (#137, design-match-formats.md addendum). Small, $0, fixes a ratings number that is reported in the launch secondary metrics.
 3. **`LoggedAggregate` generic driver for series and tournament** (#140, same addendum). After [PR 119](https://github.com/jaydenpiao/claude-duel/pull/119) and [PR 120](https://github.com/jaydenpiao/claude-duel/pull/120) land; keeps future formats (deathmatch, ladder, survival) from being copy-pasted drivers.
 4. Still unbuilt from round 1: Bronstein delay and `bank_mult` clock handicaps, survival task (10b), ladder / lives (11a). Not before the launch.

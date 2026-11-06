@@ -1,12 +1,22 @@
-claude duel · alice (fake-1) vs bob (fake-1)
+claude duel · alice vs bob
 round 2/2 · match deep
 
 alice ██████████████████████████████████████████████████████████████████████    56 █▁
 bob   ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
 alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-alice: in 13,093 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
-bob: in 11,685 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice · done · in 13,279 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+  ▣ Maze: Find the input that reveals the flag (password).
+  ▸ try 2 on 'Mirror' → missed
+  ▸ attack: 594 in / 8 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Mirror' → missed
+bob · done · in 11,868 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+  ▣ Mirror: Find the input that reveals the flag (reverse).
+  ▸ try 2 on 'Knock' → missed
+  ▸ attack: 627 in / 7 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Knock' → missed
+alice: in 13,279 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+bob: in 11,868 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
 alice: r2 stakes 0·6k·6k (fallback) · keystone #1
 bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
