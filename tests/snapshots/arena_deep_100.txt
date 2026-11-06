@@ -1,0 +1,21 @@
+claude duel · alice (fake-1) vs bob (fake-1)
+round 2/2 · match deep
+
+alice ██████████████████████████████████████████████████████████████████████    56 █▁
+bob   ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
+alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
+
+alice: in 13,127 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+bob: in 11,779 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice: r2 stakes 0·6k·6k (fallback) · keystone #1
+bob: r2 stakes 0·12k·0 (fallback) · keystone #1
+GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
+now: match over
+🛡 bob defended 'Mirror' +20
+· 🛡 bob defended 'Mirror' +20
+· bob +5 for alice's 'Mirror'
+· bob +5 for alice's 'Maze'
+· alice +10 for bob's 'Arithmetic gate'
+· after round 2: alice 56  bob 37 · alice leads
+$0.0019 this match · $0.0000 of $50 cap
+🏆 winner: alice · alice 56  bob 37
