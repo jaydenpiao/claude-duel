@@ -9,7 +9,8 @@ queryable index, and a future public page needs data that provably holds no flag
 ## Decision
 - Cloud SQL for PostgreSQL is a **derived, rebuildable index**; the event logs stay the source of truth.
   `duel sync --rebuild` truncates and reloads it.
-- `duel sync` (owner URL from env `DATABASE_URL` only) verifies each log's chain, loads the snapshot
+- `duel sync` (a `duel_ingest` login from env `DATABASE_URL`; the owner's `MIGRATE_DATABASE_URL` only for
+  `--rebuild`) verifies each log's chain, loads the snapshot
   without opening `*.secret`, replays it up to `last_seq` and rejects (recorded in `duel.sync_rejects`,
   exit 1) anything inconsistent. Inserts are idempotent, keyed on event hash. If the DB holds a hash
   the log no longer has, sync halts (`HistoryRewrittenError`, exit 2): history was rewritten.
