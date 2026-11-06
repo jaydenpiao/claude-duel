@@ -53,7 +53,7 @@ runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating
 ## Cost rules
 - Default allowlist is low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Premium models are opt-in via `allow_premium` and never default.
 - Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$33`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it; output shows the lifetime cap), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
-- `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` come from env only, held as `SecretStr`. Never print, log, commit or put them in CI without asking.
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and the three results-DB URLs (`DATABASE_URL`, `MIGRATE_DATABASE_URL`, `EXPORT_DATABASE_URL`; each embeds a password) come from env only, held as `SecretStr`. Never print, log, commit or put them in CI without asking.
 
 ## Security invariants
 - Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only over stdin (runner header) and exposed to challenge code as the global `FLAG`; never on argv or in env. Never logged, never in events, never persisted (the match `secret` is, only in its own 0600 `<id>.secret` file; `MatchState.secret` is excluded from every dump and repr, so state files, summaries and exports never carry it).
