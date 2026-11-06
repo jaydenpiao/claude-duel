@@ -52,7 +52,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - CI requires real-Docker sandbox tests (`DUEL_REQUIRE_DOCKER=1`).
 - `duel experiment`: stakes experiment arms with a run-cap override (finite values only).
 - Match caps: a match-scoped cap hit ends the match `CAPPED` (void, not resumable; ADR 0014).
-- Sealed Ledger scorer: stake-discounted captures, keystone and spend tiebreak (arena wiring follows).
+- Sealed Ledger scorer: stake-discounted captures (#192).
+- Ledger keystone bet (#193), seeded terrain (#194), novelty heat (#198).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
 
