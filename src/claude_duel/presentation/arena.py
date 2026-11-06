@@ -32,6 +32,7 @@ from claude_duel.presentation.common import (
     spend,
     verdict,
     verdict_text,
+    who,
 )
 
 SPARKS = "▁▂▃▄▅▆▇█"
@@ -83,6 +84,7 @@ class Player:
     score: int = 0
     rounds: list[int] = field(default_factory=list)
     cost: str = ""  # live tokens in/out and $ (common.agent_cost)
+    key: str = ""  # agent name in the match state (the label above is what is shown)
 
 
 @dataclass
@@ -133,7 +135,7 @@ def _tug_line(m: ArenaModel, width: int) -> Text:
 def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> Group:
     """Pure: one full screen for ``m`` at ``width`` columns."""
     width = max(width, 20)
-    names = " vs ".join(f"{p.name} ({p.model})" for p in m.players)
+    names = " vs ".join(p.name for p in m.players)
     header = Text(f"claude duel · {names}", style="bold", no_wrap=True, overflow="ellipsis")
     sub = Text(f"round {m.round}/{m.rounds} · match {m.match_id}", style="dim", no_wrap=True, overflow="ellipsis")
     bar = max(width - 30, MIN_BAR)
@@ -148,9 +150,9 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         if p.cost
     )
     parts.extend(
-        Text(f"{p.name}: {m.ledger[p.name]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
+        Text(f"{p.name}: {m.ledger[p.key]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
         for i, p in enumerate(m.players)
-        if m.ledger.get(p.name)
+        if m.ledger.get(p.key)
     )
     if m.ghosts:
         parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
@@ -220,13 +222,13 @@ class ArenaView(MatchFold):
         m = self.model
         m.round, m.rounds = s.round, s.rules.rounds
         for p in m.players:
-            p.score = s.scores.get(p.name, 0)
-            p.cost = agent_cost(s, p.name)
+            p.score = s.scores.get(p.key, 0)
+            p.cost = agent_cost(s, p.key)
         m.spend = spend(s, self._lifetime(), self._cap)
         m.ghosts = ghost_row(s)
 
     def _created(self, s: MatchState, e: Event) -> None:
-        self.model.players = [Player(a.name, a.model or "default") for a in s.agents]
+        self.model.players = [Player(who(s, a.name), a.model or "default", key=a.name) for a in s.agents]
 
     def _stage(self, s: MatchState, e: Event) -> None:
         if s.stage is Stage.COMPLETE:
@@ -241,11 +243,11 @@ class ArenaView(MatchFold):
     def _built(self, s: MatchState, e: Event) -> None:
         ch = Challenge.model_validate(e.data["challenge"])
         what = f"built {scrub(ch.spec.title)!r}" if ch.spec else "forfeited a trap"
-        self.model.log(f"{ch.author} {what}")
+        self.model.log(f"{who(s, ch.author)} {what}")
 
     def _validated(self, s: MatchState, e: Event) -> None:
         ch, title, _ = verdict(s, e)
-        self.model.log(f"check {ch.author}'s {title!r}: {verdict_text(s, e)}")
+        self.model.log(f"check {who(s, ch.author)}'s {title!r}: {verdict_text(s, e)}")
 
     def _started(self, s: MatchState, e: Event) -> None:
         cid, _, attacker = str(e.data["key"]).rpartition(":")
@@ -253,38 +255,42 @@ class ArenaView(MatchFold):
         title = scrub(ch.spec.title) if ch.spec else "forfeit"
         self.model.busy = True
         self.model.now = (
-            f"{attacker} attacking {ch.author}'s {title!r}... try {e.data['try_no']}/{s.max_attempts(attacker)}"
+            f"{who(s, attacker)} attacking {who(s, ch.author)}'s {title!r}... "
+            f"try {e.data['try_no']}/{s.max_attempts(attacker)}"
         )
 
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)
         self.model.now = (
-            f"{a.attacker} attacking {a.author}'s {a.title!r} (try {a.try_no}/{s.max_attempts(a.attacker)})"
+            f"{who(s, a.attacker)} attacking {who(s, a.author)}'s {a.title!r} "
+            f"(try {a.try_no}/{s.max_attempts(a.attacker)})"
         )
         if a.captured:
-            self.model.flash = f"⚔ {a.attacker} captured {a.author}'s flag ✓ +{a.award}"
+            self.model.flash = f"⚔ {who(s, a.attacker)} captured {who(s, a.author)}'s flag ✓ +{a.award}"
             self.model.log(self.model.flash)
 
     def _attacked(self, s: MatchState, e: Event) -> None:
         held = defense(s, e)
         if held is not None:
             _, ch, award = held
-            self.model.flash = f"🛡 {ch.author} defended {scrub(ch.spec.title if ch.spec else '')!r} +{award}"
+            self.model.flash = f"🛡 {who(s, ch.author)} defended {scrub(ch.spec.title if ch.spec else '')!r} +{award}"
             self.model.log(self.model.flash)
 
     def _scored(self, s: MatchState, e: Event) -> None:
         delta = cast("dict[str, int]", e.data["delta"])
         for p in self.model.players:
-            p.rounds.append(int(delta.get(p.name, 0)))
+            p.rounds.append(int(delta.get(p.key, 0)))
         for cid, pts in cast("dict[str, int]", e.data.get("points", {})).items():
             ch = s.challenges.get(cid)
             atk = next((a for a in s.attacks.values() if a.challenge_id == cid), None)
             if ch is None or atk is None:  # only a forged log names a capture that never happened
                 continue
             title = scrub(ch.spec.title) if ch.spec else "forfeit"
-            self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
+            self.model.log(f"{who(s, atk.attacker)} +{pts} for {who(s, ch.author)}'s {title!r}")
         lead = leader(s)
-        self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
+        self.model.log(
+            f"after round {e.data['round']}: {board(s)}" + (f" · {who(s, lead)} leads" if lead else " · level")
+        )
 
     def _staked(self, s: MatchState, e: Event) -> None:
         stakes = "·".join(_k(int(x)) for x in cast("list[int]", e.data["stakes"]))
