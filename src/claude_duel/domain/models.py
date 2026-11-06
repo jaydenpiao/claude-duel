@@ -41,6 +41,9 @@ class AgentSpec(_Frozen):
     model: str | None = Field(default=None, description="None means the provider's configured default")
     skill: int = Field(default=2, ge=0, description="fake provider only")
     handicap: Handicap = Handicap()
+    max_output_tokens: int | None = Field(
+        default=None, ge=64, le=64_000, description="per-call output cap for this agent (thinking models); None: rules"
+    )
 
 
 class SandboxLimits(_Frozen):
@@ -118,6 +121,16 @@ class LedgerRule(_Frozen):
         default=True, description="each author commits to one challenge: defended x2, captured -base//2"
     )
     terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
+    heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+
+
+class DeepRule(_Frozen):
+    """Deep layer (design-core-logic deep-layer doc), phase 1: Ghost Codex replay, no imports. Ledger only."""
+
+    ghosts: bool = False  # replay past captures' payloads against the opponent's new challenges, $0 API
+    max_ghost_runs: int = Field(default=24, ge=0, le=200)  # sandbox runs per round
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
@@ -141,7 +154,7 @@ class Rules(_Frozen):
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
     )
     max_output_tokens: int = Field(
-        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; same for every agent"
+        default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
@@ -160,6 +173,7 @@ class Rules(_Frozen):
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
     ledger: LedgerRule | None = Field(default=None, description="Sealed Ledger stakes (mode ledger); None = off")
+    deep: DeepRule | None = Field(default=None, description="deep layer on top of ledger; None = off")
     wallet: WalletRule = WalletRule()
     clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
@@ -190,17 +204,25 @@ class Rules(_Frozen):
                 f"ledger: {self.challenges_per_round} challenges per round cannot each get min_alloc "
                 f"{self.ledger.min_alloc} from attack_tokens {self.ledger.attack_tokens}"
             )
+        if self.deep is not None and self.ledger is None:
+            raise ValueError("deep layer needs ledger")
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
         """Escalation: authors get more room every round."""
         return self.max_source_bytes_base * round_no
 
+    def output_cap(self, own: int | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
+        tokens = self.max_output_tokens if own is None else own
+        cap = self.wallet.max_output_tokens
+        return tokens if cap is None else min(tokens, cap)
+
 
 class ChallengeSpec(_Frozen):
     """What an author submits."""
 
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
@@ -272,6 +294,7 @@ class Attack(_Frozen):
     usd_micros: int = 0
     stake: int | None = Field(default=None, ge=0)  # ledger mode: tokens the attacker allocated here (0 = skipped)
     stake_overshoot: int = Field(default=0, ge=0)  # ledger: tokens past the stake (input estimate gap only)
+    ghost: str | None = None  # deep: id of the ghost that captured this with no live attack (stake refunded)
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
@@ -361,6 +384,7 @@ class MatchState(BaseModel):
     round: int = 0
     challenges: dict[str, Challenge] = Field(default_factory=dict)
     stakes: dict[str, list[int]] = Field(default_factory=dict)  # "<round>:<attacker>" -> stakes (ledger mode)
+    allocate_started: list[str] = Field(default_factory=list)  # "<round>:<attacker>" after ALLOCATE_STARTED (#254)
     keystones: dict[str, Keystone] = Field(default_factory=dict)  # "<round>:<author>" -> sealed/revealed keystone
     terrains: dict[str, str] = Field(default_factory=dict)  # challenge id -> terrain (ledger mode)
     validations: dict[str, Validation] = Field(default_factory=dict)
@@ -368,6 +392,7 @@ class MatchState(BaseModel):
     scores: dict[str, int] = Field(default_factory=dict)
     scored_rounds: list[int] = Field(default_factory=list)
     attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
+    ghost_runs: dict[str, bool] = Field(default_factory=dict)  # "<round>:<ghost id>><challenge id>" -> hit
     build_errors: dict[str, list[str]] = Field(default_factory=dict)
     last_seq: int = -1
     failure: str | None = None

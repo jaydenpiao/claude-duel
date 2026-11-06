@@ -21,12 +21,16 @@ from claude_duel.adapters.store import results_sql
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.postgres import PgExecutor, PublicReader, connect
 from claude_duel.adapters.store.results_sql import SqlResults
+from claude_duel.app.export import FIELDS
 from claude_duel.cli import main
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 from claude_duel.domain.flags import assert_no_flag, flag_of
 
 ADMIN = os.environ.get("DUEL_TEST_DATABASE_URL", "")
-pytestmark = pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set")
+pytestmark = [
+    pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set"),
+    pytest.mark.xdist_group("results_db"),  # roles are cluster-wide; keep these on one xdist worker
+]
 OWNER_PW = "owner-test-only"
 EXPORTER_PW = "exporter-test-only"
 INGEST_PW = "ingest-test-only"
@@ -147,6 +151,23 @@ def test_public_reader_refuses_writer_roles(db: dict[str, str]) -> None:
         PublicReader(conn)
     with connect(ADMIN) as conn, pytest.raises(ConfigError):
         PublicReader(conn)
+
+
+def test_public_view_columns_match_export_fields(db: dict[str, str]) -> None:
+    with connect(db["owner"]) as conn:
+        rows = conn.execute(
+            "select table_name, column_name from information_schema.columns"
+            " where table_schema = 'public_v' order by table_name, ordinal_position"
+        ).fetchall()
+    cols: dict[str, list[str]] = {}
+    for r in rows:
+        cols.setdefault(r["table_name"], []).append(r["column_name"])
+    # FIELDS is the export whitelist: every field must exist in its view, and any view column it drops is listed here
+    dropped = {"leaderboard": {"sync_run_id"}, "rating_history": {"elo_order", "elo_k", "through_match"}}
+    assert set(cols) == set(FIELDS)
+    for view, fields in FIELDS.items():
+        assert set(fields) <= set(cols[view]), view
+        assert set(cols[view]) - set(fields) == dropped.get(view, set()), view
 
 
 def test_schema_hardening(db: dict[str, str]) -> None:
