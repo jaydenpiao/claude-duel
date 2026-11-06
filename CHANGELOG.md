@@ -10,6 +10,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
 - Program-form build prompt now says the solver runs alone (it cannot call the source's check or helpers), matching the engine; the NameError repair hint says the same. Composing was rejected: program sources run top-level stdin/FLAG code.
 - Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed; one role query for sync/export checks; psycopg moved to the optional `db` extra; export name in one constant (quality L23-L28, L30).
 - `duel estimate` prices an agent's own `max_output_tokens` (wallet cap still lowers it), so thinking-model runs are not understated.
@@ -58,6 +59,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Ledger keystone bet (#193), seeded terrain (#194), novelty heat (#198).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
+- Ledger keystone commit-reveal: each author seals one challenge (#193).
+- Ledger seeded terrain: a public stdin transform per challenge, drawn before allocation (#194).
+- Ledger novelty heat: an author's challenge close to their own recent ones earns less defense (#198).
 
 ## [0.1.0]
 First public release.
