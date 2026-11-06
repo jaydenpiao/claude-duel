@@ -344,6 +344,27 @@ def test_stake_overshoot_records_the_estimate_gap(make_engine, new_state, event_
     assert replay(state, event_log.read("l1")).consistent
 
 
+def test_pre_keystone_ledger_log_replays_with_features_off(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """An old ledger log pins `rules.ledger` without keystone, terrain or heat; it folds to off and replays."""
+    st0 = _ledger(new_state)
+    old = LedgerRule(attack_tokens=st0.rules.ledger.attack_tokens, min_alloc=st0.rules.ledger.min_alloc)
+    state = make_engine().run(st0.model_copy(update={"rules": st0.rules.model_copy(update={"ledger": old})}))
+    log = event_log.read("l1")
+    pinned = log[0].data["rules"]["ledger"]
+    for gone in ("keystone", "terrain", "heat_window"):
+        del pinned[gone]
+    folded = ev.initial_state("l1", log[0]).rules.ledger
+    assert folded is not None
+    assert (folded.keystone, folded.terrain, folded.heat_window) == (False, "none", 0)
+    assert replay(state, log).consistent
+
+
+def test_ledger_preset_turns_the_features_on() -> None:
+    rule = preset("ledger").ledger
+    assert rule is not None
+    assert (rule.keystone, rule.terrain, rule.heat_window) == (True, "seeded", 2)
+
+
 def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
     """A ledger log from before #199 has no round_scored points: replay skips that check, not flags it."""
     state = make_engine().run(_ledger(new_state))
