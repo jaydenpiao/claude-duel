@@ -72,6 +72,10 @@ def tug(a: int, b: int, width: int) -> str:
     return "━" * pos + "◆" + "━" * (width - 1 - pos)
 
 
+def _k(tokens: int) -> str:
+    return f"{tokens / 1000:g}k" if tokens >= 1000 else str(tokens)
+
+
 @dataclass
 class Player:
     name: str
@@ -94,6 +98,7 @@ class ArenaModel:
     spend: str = ""
     banner: str = ""
     ghosts: str = ""  # deep layer: "GHOSTS" row, "" when ghosts are off
+    ledger: dict[str, str] = field(default_factory=dict)  # player -> "stakes 4k·4k·4k · keystone #2"
 
     def log(self, line: str) -> None:
         self.ticker = [*self.ticker, line][-TICKER_LINES:]
@@ -141,6 +146,11 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         Text(f"{p.name}: {p.cost}", style=f"dim {COLORS[i % len(COLORS)]}", no_wrap=True, overflow="ellipsis")
         for i, p in enumerate(m.players)
         if p.cost
+    )
+    parts.extend(
+        Text(f"{p.name}: {m.ledger[p.name]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
+        for i, p in enumerate(m.players)
+        if m.ledger.get(p.name)
     )
     if m.ghosts:
         parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
@@ -275,6 +285,17 @@ class ArenaView(MatchFold):
             self.model.log(f"{atk.attacker} +{pts} for {ch.author}'s {title!r}")
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
+
+    def _staked(self, s: MatchState, e: Event) -> None:
+        stakes = "·".join(_k(int(x)) for x in cast("list[int]", e.data["stakes"]))
+        note = " (fallback)" if e.data.get("fallback") else ""
+        self.model.ledger[str(e.data["agent"])] = f"r{e.data['round']} stakes {stakes}{note}"
+
+    def _revealed(self, s: MatchState, e: Event) -> None:
+        idx = e.data.get("index")
+        key = f"keystone #{cast('int', idx) + 1}" if idx is not None else "no keystone"
+        agent = str(e.data["agent"])
+        self.model.ledger[agent] = " · ".join(x for x in (self.model.ledger.get(agent, ""), key) if x)
 
     def _ghost_ran(self, s: MatchState, e: Event) -> None:
         m = moment_of(e)

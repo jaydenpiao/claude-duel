@@ -33,6 +33,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Deep layer phase 1: Ghost Codex replay (`ledger_deep` preset, `ghost_run` events, ghost captures pay max(1, full // 4); #210).
+- `duel backup` refuses a bucket without public access prevention enforced, and also scans for octal, binary, base85 and base64/zlib-encoded flags before upload.
 - Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).
 - Ledger rejection of malformed stakes (#208).
