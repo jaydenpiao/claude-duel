@@ -46,7 +46,7 @@ raised before any premium spend, and never after any of that arm's seeds have be
 Seeds run in a fixed order (`launch-0`, `launch-1`, ...) and only whole seeds count. If a worse-than-typical
 run hits `run_max_usd` early, N shrinks without anyone choosing which seeds count. The N reached is reported.
 
-### Void seeds (match cap hits, ADR "match caps")
+### Void seeds (match cap hits, [ADR 0014](../adr/0014-match-caps.md))
 A match that crosses `match_max_usd` ends in the terminal stage `CAPPED`. It records the breaching agent, is
 never resumed, and counts as void (no winner, excluded from ratings). A seed with any `CAPPED` match is a
 **void seed**:
@@ -71,6 +71,9 @@ never resumed, and counts as void (no winner, excluded from ratings). A seed wit
 1. **Neutral labels and seat swap.** Agents are named `a`/`b`, never by vendor. Each seed is played twice,
    once with Claude as `a` and once as `b`. The dry run below shows why: with identical fake agents, the
    winner followed the *name* (the fake hashes it), not the seat. With the seats swapped, the same name still won.
+   Model names (#219, #229) are display labels only: the arena, commentary, card and replay output show them,
+   but agent ids stay `a`/`b` and no prompt or system prompt names a model or vendor (pinned by
+   `tests/integration/test_neutral_labels.py`). Clarified 2026-10-31, before any spend.
 2. **Replay verification.** Every match log must replay to the same state (`series verified ✓`). A mismatch
    voids the match.
 3. **Empty-challenge integrity control** (required before launch, ~$0; `integrity_control = true` in launch.toml). A challenge that can never print the
@@ -121,7 +124,7 @@ Per match: 3 rounds × 2 agents. **Typical** is 12 calls at 1,500 in / 2,000 out
 |---|---|---|---|---|---|
 | haiku-5-5 vs gpt-6-luna | $0.014 | $0.151 | $0.14 ($1.51) | $0.41 ($4.54) | $1.38 ($15.12) |
 | sonnet-5-5 vs gpt-6.1-sol | $0.276 | $3.024 | $2.76 ($30.24) | $8.28 ($90.72) | $27.60 ($302.40) |
-| opus-5-5 vs gpt-5.6-sol | $0.552 | $6.048 | $5.52 ($60.48) | $16.56 ($181.44) | $55.20 ($604.80) |
+| opus-5-5 vs gpt-5.6-sol (reference; premium arm below) | $0.552 | $6.048 | $5.52 ($60.48) | $16.56 ($181.44) | $55.20 ($604.80) |
 | fable-5-1 vs gpt-6-astra | $1.380 | $15.120 | $13.80 ($151.20) | $41.40 ($453.60) | $138.00 ($1,512.00) |
 
 Budget: the lifetime ledger ceiling is $33 and about $30.7 remains (~$2.3 spent). Worst cases above that are stopped by
