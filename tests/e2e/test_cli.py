@@ -31,7 +31,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "--match-id", "e2e"]) == 0
     out = capsys.readouterr().out
-    assert "fake-1 (A) vs fake-1 (B)" in out
+    assert "alice vs bob" in out
     assert "winner: " in out
     assert out.rstrip().endswith("replay verified ✓")
     assert "of $33 cap" in out  # #195: the spend line shows the enforced cap, never the key limit

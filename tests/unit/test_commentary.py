@@ -40,7 +40,7 @@ def test_resume_replays_history_then_continues(tmp_path: Path) -> None:
     play(settings, "m1", InMemoryMetrics())
     out = io.StringIO()
     play(settings, "m1", InMemoryMetrics(), _commentary(out, "m1"))
-    assert "fake-1 (A) vs fake-1 (B)" in out.getvalue()
+    assert "alice vs bob" in out.getvalue()
     assert "winner: " in out.getvalue()
 
 
@@ -103,4 +103,17 @@ def test_labels_use_models_and_disambiguate() -> None:
             self.name, self.model = n, m
 
     assert labels([A("alice", "m1"), A("bob", "m2")]) == {"alice": "m1", "bob": "m2"}  # type: ignore[list-item]
-    assert labels([A("alice", "m"), A("bob", "m")]) == {"alice": "m (A)", "bob": "m (B)"}  # type: ignore[list-item]
+    assert labels([A("alice", "m"), A("bob", "m")]) == {"alice": "alice", "bob": "bob"}  # type: ignore[list-item]
+
+
+def test_labels_prefer_configured_names_when_models_match() -> None:
+    """Live-lanes blocker: same model id must not force A/B over config names (fake-1-s2 / fake-1-s5)."""
+
+    class A:
+        def __init__(self, n: str, m: str) -> None:
+            self.name, self.model = n, m
+
+    assert labels([A("fake-1-s2", "fake-1"), A("fake-1-s5", "fake-1")]) == {  # type: ignore[list-item]
+        "fake-1-s2": "fake-1-s2",
+        "fake-1-s5": "fake-1-s5",
+    }

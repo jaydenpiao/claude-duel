@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
