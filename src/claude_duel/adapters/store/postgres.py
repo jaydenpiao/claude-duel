@@ -81,15 +81,8 @@ class PublicReader:
     """Reads the ``public_v`` views in a read-only transaction, as a role that can't write or own anything."""
 
     def __init__(self, conn: Conn) -> None:
-        row = conn.execute(
-            "select r.rolsuper or r.rolcreaterole or r.rolbypassrls"
-            " or pg_has_role(current_user, 'duel_writer', 'MEMBER')"
-            " or pg_has_role(current_user, 'duel_ingest', 'MEMBER')"
-            " or exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as unsafe,"
-            " pg_has_role(current_user, 'duel_reader', 'MEMBER') as reader"
-            " from pg_roles r where r.rolname = current_user"
-        ).fetchone()
-        if row is None or row["unsafe"] or not row["reader"]:
+        f = results_sql.role_facts(PgExecutor(conn))
+        if f.superuser or f.createrole or f.bypassrls or f.writer or f.ingest or f.owner or not f.reader:
             raise ConfigError("the export role must be a duel_reader member with no write, owner or admin rights")
         results_sql.refuse_definer_functions(PgExecutor(conn))
         self._conn = conn
