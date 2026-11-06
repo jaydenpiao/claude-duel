@@ -17,14 +17,20 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from claude_duel.adapters.store import results_sql
 from claude_duel.adapters.store.file_store import FileMatchStore
-from claude_duel.adapters.store.postgres import PostgresResults, PublicReader, connect, migrate, require_current
+from claude_duel.adapters.store.postgres import PgExecutor, PublicReader, connect
+from claude_duel.adapters.store.results_sql import SqlResults
+from claude_duel.app.export import FIELDS
 from claude_duel.cli import main
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 from claude_duel.domain.flags import assert_no_flag, flag_of
 
 ADMIN = os.environ.get("DUEL_TEST_DATABASE_URL", "")
-pytestmark = pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set")
+pytestmark = [
+    pytest.mark.skipif(not ADMIN, reason="DUEL_TEST_DATABASE_URL not set"),
+    pytest.mark.xdist_group("results_db"),  # roles are cluster-wide; keep these on one xdist worker
+]
 OWNER_PW = "owner-test-only"
 EXPORTER_PW = "exporter-test-only"
 INGEST_PW = "ingest-test-only"
@@ -53,7 +59,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, st
     name = _new_db()
     owner = _url(name, "duel_test_owner", OWNER_PW)
     with connect(owner) as conn:
-        migrate(conn)
+        results_sql.migrate(PgExecutor(conn))
     with psycopg.connect(ADMIN, autocommit=True) as admin:
         admin.execute(f"alter role duel_exporter login password '{EXPORTER_PW}'")
         if admin.execute("select 1 from pg_roles where rolname = 'duel_test_ingest'").fetchone() is None:
@@ -147,9 +153,26 @@ def test_public_reader_refuses_writer_roles(db: dict[str, str]) -> None:
         PublicReader(conn)
 
 
+def test_public_view_columns_match_export_fields(db: dict[str, str]) -> None:
+    with connect(db["owner"]) as conn:
+        rows = conn.execute(
+            "select table_name, column_name from information_schema.columns"
+            " where table_schema = 'public_v' order by table_name, ordinal_position"
+        ).fetchall()
+    cols: dict[str, list[str]] = {}
+    for r in rows:
+        cols.setdefault(r["table_name"], []).append(r["column_name"])
+    # FIELDS is the export whitelist: every field must exist in its view, and any view column it drops is listed here
+    dropped = {"leaderboard": {"sync_run_id"}, "rating_history": {"elo_order", "elo_k", "through_match"}}
+    assert set(cols) == set(FIELDS)
+    for view, fields in FIELDS.items():
+        assert set(fields) <= set(cols[view]), view
+        assert set(cols[view]) - set(fields) == dropped.get(view, set()), view
+
+
 def test_schema_hardening(db: dict[str, str]) -> None:
     with connect(db["owner"]) as conn:
-        assert migrate(conn) == []  # idempotent
+        assert results_sql.migrate(PgExecutor(conn)) == []  # idempotent
         tables = conn.execute(
             "select relname, relrowsecurity, relforcerowsecurity from pg_class c"
             " join pg_namespace n on n.oid = c.relnamespace where nspname = 'duel' and relkind = 'r'"
@@ -261,9 +284,9 @@ def test_sync_refuses_superuser_and_pending_migrations(
         with connect(owner) as conn:
             conn.execute("update duel.schema_migrations set sha256 = repeat('0', 64)")
             with pytest.raises(ConfigError, match="forward-only"):
-                require_current(conn)
+                results_sql.require_current(PgExecutor(conn))
             with pytest.raises(ConfigError, match="forward-only"):
-                migrate(conn)
+                results_sql.migrate(PgExecutor(conn))
     finally:
         _drop(fresh)
 
@@ -273,7 +296,7 @@ def test_concurrent_migrations_apply_once() -> None:
     try:
         owner = _url(fresh, "duel_test_owner", OWNER_PW)
         with ThreadPoolExecutor(2) as pool:
-            done = list(pool.map(lambda _: migrate(connect(owner)), range(2)))
+            done = list(pool.map(lambda _: results_sql.migrate(PgExecutor(connect(owner))), range(2)))
         assert sorted(len(d) for d in done) == [0, 1]
     finally:
         _drop(fresh)
@@ -286,14 +309,14 @@ def test_security_definer_functions_are_refused(db: dict[str, str]) -> None:
             " as 'select string_agg(rules::text, '','') from duel.matches'"
         )
         with pytest.raises(ConfigError, match="SECURITY DEFINER"):
-            require_current(conn)
+            results_sql.require_current(PgExecutor(conn))
     with connect(db["exporter"]) as conn, pytest.raises(ConfigError, match="SECURITY DEFINER"):
         PublicReader(conn)
 
 
 def test_database_errors_are_redacted(db: dict[str, str]) -> None:
     with connect(db["ingest"]) as conn:
-        results = PostgresResults(conn)
+        results = SqlResults(PgExecutor(conn))
         with pytest.raises(ResultsDbError) as err:
             results.start_run("not-a-uuid-secret-value", None)
     assert "secret-value" not in str(err.value)
