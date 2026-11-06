@@ -1,5 +1,5 @@
 claude duel · match snap
-alice (fake-1) vs bob (fake-1)
+alice vs bob
 2 rounds · 2 challenges each per round · up to 4 tries
 
 ────────────────────────────────────────────────
