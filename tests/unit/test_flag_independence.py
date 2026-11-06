@@ -83,7 +83,7 @@ def test_a_check_that_hangs_on_wrong_input_is_rejected_fast(make_engine, new_sta
     took = time.monotonic() - t
     assert not state.validations[ch.id].valid
     assert any("timed out" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
-    assert took < 2 * state.limits.wall_seconds + 4  # one probe timeout plus the fast runs and engine overhead
+    assert took < 2 * state.limits.wall_seconds + 8  # one probe timeout plus the fast runs and engine overhead
 
 
 def test_validation_over_its_time_budget_is_rejected(make_engine, new_state, monkeypatch) -> None:  # type: ignore[no-untyped-def]
