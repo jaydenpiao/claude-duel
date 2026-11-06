@@ -21,6 +21,7 @@ duel run --format json              # one JSON summary instead (scripts, CI)
 duel card demo [--out card.svg]     # shareable SVG card: models, score, rounds, spend, replay-verified log hash
 duel replay demo --transcript       # refold the event log and verify scores
 duel replay demo --view arena       # re-watch a finished match in the arena view from its log ($0, no API calls)
+duel replay demo --verify           # also re-run logged ghost runs in the sandbox ($0 API)
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
 duel tournament                     # round robin (<= 6) or Swiss over the config's [[tournament.entrants]];
                                     # [tournament] pool = true adds a shared, CTFd-decayed challenge pool

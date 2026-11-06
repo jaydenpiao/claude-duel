@@ -54,6 +54,7 @@ STAKES_SET = "stakes_set"
 KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
 TERRAIN_DRAWN = "terrain_drawn"
+GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -206,6 +207,16 @@ class KeystoneRevealed(_Payload):
     salt: str
 
 
+class GhostRun(_Payload):
+    """One $0 sandbox replay of a past capture's payload; ``stdout_sha`` is of the redacted output."""
+
+    round: int
+    ghost_id: str
+    target: str
+    hit: bool
+    stdout_sha: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
@@ -320,6 +331,10 @@ def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
     state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
 
 
+def _ghost_ran(state: MatchState, p: GhostRun) -> None:
+    state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -347,6 +362,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     KEYSTONE_SEALED: (KeystoneSealed, _sealed),
     KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
     TERRAIN_DRAWN: (TerrainDrawn, _terrain),
+    GHOST_RUN: (GhostRun, _ghost_ran),
 }
 
 
