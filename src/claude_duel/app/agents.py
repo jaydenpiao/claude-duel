@@ -150,6 +150,18 @@ class _BuildAnswer(ChallengeSpec):
     difficulty: int = Field(default=2, ge=1, le=3)
 
 
+def heat_rule(rules: Rules) -> list[str]:
+    """Forge-prompt disclosure of novelty heat (design-core-logic.md 4.3); [] when heat is off."""
+    led = rules.ledger
+    if led is None or not led.heat_window:
+        return []
+    return [
+        f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
+        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
+        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+    ]
+
+
 def build_prompt(
     agent: str,
     round_no: int,
@@ -170,6 +182,7 @@ def build_prompt(
         *(_program_rules(rules, round_no) if rules.challenge_form == "program" else _check_rules(rules, round_no)),
     ]
     lines += variety
+    lines += heat_rule(rules)
     lines += memory_lines(memory, scratchpad)
     if previous is not None:
         lines.append(
@@ -309,6 +322,7 @@ def allocate_prompt(
     targets: list[tuple[str, str, str, bool]],
     memory: str = "",
     own: list[tuple[str, str, bool]] | None = None,
+    ghosted: dict[int, str] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -321,6 +335,8 @@ def allocate_prompt(
     ]
     for i, (cid, title, source, valid) in enumerate(targets, 1):
         state = "valid" if valid else "INVALID (cannot be attacked; stake it 0)"
+        if ghosted and i - 1 in ghosted:
+            state = f"CAPTURED BY GHOST {ghosted[i - 1]} (already scored for you at no cost; stake it 0)"
         lines.append(f"#{i} {cid} [{state}] title={fence(title)}\nSource:\n{fence(source)}")
     lines += memory_lines(memory)
     lines.append(

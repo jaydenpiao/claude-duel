@@ -1,13 +1,20 @@
 """Flag derivation, leak guards and the one shared redactor (``scrub``)."""
 
+from __future__ import annotations
+
 import base64
 import codecs
 import hashlib
 import hmac
 import re
+from collections.abc import Iterable
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from claude_duel.domain.errors import FlagLeakError
+
+if TYPE_CHECKING:
+    from claude_duel.domain.models import MatchState
 
 FLAG_PATTERN = re.compile(r"DUEL\{[0-9a-f]{8,64}\}")
 REDACTED = "DUEL{<redacted>}"
@@ -19,11 +26,13 @@ ENCODED_FLAG_PATTERNS = (
     re.compile(_DEC_SEP.join(("68", "85", "69", "76", "123")) + rf"(?:{_DEC_SEP}[0-9]{{2,3}}){{8,65}}"),
 )
 # Key-, token- and secret-shaped text: OpenAI keys, ``api_key=...``/``authorization: ...``, long hex runs.
-SECRET_PATTERNS = (
+# ``KEY_PATTERNS`` alone is the backup's key scan: event hashes match the long-hex rule.
+KEY_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
     re.compile(r"(?i)(api[_-]?key|authorization)[\"':= ]+\S+"),
-    re.compile(r"\b[0-9a-fA-F]{32,}\b"),
 )
+HEX_PATTERN = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+SECRET_PATTERNS = (*KEY_PATTERNS, HEX_PATTERN)
 _GAP = r"[\W_]*"  # spaces, punctuation or newlines a challenge may put between characters
 MIN_PART = 16  # halves of the 32-char digest are still a leak
 
@@ -127,9 +136,35 @@ def flag_shaped(text: str) -> bool:
     return any(p.search(text) for p in (FLAG_PATTERN, *ENCODED_FLAG_PATTERNS))
 
 
+# Terminal-unsafe code points: C0 except \t and \n, DEL, C1, and bidi overrides/isolates (a str.translate table).
+UNPRINTABLE: dict[int, None] = dict.fromkeys(
+    (*range(0x00, 0x09), *range(0x0B, 0x20), *range(0x7F, 0xA0), *range(0x202A, 0x202F), *range(0x2066, 0x206A))
+)
+
+
+def printable(text: str) -> str:
+    """Drop characters that could drive the terminal (escape sequences, OSC 52, bidi spoofing)."""
+    return text.translate(UNPRINTABLE)
+
+
 def scrub(text: str, flags: tuple[str, ...] = ()) -> str:
-    """The redactor for anything shown or logged: flags (and their variants when known) plus secret-shaped text."""
-    text = redact(text, flags)
+    """The redactor for anything shown or logged: control characters, flags (and variants when known), secrets."""
+    text = redact(printable(text), flags)
     for pat in SECRET_PATTERNS:
         text = pat.sub("<redacted>", text)
     return text
+
+
+def match_flags(state: MatchState, extra_cids: Iterable[str] = ()) -> list[str]:
+    """Every flag the match ever used: each challenge (plus ``extra_cids``), each repair try and the built epoch.
+
+    The one source for the engine's event guard and the backup scan (review M20)."""
+    if not state.secret:
+        return []
+    cids = set(state.challenges) | set(state.build_errors) | set(extra_cids)
+    out: list[str] = []
+    for cid in sorted(cids):
+        ch = state.challenges.get(cid)
+        last = max(len(state.build_errors.get(cid, [])), ch.flag_epoch if ch else 0)
+        out += [flag_of(state.secret, cid, epoch) for epoch in range(last + 1)]
+    return out

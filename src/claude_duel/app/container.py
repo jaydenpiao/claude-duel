@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
+from types import ModuleType
 
 from pydantic import SecretStr
 
@@ -18,6 +20,7 @@ from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_ru
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
+from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.adapters.store.results_sql import (
     Executor,
@@ -34,7 +37,7 @@ from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
 from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox, Uploader
 
 _LOG = logging.getLogger(__name__)
 
@@ -83,6 +86,10 @@ def make_sandbox(settings: Settings, agents: Iterable[AgentSpec]) -> Sandbox:
 
 def build_store(settings: Settings) -> FileMatchStore:
     return FileMatchStore(settings.store_dir)
+
+
+def build_uploader() -> Uploader:
+    return GcloudUploader()
 
 
 def build_event_log(settings: Settings) -> FileEventLog:
@@ -190,14 +197,22 @@ def _owner_url(settings: Settings) -> str:
     return _db_url(settings.database_url, "MIGRATE_DATABASE_URL (or DATABASE_URL)")
 
 
+def _postgres() -> ModuleType:
+    """The Postgres adapter, imported lazily: psycopg is the optional ``db`` extra (quality L27)."""
+    try:
+        return importlib.import_module("claude_duel.adapters.store.postgres")
+    except ImportError:
+        raise ConfigError("the results database needs psycopg: install claude-duel[db]") from None
+
+
 def results_executor(url: str) -> Executor:
     """psycopg to the results database (in production a cloud-sql-proxy Unix socket in a 0700 dir, ADR 0012).
 
     psycopg is imported only when used.
     """
-    from claude_duel.adapters.store.postgres import PgExecutor, connect  # noqa: PLC0415 - psycopg only when used
-
-    return PgExecutor(connect(url))
+    pg = _postgres()
+    ex: Executor = pg.PgExecutor(pg.connect(url))
+    return ex
 
 
 def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
@@ -238,6 +253,6 @@ def git_sha() -> str | None:
 
 def build_public_reader(settings: Settings) -> PublicSource:
     """Connect with ``EXPORT_DATABASE_URL``; ``PublicReader`` refuses any role that could write (postgres only)."""
-    from claude_duel.adapters.store.postgres import PublicReader, connect  # noqa: PLC0415 - psycopg only when used
-
-    return PublicReader(connect(_db_url(settings.export_database_url, "EXPORT_DATABASE_URL")))
+    pg = _postgres()
+    reader: PublicSource = pg.PublicReader(pg.connect(_db_url(settings.export_database_url, "EXPORT_DATABASE_URL")))
+    return reader

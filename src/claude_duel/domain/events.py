@@ -6,10 +6,11 @@ The engine records an event and applies it; replay folds the same events from sc
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable, Iterable
 from typing import Any, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
@@ -42,6 +43,7 @@ BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
 CHALLENGE_VALIDATED = "challenge_validated"
 ATTACK_STARTED = "attack_started"
+ALLOCATE_STARTED = "allocate_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
@@ -52,6 +54,7 @@ STAKES_SET = "stakes_set"
 KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
 TERRAIN_DRAWN = "terrain_drawn"
+GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -82,6 +85,7 @@ class _Payload(BaseModel):
 
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
+    python: str = ""  # interpreter version that parsed sources for heat (ast is version-pinned); absent before heat
     framing_text: str = ""  # absent before framings
     created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
@@ -135,6 +139,13 @@ class AttackStarted(_Payload):
 
     key: str
     try_no: int
+
+
+class AllocateStarted(_Payload):
+    """Ledger allocate is about to be paid; resume settles even-split if stakes never landed (#254)."""
+
+    agent: str
+    round: int
 
 
 class AttackAttempted(_Payload):
@@ -196,9 +207,21 @@ class KeystoneRevealed(_Payload):
     salt: str
 
 
+class GhostRun(_Payload):
+    """One $0 sandbox replay of a past capture's payload; ``stdout_sha`` is of the redacted output."""
+
+    round: int
+    ghost_id: str
+    target: str
+    hit: bool
+    stdout_sha: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+    points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
+    heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
 
 
 class FindingFlagged(_Payload):
@@ -266,6 +289,12 @@ def _started(state: MatchState, p: AttackStarted) -> None:
     return None  # no state change: replay of logs with or without it is identical
 
 
+def _allocate_started(state: MatchState, p: AllocateStarted) -> None:
+    key = f"{p.round}:{p.agent}"
+    if key not in state.allocate_started:
+        state.allocate_started.append(key)
+
+
 def _attempted(state: MatchState, p: AttackAttempted) -> None:
     state.attempts.setdefault(p.key, []).append(p.attempt)
 
@@ -302,6 +331,10 @@ def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
     state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
 
 
+def _ghost_ran(state: MatchState, p: GhostRun) -> None:
+    state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -318,6 +351,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
     ATTACK_STARTED: (AttackStarted, _started),
+    ALLOCATE_STARTED: (AllocateStarted, _allocate_started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
@@ -328,6 +362,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     KEYSTONE_SEALED: (KeystoneSealed, _sealed),
     KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
     TERRAIN_DRAWN: (TerrainDrawn, _terrain),
+    GHOST_RUN: (GhostRun, _ghost_ran),
 }
 
 
@@ -349,6 +384,7 @@ def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
         "seed": state.seed,
+        "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),
