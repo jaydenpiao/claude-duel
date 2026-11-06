@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from claude_duel.domain import terrain
 from claude_duel.domain.policy import MAZE_SOURCE
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -79,6 +80,8 @@ _AGENT = re.compile(r"^AGENT: (\S+)$", re.M)
 _ROUND = re.compile(r"^ROUND: (\d+)$", re.M)
 _INDEX = re.compile(r"^INDEX: (\d+)$", re.M)
 _ATTEMPT = re.compile(r"^ATTEMPT: (\d+)$", re.M)
+_BUDGET = re.compile(r"^BUDGET: (\d+)$", re.M)
+_CHALLENGES = re.compile(r"^CHALLENGES: (\d+)$", re.M)
 
 
 def _stable(*parts: str) -> int:
@@ -102,7 +105,10 @@ class FakeProvider:
             self._malformed_left -= 1
             return self._wrap(request, "sure! here is my answer, not json")
         agent = _field(_AGENT, request.prompt, "anon")
-        if request.purpose == "build":
+        if request.purpose == "allocate":  # even split, all of it
+            k = int(_field(_CHALLENGES, request.prompt, "1"))
+            body: dict[str, object] = {"stakes": [int(_field(_BUDGET, request.prompt, "0")) // k] * k, "keystone": 0}
+        elif request.purpose == "build":
             idx = _stable(agent, _field(_ROUND, request.prompt, "1"), _field(_INDEX, request.prompt, "0"))
             t = TEMPLATES[idx % len(TEMPLATES)]
             body = {
@@ -116,6 +122,9 @@ class FakeProvider:
             known = sorted(TEMPLATES, key=lambda t: _stable(agent, t.key))[: self._skill]
             attempt = int(_field(_ATTEMPT, request.prompt, "1"))
             payload = known[attempt - 1].payload if attempt <= len(known) else f"guess-{attempt}"
+            ground = re.search(r"\[terrain=([a-z0-9:]+)\]", request.prompt)
+            if ground:  # a skilled fake reasons through the transform
+                payload = terrain.invert(ground.group(1), payload) or payload
             body = {"payload": payload}
         return self._wrap(request, "```json\n" + json.dumps(body) + "\n```")
 

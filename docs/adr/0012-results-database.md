@@ -9,7 +9,8 @@ queryable index, and a future public page needs data that provably holds no flag
 ## Decision
 - Cloud SQL for PostgreSQL is a **derived, rebuildable index**; the event logs stay the source of truth.
   `duel sync --rebuild` truncates and reloads it.
-- `duel sync` (owner URL from env `DATABASE_URL` only) verifies each log's chain, loads the snapshot
+- `duel sync` (a `duel_ingest` login from env `DATABASE_URL`; the owner's `MIGRATE_DATABASE_URL` only for
+  `--rebuild`) verifies each log's chain, loads the snapshot
   without opening `*.secret`, replays it up to `last_seq` and rejects (recorded in `duel.sync_rejects`,
   exit 1) anything inconsistent. Inserts are idempotent, keyed on event hash. If the DB holds a hash
   the log no longer has, sync halts (`HistoryRewrittenError`, exit 2): history was rewritten.
@@ -39,7 +40,7 @@ queryable index, and a future public page needs data that provably holds no flag
   operator, never on TCP loopback and never as the CI runner's uid, so other local processes can't borrow its
   login. Routine `duel sync` refuses a role that owns a `duel` table (`refuse_table_owner`), and the export refuses
   any write or owner role. Keep every URL and key out of the repo and CI.
-- Transport: `PostgresResults` uses psycopg to the local proxy, which dials Google with IAM + TLS.
+- Transport: `SqlResults(PgExecutor(conn))` uses psycopg to the local proxy's Unix socket, which dials Google with IAM + TLS.
 
 
 ## Amendments (review fixes, 2026-10-22)
@@ -55,3 +56,13 @@ queryable index, and a future public page needs data that provably holds no flag
   SQLSTATE only); free text is omitted from stored events and legacy logs are checked for plain, rot13 and
   decimal-encoded flags; default EXECUTE is revoked from PUBLIC and any SECURITY DEFINER function in `duel`/`public_v`
   blocks sync and export; CI Postgres is pinned by digest with a random per-job password.
+
+## Amendment: Cloud SQL transport (2026-10-29)
+
+- The results SQL lives in `results_sql.py` behind a small `Executor` protocol, run by the `postgres` (psycopg)
+  transport; `tests/contract` runs one suite against memory and postgres. The Neon SQL-over-HTTPS transport
+  was dropped: the index moved to Cloud SQL for PostgreSQL.
+- The box connects through `cloud-sql-proxy --auto-iam-authn --unix-socket <dir>` (a 0700 directory; TLS and IAM
+  handled by the proxy; socket hosts are exempt from `require_tls`). `DATABASE_URL` uses the ingest IAM user and no
+  password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; `iam_url` escapes the
+  inner `@` for libpq.

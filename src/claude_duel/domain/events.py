@@ -6,10 +6,11 @@ The engine records an event and applies it; replay folds the same events from sc
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable, Iterable
 from typing import Any, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
@@ -20,6 +21,7 @@ from claude_duel.domain.models import (
     Challenge,
     Event,
     Finding,
+    Keystone,
     MatchState,
     Rules,
     SandboxLimits,
@@ -28,6 +30,7 @@ from claude_duel.domain.models import (
     Validation,
 )
 from claude_duel.domain.scoring import add_scores
+from claude_duel.domain.stakes import keystone_commit
 from claude_duel.domain.state_machine import recover, transition
 
 MATCH_CREATED = "match_created"
@@ -40,12 +43,18 @@ BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
 CHALLENGE_VALIDATED = "challenge_validated"
 ATTACK_STARTED = "attack_started"
+ALLOCATE_STARTED = "allocate_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
 BUDGET_OVERRIDDEN = "budget_overridden"
+STAKES_SET = "stakes_set"
+KEYSTONE_SEALED = "keystone_sealed"
+KEYSTONE_REVEALED = "keystone_revealed"
+TERRAIN_DRAWN = "terrain_drawn"
+GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -76,6 +85,7 @@ class _Payload(BaseModel):
 
 class MatchCreated(_Payload):
     seed: str = ""  # absent before ADR 0007
+    python: str = ""  # interpreter version that parsed sources for heat (ast is version-pinned); absent before heat
     framing_text: str = ""  # absent before framings
     created_seq: int | None = None  # store-assigned creation order (#137); absent in older logs
     agents: tuple[AgentSpec, AgentSpec]
@@ -109,6 +119,8 @@ class CallCharged(_Payload):
     output_tokens: int = 0
     reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
     truncated: bool = False
+    purpose: str = ""  # build / attack / ... (absent in older logs)
+    summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
 
 
 class BuildRejected(_Payload):
@@ -129,6 +141,13 @@ class AttackStarted(_Payload):
 
     key: str
     try_no: int
+
+
+class AllocateStarted(_Payload):
+    """Ledger allocate is about to be paid; resume settles even-split if stakes never landed (#254)."""
+
+    agent: str
+    round: int
 
 
 class AttackAttempted(_Payload):
@@ -159,9 +178,52 @@ class NoteRecorded(_Payload):
     text: str
 
 
+class TerrainDrawn(_Payload):
+    """Ledger: the round's public stdin transform per valid challenge (challenge id -> terrain)."""
+
+    round: int
+    terrains: dict[str, str]
+
+
+class StakesSet(_Payload):
+    """An attacker's settled ledger stakes for one round; ``fallback`` = its answer was invalid (alloc_fallback)."""
+
+    agent: str
+    round: int
+    stakes: tuple[int, ...]
+    fallback: bool = False
+
+
+class KeystoneSealed(_Payload):
+    """An author's keystone commit only; the index is logged at reveal (KeystoneRevealed)."""
+
+    agent: str
+    round: int
+    commit: str
+
+
+class KeystoneRevealed(_Payload):
+    agent: str
+    round: int
+    index: int | None = None
+    salt: str
+
+
+class GhostRun(_Payload):
+    """One $0 sandbox replay of a past capture's payload; ``stdout_sha`` is of the redacted output."""
+
+    round: int
+    ghost_id: str
+    target: str
+    hit: bool
+    stdout_sha: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
+    points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
+    heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
 
 
 class FindingFlagged(_Payload):
@@ -229,6 +291,12 @@ def _started(state: MatchState, p: AttackStarted) -> None:
     return None  # no state change: replay of logs with or without it is identical
 
 
+def _allocate_started(state: MatchState, p: AllocateStarted) -> None:
+    key = f"{p.round}:{p.agent}"
+    if key not in state.allocate_started:
+        state.allocate_started.append(key)
+
+
 def _attempted(state: MatchState, p: AttackAttempted) -> None:
     state.attempts.setdefault(p.key, []).append(p.attempt)
 
@@ -243,6 +311,30 @@ def _overridden(state: MatchState, p: BudgetOverridden) -> None:
 
 def _noted(state: MatchState, p: NoteRecorded) -> None:
     state.notes.setdefault(p.agent, {})[p.round] = p.text  # last note of the round wins
+
+
+def _staked(state: MatchState, p: StakesSet) -> None:
+    state.stakes[f"{p.round}:{p.agent}"] = list(p.stakes)
+
+
+def _terrain(state: MatchState, p: TerrainDrawn) -> None:
+    state.terrains.update(p.terrains)
+
+
+def _sealed(state: MatchState, p: KeystoneSealed) -> None:
+    state.keystones[f"{p.round}:{p.agent}"] = Keystone(commit=p.commit)
+
+
+def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
+    key = f"{p.round}:{p.agent}"
+    sealed = state.keystones.get(key)
+    if sealed is None or sealed.commit != keystone_commit(p.index, p.salt):
+        raise EventLogCorruptError(f"tampered: keystone reveal for {key} does not match its commit")
+    state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
+
+
+def _ghost_ran(state: MatchState, p: GhostRun) -> None:
+    state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
 
 
 def _scored(state: MatchState, p: RoundScored) -> None:
@@ -261,12 +353,18 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
     ATTACK_STARTED: (AttackStarted, _started),
+    ALLOCATE_STARTED: (AllocateStarted, _allocate_started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
     FINDING_FLAGGED: (FindingFlagged, _flagged),
     NOTE_RECORDED: (NoteRecorded, _noted),
     BUDGET_OVERRIDDEN: (BudgetOverridden, _overridden),
+    STAKES_SET: (StakesSet, _staked),
+    KEYSTONE_SEALED: (KeystoneSealed, _sealed),
+    KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
+    TERRAIN_DRAWN: (TerrainDrawn, _terrain),
+    GHOST_RUN: (GhostRun, _ghost_ran),
 }
 
 
@@ -288,6 +386,7 @@ def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
     return {
         "seed": state.seed,
+        "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
         "rules": state.rules.model_dump(mode="json"),

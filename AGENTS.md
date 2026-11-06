@@ -4,9 +4,9 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 
 ## Architecture (hexagonal, ADR 0001)
 - `src/claude_duel/domain/`: pure models, state machine, scoring, flag derivation, static policy. No I/O. See [domain/AGENTS.md](src/claude_duel/domain/AGENTS.md).
-- `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `MatchLock`, `SpendLedger`, `EventLog`, `Metrics`, `ResultsStore`, `PublicSource`.
+- `src/claude_duel/ports.py`: Protocols `LLMProvider`, `Sandbox`, `MatchStore`, `ReplaySource`, `MatchLock`, `SpendLedger`, `EventLog`, `Metrics`, `ResultsStore`, `PublicSource`, `Uploader`.
 - `src/claude_duel/adapters/`: `providers/` (fake, openai, anthropic, retry), `sandbox/` (subprocess, docker), `store/` (file store, hash-chained event log, spend ledger, Postgres results DB), `metrics/` (jsonl). See [adapters/AGENTS.md](src/claude_duel/adapters/AGENTS.md).
-- `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `session.py`, `observers.py`, `bench.py` (benchmark slice harness, fake agents only), `series.py` (best-of-N series), `tournament.py` (round robin and Swiss), `driver.py` (shared series/tournament helpers), `allowance.py` (per-agent wallets), `estimate.py` (offline worst-case cost), `framings.py` (system-prompt framing text), `experiment.py` (stakes experiment, audited run-cap override), `sync.py` + `export.py` (results DB and static public export, ADR 0012), `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
+- `src/claude_duel/app/`: `engine.py` (runs stages), `agents.py` (prompts + parsing), `budget.py` (cost caps, model allowlist), `replay.py`, `session.py`, `observers.py`, `bench.py` (benchmark slice harness, fake agents only), `series.py` (best-of-N series), `tournament.py` (round robin and Swiss), `driver.py` (shared series/tournament helpers), `allowance.py` (per-agent wallets), `estimate.py` (offline worst-case cost), `framings.py` (system-prompt framing text), `experiment.py` (stakes experiment, audited run-cap override), `ghost_verify.py` (sandbox re-run of logged ghost runs), `sync.py` + `export.py` (results DB and static public export, ADR 0012), `backup.py` (finished-match replay files to a private GCS bucket, flag-scanned), `container.py` (**composition root, the only place adapters are chosen**). See [app/AGENTS.md](src/claude_duel/app/AGENTS.md).
 - `presentation/commentary.py`: `Commentary`, the default `duel run`/`resume` output. An `EventObserver` that folds events with `domain/events.apply` and prints header, round banners, plain-sentence lines, scoreboard, redacted snippets (`flags.scrub`), winner and the `$X of $33 cap` line. Presentation only: never mutates the match. Snapshot: `tests/snapshots/`.
 - `presentation/arena.py`: `ArenaView`, the live animated view (rich `Live`, 4 fps): HP-style score meters, a tug-of-war lead bar, per-round sparklines, a spinner on the current action (`attack_started` shows `bob attacking ...'s 'X'... try 2/4` while the attempt is in flight), ✓ capture / 🛡 defense flashes, a 5-line ticker, the burn line and a winner banner. `frame(model, width)` is pure and snapshot-tested; it never wraps, so any width renders. Default for `duel run`/`resume` when stdout is a TTY; `--view arena|commentary` forces one, `--pace S` slows it for demos. Both renderers subclass `presentation/common.py:MatchFold` and share its helpers (`board`, `spend`, `result`, `attempt_view`, ...); put new shared text there, never copy it. NO_COLOR is honoured by rich.
 - `presentation/card.py`: `duel card ID [--out PATH]` writes a static SVG summary for posting (models, score, rounds, spend, `replay verified` + a 16-hex `log_digest` of the event log). `card_svg` is pure and snapshot-tested; all text goes through `scrub` and is XML-escaped. For a PNG, convert the SVG (e.g. `rsvg-convert` or headless Chrome).
@@ -20,7 +20,7 @@ Start here. Agent-vs-agent staged CTF arena: two LLM agents each author Python c
 configs/{dev,staging,prod}.toml   per-env model + budget
 docs/requirements.md docs/design.md docs/demo.tape (README GIF) docs/adr/NNNN-*.md
 docs/design/                      design specs (see its README)
-docs/runs/                        live-run reports
+docs/runs/                        live-run reports and pre-registrations (launch: launch-prereg.md + launch.toml)
 src/claude_duel/                  code (see above)
 tests/{unit,integration,e2e}/     see tests/AGENTS.md
 .github/workflows/{ci,security,staging,release}.yml  (+ dependabot.yml, SECURITY.md)
@@ -53,7 +53,7 @@ runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating
 ## Cost rules
 - Default allowlist is low/medium models from `DEFAULT_PRICES` in `app/budget.py`; unknown models are rejected (`check_model_allowed`). Premium models are opt-in via `allow_premium` and never default.
 - Caps: per match (persisted in `state.usage`), per run (this process only), lifetime from `.duel/ledger.jsonl` (`$33`; `budget.key_limit_usd`, the key's $50 hard limit, must be >= it; output shows the lifetime cap), re-read under `flock` before every call so concurrent runs share it. Every call is ledgered, including $0 fake calls. Quota errors abort, never retry.
-- `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` come from env only, held as `SecretStr`. Never print, log, commit or put them in CI without asking.
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and the three results-DB URLs (`DATABASE_URL`, `MIGRATE_DATABASE_URL`, `EXPORT_DATABASE_URL`; each embeds a password) come from env only, held as `SecretStr`. Never print, log, commit or put them in CI without asking.
 
 ## Security invariants
 - Flags are `HMAC(secret, challenge_id)`, derived on demand, passed to the sandbox only over stdin (runner header) and exposed to challenge code as the global `FLAG`; never on argv or in env. Never logged, never in events, never persisted (the match `secret` is, only in its own 0600 `<id>.secret` file; `MatchState.secret` is excluded from every dump and repr, so state files, summaries and exports never carry it).
@@ -69,7 +69,7 @@ runs (main runs are never cancelled). Fork PR workflows stay disabled. Operating
 - Every failure path gets a test that triggers it.
 
 ## Git style
-- `main` is protected: changes land only by PR, squash or rebase (linear history), with `check (3.11/3.12/3.13)`, `audit`, `secrets`, `codeql` and `image` green on an up-to-date branch. No force pushes or deletion. Never bypass it as admin.
+- By policy, changes to `main` land only by PR, squash or rebase (linear history), with `check (3.11/3.12/3.13)`, `audit`, `secrets`, `codeql` and `image` green on an up-to-date branch. No force pushes or deletion. GitHub does not enforce this on the private free plan (see SECURITY.md), so merge only through the maintainer's merge script.
 - Commits: short lowercase imperative, e.g. `add match state machine`. Branches: kebab-case, e.g. `sandbox-limits`. PR title like a commit; body 2-4 short bullets. No emoji.
 
 ## Definition of done

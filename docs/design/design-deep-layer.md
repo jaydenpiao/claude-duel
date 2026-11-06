@@ -1,7 +1,7 @@
 Changelog: 2026-10-29 — ghost phase moved before the terrain draw and allocation, matching the build (#210).
 # Design: the deep layer on top of Sealed Ledger
 Status: draft for Elon, 2026-10-29 (3:30 PM EDT). Design only, no repo code changed.
-Base: design-core-logic.md (Sealed Ledger: forge → validate → commit → allocate → attack → reveal → score). Fits ADR 0007 (one `Rules`, `SCORERS` registry), ADR 0006 (defense ≥ capture; captures discount-only), ADR 0004 (event-sourced replay), ADR 0009 (memory), ADR 0013 draft (CAPPED void).
+Base: design-core-logic.md (Sealed Ledger: forge → validate → commit → allocate → attack → reveal → score). Fits ADR 0007 (one `Rules`, `SCORERS` registry), ADR 0006 (defense ≥ capture; captures discount-only), ADR 0004 (event-sourced replay), ADR 0009 (memory), ADR 0014 (CAPPED void).
 Bar from the owner: "something that has never been created or thought of before." Known systems are the floor. Every layer has a **Prior art** subsection; where something exists I say so plainly.
 
 ## 0. Headline
