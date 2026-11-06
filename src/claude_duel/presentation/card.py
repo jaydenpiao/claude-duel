@@ -13,7 +13,7 @@ from xml.sax.saxutils import escape
 from claude_duel.app.replay import ReplayReport
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Event, MatchState
-from claude_duel.presentation.common import agent_cost, result
+from claude_duel.presentation.common import agent_cost, result, who
 
 WIDTH, HEIGHT = 800, 420
 COLORS = ("#22d3ee", "#e879f9")
@@ -30,7 +30,7 @@ def log_digest(events: list[Event]) -> str:
 @dataclass(frozen=True)
 class CardData:
     match_id: str
-    players: list[tuple[str, str, int]]  # (name, model, score)
+    players: list[tuple[str, str, int]]  # (label, model, score)
     costs: list[str]  # per player, common.agent_cost
     rounds: str
     headline: str
@@ -40,7 +40,7 @@ class CardData:
 
 
 def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> CardData:
-    players = [(a.name, a.model or "default", state.scores.get(a.name, 0)) for a in state.agents]
+    players = [(who(state, a.name), a.model or "default", state.scores.get(a.name, 0)) for a in state.agents]
     return CardData(
         match_id=state.match_id,
         players=players,
@@ -63,11 +63,11 @@ def _t(x: int, y: int, text: str, size: int = 20, fill: str = "#e5e7eb", weight:
 def _bars(d: CardData) -> list[str]:
     top = max([s for _, _, s in d.players] + [1])
     out = []
-    for i, (name, model, score) in enumerate(d.players):
+    for i, (name, _, score) in enumerate(d.players):
         y = 150 + i * 70
         w = round(500 * max(score, 0) / top)
         out += [
-            _t(40, y, f"{name} ({model})", 18, COLORS[i % 2], "bold"),
+            _t(40, y, name, 18, COLORS[i % 2], "bold"),
             f'<rect x="40" y="{y + 10}" width="500" height="22" rx="4" fill="#1f2937"/>',
             f'<rect x="40" y="{y + 10}" width="{w}" height="22" rx="4" fill="{COLORS[i % 2]}"/>',
             _t(560, y + 28, str(score), 22, "#f9fafb", "bold"),
