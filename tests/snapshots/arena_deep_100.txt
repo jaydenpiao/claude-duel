@@ -1,21 +1,31 @@
-claude duel · fake-1 (A) vs fake-1 (B)
+claude duel · alice vs bob
 round 2/2 · match deep
 
-fake-1 (A) ██████████████████████████████████████████████████████████████████████    56 █▁
-fake-1 (B) ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
-fake-1 (A) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fake-1 (B)
+alice ██████████████████████████████████████████████████████████████████████    56 █▁
+bob   ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
+alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-fake-1 (A): in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
-fake-1 (B): in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
-fake-1 (A): r2 stakes 0·6k·6k (fallback) · keystone #1
-fake-1 (B): r2 stakes 0·12k·0 (fallback) · keystone #1
+alice · done · in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+  ▣ Maze: Find the input that reveals the flag (password).
+  ▸ try 2 on 'Mirror' → missed
+  ▸ attack: 576 in / 8 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Mirror' → missed
+bob · done · in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+  ▣ Mirror: Find the input that reveals the flag (reverse).
+  ▸ try 2 on 'Knock' → missed
+  ▸ attack: 610 in / 7 out · $0.0000 · 0.0s
+  ▸ try 3 on 'Knock' → missed
+alice: in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+bob: in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice: r2 stakes 0·6k·6k (fallback) · keystone #1
+bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
-🛡 fake-1 (B) defended 'Mirror' +20
-· 🛡 fake-1 (B) defended 'Mirror' +20
-· fake-1 (B) +5 for fake-1 (A)'s 'Mirror'
-· fake-1 (B) +5 for fake-1 (A)'s 'Maze'
-· fake-1 (A) +10 for fake-1 (B)'s 'Arithmetic gate'
-· after round 2: fake-1 (A) 56  fake-1 (B) 37 · fake-1 (A) leads
+🛡 bob defended 'Mirror' +20
+· 🛡 bob defended 'Mirror' +20
+· bob +5 for alice's 'Mirror'
+· bob +5 for alice's 'Maze'
+· alice +10 for bob's 'Arithmetic gate'
+· after round 2: alice 56  bob 37 · alice leads
 $0.0019 this match · $0.0000 of $50 cap
-🏆 winner: fake-1 (A) · fake-1 (A) 56  fake-1 (B) 37
+🏆 winner: alice · alice 56  bob 37
