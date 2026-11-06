@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.ports import Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
@@ -41,13 +42,12 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
 PREMIUM: frozenset[str] = frozenset(
     {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-5.6-sol", "claude-fable-5-1", "gpt-6-astra"}
 )
-VENDORS = {"claude-": "anthropic", "gpt-": "openai"}
 
 
 def vendor_of(model: str) -> str:
     if model == FAKE_MODEL:
         return "fake"
-    return next((v for prefix, v in VENDORS.items() if model.startswith(prefix)), "unknown")
+    return next((v.name for v in VENDORS.values() if model.startswith(v.model_prefix)), "unknown")
 
 
 def check_model_allowed(model: str, allow_premium: bool = False) -> None:
@@ -65,7 +65,7 @@ class BudgetLimits(BaseModel):
     run_max_calls: int = Field(default=200, ge=1)
     run_max_usd: float = Field(default=0.50, gt=0)
     lifetime_max_usd: float = Field(default=33.0, gt=0)
-    key_limit_usd: float = Field(default=50.0, gt=0, description="provider key's hard limit; shown in output")
+    key_limit_usd: float = Field(default=50.0, gt=0, description="key's hard limit; must be >= lifetime_max_usd")
 
     @model_validator(mode="after")
     def _ceiling_under_key_limit(self) -> BudgetLimits:

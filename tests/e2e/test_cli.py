@@ -31,7 +31,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_run_resume_replay(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "--match-id", "e2e"]) == 0
     out = capsys.readouterr().out
-    assert "alice (fake-1) vs bob (fake-1)" in out
+    assert "alice vs bob" in out
     assert "winner: " in out
     assert out.rstrip().endswith("replay verified ✓")
     assert "of $33 cap" in out  # #195: the spend line shows the enforced cap, never the key limit
@@ -98,7 +98,7 @@ FAKE = (AgentSpec(name="a"), AgentSpec(name="b"))
 
 
 def test_container_wiring(env: Path) -> None:
-    s = Settings(openai_api_key=SecretStr("sk-x"))
+    s = Settings(api_keys={"openai": SecretStr("sk-x")})
     assert isinstance(make_provider(OPENAI[0], s, NullMetrics()), RetryingProvider)
 
 
