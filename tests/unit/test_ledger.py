@@ -17,7 +17,7 @@ from claude_duel.ports import Completion
 def _spend(path: str, n: int) -> None:
     ledger = FileSpendLedger(Path(path))
     for _ in range(n):
-        ledger.record("m", "gpt-4.1-nano", 1, 0.25)
+        ledger.record("m", "gpt-4o-mini", 1, 0.25)
 
 
 def test_other_instances_see_new_spend(tmp_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_other_instances_see_new_spend(tmp_path: Path) -> None:
 
 def test_concurrent_processes_never_lose_or_tear_entries(tmp_path: Path) -> None:
     path = tmp_path / "l.jsonl"
-    ctx = multiprocessing.get_context("fork")
+    ctx = multiprocessing.get_context("spawn")
     procs = [ctx.Process(target=_spend, args=(str(path), 50)) for _ in range(4)]
     for p in procs:
         p.start()
@@ -83,9 +83,9 @@ def test_zero_cost_calls_are_ledgered(tmp_path: Path, new_state) -> None:  # typ
 
 def test_spent_usd_counts_a_settled_reservation_once(tmp_path: Path) -> None:
     ledger = FileSpendLedger(tmp_path / "ledger.jsonl")
-    rid = ledger.reserve("s1-g1", "gpt-4.1-nano", 0.05)
+    rid = ledger.reserve("s1-g1", "gpt-4o-mini", 0.05)
     assert ledger.spent_usd("s1-") == pytest.approx(0.05)
-    ledger.record("s1-g1", "gpt-4.1-nano", 100, 0.01, settles=rid)
-    ledger.record("other", "gpt-4.1-nano", 100, 0.02)
+    ledger.record("s1-g1", "gpt-4o-mini", 100, 0.01, settles=rid)
+    ledger.record("other", "gpt-4o-mini", 100, 0.02)
     assert ledger.spent_usd("s1-") == pytest.approx(0.01)
     assert ledger.total_usd() == pytest.approx(0.03)

@@ -2,26 +2,42 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
+import os
+import subprocess
 from collections.abc import Iterable
+from pathlib import Path
+from types import ModuleType
+
+from pydantic import SecretStr
 
 from claude_duel.adapters.metrics.jsonl_metrics import JsonlMetrics, TeeMetrics
-from claude_duel.adapters.providers.anthropic import AnthropicProvider
 from claude_duel.adapters.providers.fake import FakeProvider, is_template
-from claude_duel.adapters.providers.openai import OpenAIProvider
+from claude_duel.adapters.providers.registry import FACTORIES
 from claude_duel.adapters.providers.retry import RetryingProvider
 from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
+from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.results_sql import (
+    Executor,
+    SqlResults,
+    migrate,
+    refuse_superuser,
+    refuse_table_owner,
+    require_current,
+)
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, RunOverride, check_model_allowed
 from claude_duel.app.engine import GATE, MatchEngine
 from claude_duel.config import Settings
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec
+from claude_duel.domain.vendors import VENDORS
 from claude_duel.observability import log
-from claude_duel.ports import EventObserver, LLMProvider, Metrics, Sandbox
+from claude_duel.ports import EventObserver, LLMProvider, Metrics, PublicSource, ResultsStore, Sandbox, Uploader
 
 _LOG = logging.getLogger(__name__)
 
@@ -30,17 +46,13 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     if agent.provider == "fake":
         return FakeProvider(skill=agent.skill)
     model, timeout = settings.model_for(agent), settings.provider_timeout
-    inner: LLMProvider
-    if agent.provider == "openai":
-        if settings.openai_api_key is None:
-            raise ConfigError("agent uses openai but OPENAI_API_KEY is not set")
-        inner = OpenAIProvider(settings.openai_api_key, model, timeout=timeout)
-    elif agent.provider == "anthropic":
-        if settings.anthropic_api_key is None:
-            raise ConfigError("agent uses anthropic but ANTHROPIC_API_KEY is not set")
-        inner = AnthropicProvider(settings.anthropic_api_key, model, timeout=timeout)
-    else:
+    vendor = VENDORS.get(agent.provider)
+    if vendor is None:
         raise ConfigError(f"unknown provider {agent.provider!r}")
+    key = settings.api_keys.get(vendor.name)
+    if key is None:
+        raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
+    inner = FACTORIES[vendor.name](key, model, timeout)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
@@ -76,12 +88,16 @@ def build_store(settings: Settings) -> FileMatchStore:
     return FileMatchStore(settings.store_dir)
 
 
+def build_uploader() -> Uploader:
+    return GcloudUploader()
+
+
 def build_event_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir)
 
 
 def build_driver_lock(settings: Settings, log_id: str, kind: str) -> FileLock:
-    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (arch r3 #6)."""
+    """Non-blocking lock ``<id>.<kind>.lock`` held by a series/tournament driver for its whole run (#120)."""
     settings.store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     return FileLock(settings.store_dir / f"{log_id}.{kind}.lock")
 
@@ -133,7 +149,7 @@ def pin_agents(settings: Settings) -> tuple[AgentSpec, AgentSpec]:
 
 
 def pin_entrants(settings: Settings, entrants: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
-    """Tournament entrants with their effective model written in (arch r3 #15), like ``pin_agents``."""
+    """Tournament entrants with their effective model written in (#125), like ``pin_agents``."""
     return tuple(e.model_copy(update={"model": settings.model_for(e)}) for e in entrants)
 
 
@@ -167,3 +183,76 @@ def build_engine(
         models,
         observer,
     )
+
+
+def _db_url(secret: SecretStr | None, var: str) -> str:
+    if secret is None:
+        raise ConfigError(f"{var} is not set")
+    return secret.get_secret_value()
+
+
+def _owner_url(settings: Settings) -> str:
+    if settings.migrate_database_url is not None:
+        return _db_url(settings.migrate_database_url, "MIGRATE_DATABASE_URL")
+    return _db_url(settings.database_url, "MIGRATE_DATABASE_URL (or DATABASE_URL)")
+
+
+def _postgres() -> ModuleType:
+    """The Postgres adapter, imported lazily: psycopg is the optional ``db`` extra (quality L27)."""
+    try:
+        return importlib.import_module("claude_duel.adapters.store.postgres")
+    except ImportError:
+        raise ConfigError("the results database needs psycopg: install claude-duel[db]") from None
+
+
+def results_executor(url: str) -> Executor:
+    """psycopg to the results database (in production a cloud-sql-proxy Unix socket in a 0700 dir, ADR 0012).
+
+    psycopg is imported only when used.
+    """
+    pg = _postgres()
+    ex: Executor = pg.PgExecutor(pg.connect(url))
+    return ex
+
+
+def build_results(settings: Settings, *, owner: bool = False) -> ResultsStore:
+    """Connect with ``DATABASE_URL`` (or the owner's ``MIGRATE_DATABASE_URL`` for ``--rebuild``); never migrates.
+
+    Fails clearly if migrations are pending: run ``duel db migrate``.
+    """
+    ex = results_executor(_owner_url(settings) if owner else _db_url(settings.database_url, "DATABASE_URL"))
+    refuse_superuser(ex)
+    require_current(ex)
+    if not owner:
+        refuse_table_owner(ex)
+    return SqlResults(ex)
+
+
+def migrate_results(settings: Settings) -> list[str]:
+    """``duel db migrate``: apply pending migrations as the schema owner. Returns the names applied."""
+    return migrate(results_executor(_owner_url(settings)))
+
+
+def git_sha() -> str | None:
+    """The commit ``duel sync`` runs from (recorded per run), or None outside a checkout."""
+    if sha := os.environ.get("GITHUB_SHA"):
+        return sha
+    try:
+        out = subprocess.run(  # fixed argv, no shell
+            ["git", "rev-parse", "HEAD"],  # noqa: S607
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None
+
+
+def build_public_reader(settings: Settings) -> PublicSource:
+    """Connect with ``EXPORT_DATABASE_URL``; ``PublicReader`` refuses any role that could write (postgres only)."""
+    pg = _postgres()
+    reader: PublicSource = pg.PublicReader(pg.connect(_db_url(settings.export_database_url, "EXPORT_DATABASE_URL")))
+    return reader

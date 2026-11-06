@@ -1,0 +1,21 @@
+# Pinned launch rules (docs/runs/launch-prereg.md). Fake agents as written; each arm in launch-arms.toml sets
+# provider/model, its own run_max_usd/match_max_usd, and alternates which vendor is "a" per seed.
+sandbox = "docker"
+[[agents]]
+name = "a"
+[[agents]]
+name = "b"
+[rules]
+mode = "checked"
+rounds = 3
+challenges_per_round = 1
+max_attempts = 3
+max_output_tokens = 8000
+reasoning_effort = "low"
+variety = true
+integrity_control = true
+attacker_solver = true
+framing = { kind = "neutral" }
+[budget]  # fallback only: every arm in launch-arms.toml overrides both caps
+match_max_usd = 0.75
+run_max_usd = 20.0

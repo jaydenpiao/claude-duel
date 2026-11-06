@@ -1,6 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.models import ClockRule, Rules, ScoringRule, WalletRule
+from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {
     "classic": Rules(),
@@ -26,7 +26,19 @@ MODES: dict[str, Rules] = {
     "blitz": Rules(
         mode="blitz", clock=ClockRule(bank_tokens=40_000, increment_tokens=500), scoring=ScoringRule(kind="timed")
     ),
+    # Sealed Ledger (design-core-logic.md): stakes, keystone, seeded terrain and novelty heat.
+    "ledger": Rules(
+        mode="ledger",
+        challenges_per_round=3,
+        max_attempts=3,
+        scoring=ScoringRule(kind="ledger"),
+        ledger=LedgerRule(keystone=True, terrain="seeded", heat_window=2),
+        clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
+        memory=MemoryRule(kind="summary"),
+    ),
 }
+# Deep layer phase 1 (design-deep-layer.md): ledger plus the Ghost Codex.
+MODES["ledger_deep"] = MODES["ledger"].model_copy(update={"mode": "ledger_deep", "deep": DeepRule(ghosts=True)})
 
 
 def preset(name: str) -> Rules:

@@ -51,6 +51,7 @@ def test_request_shape_and_usage() -> None:
 
     c = _claude(httpx.MockTransport(h)).complete(REQ)
     assert (c.text, c.input_tokens, c.output_tokens) == ('{"a": 1}', 11, 5)
+    assert c.reasoning_summary == "hmm"  # the thinking block (a summary on current Claude models) is kept
 
 
 def test_cache_tokens_count_as_input() -> None:
@@ -116,7 +117,7 @@ def test_premium_needs_opt_in_and_vendor_matches(tmp_path: Path) -> None:
 
 def test_key_from_env_only_and_wiring() -> None:
     s = load_settings(None, {"ANTHROPIC_API_KEY": "sk-ant-x"})
-    assert s.anthropic_api_key is not None
+    assert "anthropic" in s.api_keys
     assert "sk-ant-x" not in repr(s)
     agent = AgentSpec(name="c", provider="anthropic")
     assert isinstance(make_provider(agent, s, InMemoryMetrics()), RetryingProvider)

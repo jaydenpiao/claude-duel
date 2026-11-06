@@ -2,12 +2,12 @@
 <rect width="800" height="420" rx="16" fill="#111827"/>
 <text x="40" y="60" font-size="28" fill="#f9fafb" font-weight="bold">claude duel · alice vs bob</text>
 <text x="40" y="95" font-size="16" fill="#9ca3af" font-weight="normal">match snap · 2/2 rounds · complete</text>
-<text x="40" y="150" font-size="18" fill="#22d3ee" font-weight="bold">alice (gpt-4.1-nano)</text>
+<text x="40" y="150" font-size="18" fill="#22d3ee" font-weight="bold">alice</text>
 <rect x="40" y="160" width="500" height="22" rx="4" fill="#1f2937"/>
 <rect x="40" y="160" width="500" height="22" rx="4" fill="#22d3ee"/>
 <text x="560" y="178" font-size="22" fill="#f9fafb" font-weight="bold">96</text>
 <text x="40" y="200" font-size="13" fill="#9ca3af" font-weight="normal">in 1,200 · out 300 (think 0) · $0.0020 · $0.0010/capture · —/defense</text>
-<text x="40" y="220" font-size="18" fill="#e879f9" font-weight="bold">bob (gpt-4.1-mini)</text>
+<text x="40" y="220" font-size="18" fill="#e879f9" font-weight="bold">bob</text>
 <rect x="40" y="230" width="500" height="22" rx="4" fill="#1f2937"/>
 <rect x="40" y="230" width="0" height="22" rx="4" fill="#e879f9"/>
 <text x="560" y="248" font-size="22" fill="#f9fafb" font-weight="bold">-5</text>

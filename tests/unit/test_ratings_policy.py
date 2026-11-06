@@ -1,4 +1,4 @@
-"""Arch round 3 (majors): ratings rate handicapped agents separately, on raw scores, and skip bad logs."""
+"""Ratings rate handicapped agents separately, on raw scores, and skip bad logs."""
 
 from __future__ import annotations
 

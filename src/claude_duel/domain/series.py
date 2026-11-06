@@ -14,6 +14,7 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from claude_duel.domain.driver import fold_created
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits, Stage
@@ -100,18 +101,22 @@ def game_agents(agents: tuple[AgentSpec, AgentSpec], game_no: int) -> tuple[Agen
 
 
 def game_winner(state: MatchState) -> str | None:
-    final = state.final_scores()
-    (a, sa), (b, sb) = sorted(final.items())
+    return decide(state, state.final_scores())
+
+
+def decide(state: MatchState, scores: dict[str, int]) -> str | None:
+    """The one tiebreak: more points; then (ledger) fewer recorded dollars, then fewer tokens; else fewer attack
+    tokens. None on a full tie. Used by series games, ratings and the live leader/result line."""
+    (a, sa), (b, sb) = sorted((x.name, scores.get(x.name, 0)) for x in state.agents)
     if sa != sb:
         return a if sa > sb else b
-    if state.rules.scoring.kind == "ledger":  # fewer recorded dollars, then fewer tokens (design-core-logic.md 4.3)
+    key: dict[str, tuple[int, ...]]
+    if state.rules.scoring.kind == "ledger":  # design-core-logic.md 4.3
         key = {n: _spend(state, n) for n in (a, b)}
-        if key[a] != key[b]:
-            return a if key[a] < key[b] else b
-        return None
-    spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
-    if spent[a] != spent[b]:
-        return a if spent[a] < spent[b] else b
+    else:
+        key = {n: (sum(x.tokens_used for x in state.attacks.values() if x.attacker == n),) for n in (a, b)}
+    if key[a] != key[b]:
+        return a if key[a] < key[b] else b
     return None
 
 
@@ -143,12 +148,15 @@ def game_of(game_no: int, state: MatchState, decider: MatchState | None = None) 
 
 
 def fold(series_id: str, events: Iterable[Event]) -> SeriesState:
-    it = iter(events)
-    first = next(it, None)
-    if first is None or first.type != SERIES_CREATED:
-        raise EventLogCorruptError("series log does not start with series_created")
-    check_version(first, SERIES_SCHEMA_VERSION, "series event")
-    state = typed(SeriesState, {"series_id": series_id, **first.data})
+    state, it = fold_created(
+        events,
+        created_type=SERIES_CREATED,
+        schema_version=SERIES_SCHEMA_VERSION,
+        what="series",
+        state_type=SeriesState,
+        id_field="series_id",
+        id_value=series_id,
+    )
     for e in it:
         check_version(e, SERIES_SCHEMA_VERSION, "series event")
         if e.type != GAME_FINISHED:
