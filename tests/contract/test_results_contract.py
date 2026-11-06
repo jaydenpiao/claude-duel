@@ -24,6 +24,8 @@ from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts
 from claude_duel.ports import ResultsStore
 from tests.memory_results import MemoryResults
 
+pytestmark = pytest.mark.xdist_group("results_db")  # shares cluster roles with tests/e2e/test_results_db.py
+
 ADMIN = os.environ.get("DUEL_TEST_DATABASE_URL", "")
 PW = "owner-test-only"  # the e2e owner: it created the cluster-wide duel_* roles
 
