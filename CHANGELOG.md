@@ -13,6 +13,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
+- Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).
 - Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
 - Program-form build prompt now says the solver runs alone (it cannot call the source's check or helpers), matching the engine; the NameError repair hint says the same. Composing was rejected: program sources run top-level stdin/FLAG code.
 - Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed; one role query for sync/export checks; psycopg moved to the optional `db` extra; export name in one constant (quality L23-L28, L30).
