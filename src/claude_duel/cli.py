@@ -27,12 +27,14 @@ from claude_duel.app.container import (
     build_store,
     build_uploader,
     git_sha,
+    make_sandbox,
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import write as write_export
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -118,8 +120,10 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
     stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
     stakes.add_argument("--format", choices=("text", "json"), default="text")
-    replay_p = sub.choices["replay"]
-    replay_p.add_argument("--transcript", action="store_true")
+    sub.choices["replay"].add_argument("--transcript", action="store_true")
+    sub.choices["replay"].add_argument(
+        "--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)"
+    )
     return p
 
 
@@ -206,7 +210,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
+    report = replay(snapshot, events)
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
@@ -215,7 +220,11 @@ def _dispatch(args: argparse.Namespace) -> int:
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
-    return 0 if report.consistent else 1
+    if not args.verify:
+        return 0 if report.consistent else 1
+    bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
+    print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
+    return 0 if report.consistent and not bad else 1
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
