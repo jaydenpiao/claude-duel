@@ -25,13 +25,17 @@ from claude_duel.app.container import (
     build_public_reader,
     build_results,
     build_store,
+    build_uploader,
     git_sha,
+    make_sandbox,
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
+from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -67,13 +71,13 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--view",
             choices=("auto", "arena", "commentary"),
             default="auto",
             help="text output style; auto: arena on a terminal, commentary otherwise",
         )
-    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
@@ -110,7 +114,7 @@ def _parser() -> argparse.ArgumentParser:
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
     out_p = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
-    out_p.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    out_p.add_argument("--out", type=Path, default=Path(DEFAULT_OUT), help="output path")
     exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
     exp_sub = exp.add_subparsers(dest="experiment", required=True)
     stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
@@ -121,7 +125,7 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--format", choices=("text", "json"), default="text")
     sub.choices["replay"].add_argument("--transcript", action="store_true")
     sub.choices["replay"].add_argument(
-        "--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)"
+        "--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)"
     )
     return p
 
@@ -209,12 +213,13 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    events = build_event_log(settings).read(args.match_id)
+    snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
     if args.view == "arena":
         _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
-    state = build_store(settings).load(args.match_id)
-    report = replay(state, events)
-    names = labels(state.agents)
+    report = replay(snapshot, events)
+    names = labels(snapshot.agents)
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
@@ -222,7 +227,11 @@ def _dispatch(args: argparse.Namespace) -> int:
         f" recomputed={_relabel(report.recomputed, names)} recorded={_relabel(report.recorded, names)}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
-    return 0 if report.consistent else 1
+    if not args.verify:
+        return 0 if report.consistent else 1
+    bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
+    print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
+    return 0 if report.consistent and not bad else 1
 
 
 def _relabel(scores: object, names: dict[str, str]) -> object:
@@ -242,8 +251,10 @@ def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> 
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
-    files = backup(settings.store_dir, bucket or settings.replay_bucket)
-    print(f"backed up {len(files)} replay files")
+    result = backup(build_store(settings), build_uploader(), bucket or settings.replay_bucket)
+    for why in result.skipped:
+        print(f"skipped {why}", file=sys.stderr)
+    print(f"backed up {len(result.files)} replay files")
     return 0
 
 
@@ -287,7 +298,7 @@ def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
-        rows = [estimate(preset(n), chosen, settings.budget) for n in names]
+        rows = [estimate(preset(n), chosen, settings.budget, settings.agents) for n in names]
     except KeyError as exc:
         raise ConfigError(str(exc.args[0])) from exc
     print(render(rows))

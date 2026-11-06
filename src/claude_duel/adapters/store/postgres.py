@@ -1,8 +1,8 @@
 """Postgres transport for the results index (ADR 0012): psycopg connection, ``PgExecutor`` and the public export.
 
-The SQL itself lives in ``results_sql``. In production the URL points at cloud-sql-proxy on loopback (IAM auth, no
-password; ``postgres_url.iam_url``). Connection URLs come only from the environment
-and are never logged or put in an error message. ``migrate`` and ``--rebuild`` need the schema owner
+The SQL itself lives in ``results_sql``. In production the URL points at a cloud-sql-proxy Unix socket in a 0700
+dir, never TCP loopback (ADR 0012; IAM auth, no password; ``postgres_url.iam_url``). Connection URLs come only from
+the environment and are never logged or put in an error message. Migrations and ``--rebuild`` need the schema owner
 (``MIGRATE_DATABASE_URL``); routine ``duel sync`` should run as a ``duel_ingest`` login (``DATABASE_URL``), which
 cannot delete or truncate. ``PublicReader`` refuses any role that can write.
 """
@@ -20,7 +20,7 @@ from psycopg.types.json import Jsonb
 
 from claude_duel.adapters.store import results_sql
 from claude_duel.adapters.store.postgres_url import iam_url, require_tls
-from claude_duel.adapters.store.results_sql import Row, SqlResults, Stmt
+from claude_duel.adapters.store.results_sql import Row, Stmt
 from claude_duel.domain.errors import ConfigError, ResultsDbError
 
 __all__ = ["require_tls"]
@@ -77,42 +77,14 @@ class PgExecutor:
             yield
 
 
-def PostgresResults(conn: Conn) -> SqlResults:  # noqa: N802 - kept as the adapter's public name
-    """``ResultsStore`` on a psycopg connection."""
-    return SqlResults(PgExecutor(conn))
-
-
-def migrate(conn: Conn) -> list[str]:
-    return results_sql.migrate(PgExecutor(conn))
-
-
-def require_current(conn: Conn) -> None:
-    results_sql.require_current(PgExecutor(conn))
-
-
-def refuse_superuser(conn: Conn) -> None:
-    results_sql.refuse_superuser(PgExecutor(conn))
-
-
-def refuse_definer_functions(conn: Conn) -> None:
-    results_sql.refuse_definer_functions(PgExecutor(conn))
-
-
 class PublicReader:
     """Reads the ``public_v`` views in a read-only transaction, as a role that can't write or own anything."""
 
     def __init__(self, conn: Conn) -> None:
-        row = conn.execute(
-            "select r.rolsuper or r.rolcreaterole or r.rolbypassrls"
-            " or pg_has_role(current_user, 'duel_writer', 'MEMBER')"
-            " or pg_has_role(current_user, 'duel_ingest', 'MEMBER')"
-            " or exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as unsafe,"
-            " pg_has_role(current_user, 'duel_reader', 'MEMBER') as reader"
-            " from pg_roles r where r.rolname = current_user"
-        ).fetchone()
-        if row is None or row["unsafe"] or not row["reader"]:
+        f = results_sql.role_facts(PgExecutor(conn))
+        if f.superuser or f.createrole or f.bypassrls or f.writer or f.ingest or f.owner or not f.reader:
             raise ConfigError("the export role must be a duel_reader member with no write, owner or admin rights")
-        refuse_definer_functions(conn)
+        results_sql.refuse_definer_functions(PgExecutor(conn))
         self._conn = conn
 
     def export(self) -> dict[str, list[dict[str, object]]]:

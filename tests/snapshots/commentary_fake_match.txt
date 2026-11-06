@@ -48,8 +48,8 @@ fake-1 (A) attacks 'Maze' (try 4/4)… no flag
   → defended (attempts exhausted), fake-1 (B) +10
 scoreboard after round 1: fake-1 (A) 40  fake-1 (B) 19
 spend: $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 2,656 · out 255 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 2,810 · out 268 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  fake-1 (A): in 2,718 · out 255 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  fake-1 (B): in 2,870 · out 268 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
 ────────────────────────────────────────────────
 round 2/2
@@ -97,11 +97,11 @@ fake-1 (A) attacks 'Maze' (try 4/4)… no flag
   → defended (attempts exhausted), fake-1 (B) +20
 scoreboard after round 2: fake-1 (A) 120  fake-1 (B) 58
 spend: $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 5,312 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 5,620 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
 ────────────────────────────────────────────────
 winner: fake-1 (A) · fake-1 (A) 120  fake-1 (B) 58
-30 model calls · in 10,932 · out 1,046 tokens · $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 5,312 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 5,620 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+30 model calls · in 11,176 · out 1,046 tokens · $0.0000 this match · $0.0031 of $33 cap
+  fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
