@@ -83,7 +83,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 
 **Benchmark:** `duel bench <tasks.jsonl> --tries 3` reports each agent's solve rate on a local, never-vendored slice of stdin-only CTF tasks. Every call is budget-capped and ledgered like a match; see [docs/design/benchmark.md](docs/design/benchmark.md).
 
-**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries, a retry hint and why a failed try was rejected, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less; `ledger`: Sealed Ledger, each attacker stakes a token budget per opponent challenge and a capture is discounted by the share of its stake used, with a sealed keystone bet, seeded stdin terrain and a novelty heat penalty); any other `[rules]` field overrides it.
+**Modes:** `[rules] mode = "quick"` (or `DUEL_MODE=quick`) starts from a preset in `domain/modes.py` (`classic`, `quick`, `gated`, `checked`: authors write only `def check(s)`, with seeded themes, no repeat designs, extra early tries, a retry hint and why a failed try was rejected, ADR 0010; `efficiency`: captures are discounted by the tokens they took, on a 60k-token clock per agent; `capped`: each agent has a 30k-token wallet, after which its builds forfeit and attacks stop; `blitz`: a 40k-token clock per agent with a 500-token increment per call, and slow captures are worth less; `ledger`: Sealed Ledger, each attacker stakes a token budget per opponent challenge and a capture is discounted by the share of its stake used, with a sealed keystone bet, seeded stdin terrain and a novelty heat penalty; `ledger_deep`: ledger plus Ghost Codex replay of past captures at $0 API); any other `[rules]` field overrides it.
 
 **Environment overrides** (applied over the TOML file; a full key list is enforced by `tests/unit/test_env_docs.py`):
 
@@ -101,7 +101,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
 | `DUEL_MAX_ATTEMPTS` | `[rules] max_attempts` | preset |
 | `DUEL_CHALLENGES_PER_ROUND` | `[rules] challenges_per_round` | preset |
-| `DUEL_MODE` | `[rules] mode` (a preset in `domain/modes.py`, e.g. `classic`/`quick`/`ledger`) | `classic` |
+| `DUEL_MODE` | `[rules] mode` (a preset in `domain/modes.py`, e.g. `classic`/`quick`/`ledger`/`ledger_deep`) | `classic` |
 | `DUEL_TOKEN_BUDGET` | `[rules] attack_token_budget` | preset |
 | `DUEL_MATCH_MAX_USD` | `[budget] match_max_usd` | 0.25 |
 | `DUEL_RUN_MAX_USD` | `[budget] run_max_usd` | 0.50 |
