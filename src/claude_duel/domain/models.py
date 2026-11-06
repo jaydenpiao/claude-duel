@@ -117,11 +117,13 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # Feature switches default off so a log pinned before they existed replays as written; the ledger
+    # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
-        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+        default=False, description="each author commits to one challenge: defended x2, captured -base//2"
     )
-    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
-    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    terrain: Literal["none", "seeded"] = "none"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
 
@@ -222,7 +224,7 @@ class Rules(_Frozen):
 class ChallengeSpec(_Frozen):
     """What an author submits."""
 
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
