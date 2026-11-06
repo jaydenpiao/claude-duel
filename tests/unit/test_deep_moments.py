@@ -20,6 +20,7 @@ from claude_duel.domain.modes import preset
 from claude_duel.domain.moments import GHOST_STRIKE, moments
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.arena import ArenaView, frame
+from claude_duel.presentation.common import who
 
 SNAPSHOTS = Path(__file__).parent.parent / "snapshots"
 
@@ -79,14 +80,16 @@ def test_deep_arena_golden_frame(deep: tuple[Tap, MatchState], width: int) -> No
 
 
 def test_arena_tokens_and_dollars_are_call_charged_sums(deep: tuple[Tap, MatchState]) -> None:
-    tap, _ = deep
+    tap, state = deep
     text = _text(tap, 200)
-    for name in ("alice", "bob"):
+    for agent in state.agents:
+        name = agent.name
+        label = who(state, name)
         mine = [e.data for e in tap.events if e.type == ev.CALL_CHARGED and e.data["agent"] == name]
         tokens_in = sum(int(d.get("input_tokens", 0)) for d in mine)  # type: ignore[call-overload]
         usd = sum(float(d["usd"]) for d in mine)  # type: ignore[arg-type]
         assert usd > 0
-        assert f"{name}: in {tokens_in:,} · " in text
+        assert f"{label}: in {tokens_in:,} · " in text
         assert f"${usd:.4f}" in text
 
 
