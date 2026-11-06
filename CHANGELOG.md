@@ -36,6 +36,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
+- `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
 - Deep layer phase 1: Ghost Codex replay (`ledger_deep` preset, `ghost_run` events, ghost captures pay max(1, full // 4); #210).
 - `duel backup` refuses a bucket without public access prevention enforced, and also scans for octal, binary, base85 and base64/zlib-encoded flags before upload.
 - Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
