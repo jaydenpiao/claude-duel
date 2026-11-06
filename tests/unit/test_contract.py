@@ -139,3 +139,20 @@ def test_solver_gets_more_time_and_a_clear_failure(make_engine, new_state) -> No
     assert ("x = 1\n", SOLVER_TIME_FACTOR * state.limits.cpu_seconds) in seen
     mine = next(c for c in state.challenges.values() if c.author == "bob")
     assert state.validations[mine.id].reason == "no reference input: the solver never printed one"
+
+
+def test_program_prompt_says_the_solver_runs_alone() -> None:
+    assert "It runs ALONE, without your source" in agents.build_prompt("a", 1, 0, Rules(), None)
+    assert "runs ALONE" not in agents.build_prompt("a", 1, 0, Rules(challenge_form="check"), None)
+    assert "copy every helper" in agents.repair_hint("solver failed (exit 1); it printed 'error: NameError'")
+
+
+def test_program_solver_does_not_see_the_source(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    """Program form runs the solver alone (its source has top-level stdin/FLAG code), as the prompt now says."""
+    source = (
+        "import sys\ndef key():\n    return 'abcd' + 'efgh'\nif sys.stdin.read().strip() == key():\n    print(FLAG)\n"
+    )
+    bob = Builds({"title": "t", "description": "d", "source": source, "solver": "print(key())\n"})
+    state = make_engine({"alice": FakeProvider(), "bob": bob}).run(new_state(max_format_retries=0))
+    mine = next(c for c in state.challenges.values() if c.author == "bob")
+    assert "NameError" in state.build_errors[mine.id][0]
