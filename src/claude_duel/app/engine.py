@@ -12,10 +12,10 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, solvability, stakes, variety
+from claude_duel.domain import contract, findings, ghosts, memory, policy, solvability, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, flag_of, redact, shares_fragment
+from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, shares_fragment
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -30,7 +30,7 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import match_stats, score_round
+from claude_duel.domain.scoring import capture_points, heat_of_state, match_stats, score_round
 from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
 from claude_duel.ports import (
@@ -393,15 +393,10 @@ class MatchEngine:
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
         """Invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
-        if not state.secret:
-            return
         body = event.model_dump_json()
-        cids = set(state.challenges) | set(state.build_errors)
-        if isinstance(cid := event.data.get("challenge_id"), str):
-            cids.add(cid)
-        for cid in sorted(cids):
-            for epoch in range(len(state.build_errors.get(cid, [])) + 1):
-                assert_no_flag(body, flag_of(state.secret, cid, epoch), f"event {event.type}")
+        cid = event.data.get("challenge_id")
+        for flag in match_flags(state, [cid] if isinstance(cid, str) else []):
+            assert_no_flag(body, flag, f"event {event.type}")
 
     @staticmethod
     def _flag_for(state: MatchState, cid: str) -> str:
@@ -445,14 +440,14 @@ class MatchEngine:
         """One paid call; a reply cut off at the output cap gets exactly one repair call asking for brevity.
         A second cut-off reply is returned as is and counts as the failure reason ``TRUNCATED``.
         ``left`` (ledger: stake tokens left) fits max_tokens to the stake; no repair call below ``STAKE_FLOOR``."""
-        completion = self._call(state, agent, self._request(state, prompt, purpose, left))
+        completion = self._call(state, agent, self._request(state, agent, prompt, purpose, left))
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
             repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
             rest = None if left is None else left - completion.total_tokens
             if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
                 return completion
-            completion = self._call(state, agent, self._request(state, repair, purpose, rest))
+            completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
         return completion
 
     @staticmethod
@@ -461,9 +456,16 @@ class MatchEngine:
         system = agents.system_prompt(state.framing_text)
         return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
 
-    def _request(self, state: MatchState, prompt: str, purpose: Purpose, left: int | None = None) -> CompletionRequest:
-        cap = state.rules.wallet.max_output_tokens
-        tokens = state.rules.max_output_tokens if cap is None else min(state.rules.max_output_tokens, cap)
+    @staticmethod
+    def _output_cap(state: MatchState, agent: str) -> int:
+        """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
+        own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
+        return state.rules.output_cap(own)
+
+    def _request(
+        self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
+    ) -> CompletionRequest:
+        tokens = self._output_cap(state, agent)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
@@ -484,7 +486,7 @@ class MatchEngine:
         if not state.rules.difficulty_gate:
             return None, False
         prompt = agents.attack_prompt(GATE, cid, spec.title, spec.description, spec.source, 1, [])
-        completion = self._call(state, GATE, self._request(state, prompt, "attack"))
+        completion = self._call(state, GATE, self._request(state, GATE, prompt, "attack"))
         solved = self._attempt(state, GATE, spec, self._flag_for(state, cid), completion).captured
         self._metrics.incr("gate.solved" if solved else "gate.held")
         if solved and state.rules.gate_mode == "score":
@@ -640,7 +642,9 @@ class MatchEngine:
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
+        self._ghosts(state)  # before allocation: hits are public in the allocate prompt and force stake 0
         if state.rules.ledger is not None:
+            self._draw_terrain(state)
             for agent in state.agents:
                 self._allocate(state, agent.name)
         for ch in state.round_challenges(state.round):
@@ -651,7 +655,13 @@ class MatchEngine:
             if key in state.attacks:
                 continue
             stake = self._stake(state, ch, attacker)
-            if stake == 0:
+            ghost = self._ghost_hit(state, ch.id)
+            if ghost is not None:
+                attack = Attack(
+                    challenge_id=ch.id, attacker=attacker, solved=True, attempts=0, tokens_used=0,
+                    reason=f"ghost: {ghost}", stake=None if stake is None else 0, ghost=ghost,
+                )  # fmt: skip
+            elif stake == 0:
                 attack = Attack(
                     challenge_id=ch.id, attacker=attacker, solved=False, attempts=0, tokens_used=0,
                     reason="skipped: stake 0", stake=0,
@@ -662,6 +672,54 @@ class MatchEngine:
                     over = max(0, attack.tokens_used - stake)  # only the input-estimate gap can land here
                     attack = attack.model_copy(update={"stake": stake, "stake_overshoot": over})
             self._checkpoint(state, ev.CHALLENGE_ATTACKED, key=key, attack=attack.model_dump(mode="json"))
+
+    def _draw_terrain(self, state: MatchState) -> None:
+        """Ledger: after both challenge commits are fixed and before allocation; logged once per round.
+
+        Ordering vs the keystone: since #193 the keystone is picked in the allocate call, so terrain is drawn before
+        the keystone commit and authors pick knowing it. Terrain is public and identical for both sides, so this is
+        fair (and gives the pick more to reason about); design-core-logic.md 4.2 is updated to match."""
+        rule = state.rules.ledger
+        assert rule is not None
+        live = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
+        if rule.terrain != "seeded" or not live or any(c.id in state.terrains for c in live):
+            return
+        refs = [
+            (c.id, f"{author}:{i}", c.spec.reference_payload)
+            for author in sorted({c.author for c in live})
+            for i, c in enumerate(stakes.own_challenges(state.challenges, state.round, author))
+            if c in live and c.spec
+        ]
+        drawn = terrain.draw_round(state.seed, state.round, refs)
+        self._checkpoint(state, ev.TERRAIN_DRAWN, round=state.round, terrains=drawn)
+
+    def _ghosts(self, state: MatchState) -> None:
+        """Deep: replay past captures' winning payloads against this round's valid challenges. $0 API, seeded order,
+        one checkpoint per run so resume never reruns; a challenge already hit is not run again."""
+        deep = state.rules.deep
+        if deep is None or not deep.ghosts:
+            return
+        valid = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
+        plan = ghosts.ghost_schedule(
+            state.seed, state.round, ghosts.ghosts_before(state, state.round), valid, deep.max_ghost_runs
+        )
+        for ghost, ch in plan:
+            run_key = ghosts.run_key(state.round, ghost.id, ch.id)
+            if run_key in state.ghost_runs or self._ghost_hit(state, ch.id) is not None:
+                continue
+            assert ch.spec is not None
+            flag = self._flag_for(state, ch.id)
+            run = self._run_challenge(ch.spec.source, ghost.payload, flag, state, "ghost")
+            hit = flag in run.stdout
+            sha = hashlib.sha256(redact(run.stdout, (flag,)).encode()).hexdigest()
+            self._checkpoint(
+                state, ev.GHOST_RUN, round=state.round, ghost_id=ghost.id, target=ch.id, hit=hit, stdout_sha=sha
+            )
+
+    @staticmethod
+    def _ghost_hit(state: MatchState, challenge_id: str) -> str | None:
+        """The ghost that captured ``challenge_id`` this round, if any."""
+        return ghosts.round_hits(state, state.round).get(challenge_id)
 
     @staticmethod
     def _targets(state: MatchState, attacker: str) -> list[Challenge]:
@@ -676,32 +734,71 @@ class MatchEngine:
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
     def _allocate(self, state: MatchState, attacker: str) -> None:
-        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split."""
+        """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split.
+
+        ALLOCATE_STARTED is checkpointed before the paid call. A crash after the charge but before STAKES_SET
+        resumes with an even-split fallback and does not re-pay (#254).
+        """
         rule = state.rules.ledger
         assert rule is not None
-        if f"{state.round}:{attacker}" in state.stakes:
+        key = f"{state.round}:{attacker}"
+        if key in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
+        hits = ghosts.round_hits(state, state.round)
         rows = [
-            (c.id, c.spec.title if c.spec else "", c.spec.source if c.spec else "", bool(state.validations[c.id].valid))
+            (
+                c.id,
+                _with_terrain(c.spec.title if c.spec else "", state.terrains.get(c.id)),
+                c.spec.source if c.spec else "",
+                bool(state.validations[c.id].valid),
+            )
             for c in targets
         ]
-        prompt = agents.allocate_prompt(
-            attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker)
+        ghosted = frozenset(i for i, c in enumerate(targets) if c.id in hits)
+        own = stakes.own_challenges(state.challenges, state.round, attacker)
+        valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
+        own_rows = (
+            [(c.spec.title if c.spec else "", c.spec.source if c.spec else "", valid.get(c.id, False)) for c in own]
+            if rule.keystone
+            else None
         )
-        for cid in state.challenges:
-            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
         raw: object = None
-        if allowance.empty(state, attacker) is None:
-            completion = self._complete(state, attacker, prompt, "allocate")
-            try:
-                if not completion.truncated:
-                    raw = agents.parse_allocation(completion.text)
-            except MalformedOutputError:
-                self._metrics.incr("model.malformed", purpose="allocate")
-        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
+        pick: object = None
+        if key in state.allocate_started:
+            # already paid or started; settle without a second call (#254)
+            pass
+        else:
+            prompt = agents.allocate_prompt(
+                attacker,
+                state.round,
+                rule.attack_tokens,
+                rule.min_alloc,
+                rows,
+                self._memory(state, attacker),
+                own_rows,
+                {i: hits[targets[i].id] for i in sorted(ghosted)},
+            )
+            for cid in state.challenges:
+                assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+            self._checkpoint(state, ev.ALLOCATE_STARTED, agent=attacker, round=state.round)
+            if allowance.empty(state, attacker) is None:
+                completion = self._complete(state, attacker, prompt, "allocate")
+                try:
+                    if not completion.truncated:
+                        move = agents.parse_allocation(completion.text)
+                        raw, pick = move.stakes, move.keystone
+                except MalformedOutputError:
+                    self._metrics.incr("model.malformed", purpose="allocate")
+        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule, ghosted)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
+        # sealed with the allocation: same call, so it costs nothing extra
+        if rule.keystone and key not in state.keystones:
+            index = stakes.pick_keystone(pick, own, valid)
+            salt = stakes.keystone_salt(state.seed, state.round, attacker)
+            commit = stakes.keystone_commit(index, salt)
+            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
         self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
@@ -727,7 +824,7 @@ class MatchEngine:
                 attacker,
                 ch.id,
                 spec.title,
-                spec.description,
+                _with_terrain(spec.description, state.terrains.get(ch.id)),
                 spec.source,
                 len(history) + 1,
                 pairs,
@@ -743,11 +840,17 @@ class MatchEngine:
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
             self._note(state, attacker, completion.text)
-            attempt = self._attempt(state, attacker, spec, flag, completion)
+            attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.model_dump(mode="json"))
 
     def _attempt(
-        self, state: MatchState, agent: str, spec: ChallengeSpec, flag: str, completion: Completion
+        self,
+        state: MatchState,
+        agent: str,
+        spec: ChallengeSpec,
+        flag: str,
+        completion: Completion,
+        ground: str | None = None,
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         tokens = completion.total_tokens
@@ -767,7 +870,8 @@ class MatchEngine:
                 return AttackAttempt(payload=MALFORMED, output=failed, tokens=tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
         source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
-        run = self._run_challenge(source, payload, flag, state, "attack")
+        stdin = terrain.apply(ground, payload) if ground else payload
+        run = self._run_challenge(source, stdin, flag, state, "attack")
         output = CAPTURED if flag in run.stdout else redact(run.stdout, (flag,))[:500]
         if state.rules.integrity_control:
             self._control(state, agent, payload, flag)
@@ -794,6 +898,13 @@ class MatchEngine:
     def _score(self, state: MatchState) -> None:
         if state.round in state.scored_rounds:
             return  # idempotent resume
+        for key, ks in sorted(state.keystones.items()):  # reveal after every attack, before scoring
+            r, author = key.split(":", 1)
+            if int(r) == state.round and not ks.revealed:
+                salt = stakes.keystone_salt(state.seed, state.round, author)
+                n = len(stakes.own_challenges(state.challenges, state.round, author))
+                index = stakes.open_keystone(ks.commit, salt, n)  # the seal logs only the commit
+                self._checkpoint(state, ev.KEYSTONE_REVEALED, agent=author, round=state.round, index=index, salt=salt)
         delta = score_round(
             state.round,
             [a.name for a in state.agents],
@@ -801,5 +912,14 @@ class MatchEngine:
             state.validations,
             state.attacks,
             state.rules,
+            stakes.keystone_targets(state, state.round),
+            ghosts.round_hits(state, state.round),
         )
-        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta)
+        points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
+        lines = heat_of_state(state, state.round)
+        extra = {"heat": lines} if lines else {}
+        self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
+
+
+def _with_terrain(text: str, ground: str | None) -> str:
+    return text if ground is None else f"{text} [terrain={ground}] {terrain.describe(ground)}"
