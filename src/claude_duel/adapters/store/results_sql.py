@@ -144,20 +144,47 @@ def require_current(ex: Executor) -> None:
         raise ConfigError("the results database schema is behind: run `duel db migrate` (as the schema owner)")
 
 
+@dataclasses.dataclass(frozen=True)
+class RoleFacts:
+    """What the connected role can do, from one ``pg_roles`` query (quality L25)."""
+
+    superuser: bool
+    createrole: bool
+    bypassrls: bool
+    writer: bool  # member of duel_writer
+    ingest: bool  # member of duel_ingest
+    owner: bool  # owns a table in schema duel
+    reader: bool  # member of duel_reader
+
+
+_ROLE_FACTS = (
+    "select r.rolsuper as superuser, r.rolcreaterole as createrole, r.rolbypassrls as bypassrls,"
+    " pg_has_role(current_user, 'duel_writer', 'MEMBER') as writer,"
+    " pg_has_role(current_user, 'duel_ingest', 'MEMBER') as ingest,"
+    " exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner,"
+    " pg_has_role(current_user, 'duel_reader', 'MEMBER') as reader"
+    " from pg_roles r where r.rolname = current_user"
+)
+
+
+def role_facts(ex: Executor) -> RoleFacts:
+    rows = ex.query(_ROLE_FACTS)
+    if not rows:
+        raise ConfigError("cannot read the current role from pg_roles")
+    return RoleFacts(**{f.name: bool(rows[0][f.name]) for f in dataclasses.fields(RoleFacts)})
+
+
 def refuse_superuser(ex: Executor) -> None:
     """``duel sync`` must not run as a role that ignores row-level security (superuser or BYPASSRLS)."""
-    rows = ex.query("select rolsuper or rolbypassrls as unsafe from pg_roles where rolname = current_user")
-    if not rows or rows[0]["unsafe"]:
+    facts = role_facts(ex)
+    if facts.superuser or facts.bypassrls:
         raise ConfigError("refusing to sync as a superuser or BYPASSRLS role: use a duel_ingest or owner login")
 
 
 def refuse_table_owner(ex: Executor) -> None:
     """Routine ``duel sync`` must not run as a role that owns a ``duel`` table (it could truncate or drop it);
     the owner is for ``duel db migrate`` and ``--rebuild`` only."""
-    rows = ex.query(
-        "select exists (select from pg_tables where schemaname = 'duel' and tableowner = current_user) as owner"
-    )
-    if not rows or rows[0]["owner"]:
+    if role_facts(ex).owner:
         raise ConfigError("refusing to sync as a duel table owner: use a duel_ingest login (owner only for --rebuild)")
 
 
