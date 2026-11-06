@@ -4,12 +4,12 @@ sentences both views print. Pure presentation: nothing here mutates a match the 
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
-from claude_duel.domain.models import Attack, Challenge, Event, Handicap, MatchState, Usage, Validation
+from claude_duel.domain.models import AgentSpec, Attack, Challenge, Event, Handicap, MatchState, Usage, Validation
 from claude_duel.domain.scoring import defense_award, solve_award
 from claude_duel.domain.series import decide
 
@@ -31,6 +31,8 @@ HOOKS = {
     ev.MATCH_FAILED: "_failed",
     ev.MATCH_RECOVERED: "_recovered",
     ev.FINDING_FLAGGED: "_flagged",
+    ev.CALL_CHARGED: "_charged",
+    ev.BUILD_REJECTED: "_rejected",
     ev.GHOST_RUN: "_ghost_ran",
 }
 
@@ -112,9 +114,20 @@ def verdict_text(s: MatchState, e: Event) -> str:
     return "solvable ✓" if v.valid else f"rejected ✗ ({scrub(v.reason)}) -{s.rules.scoring.invalid_penalty * ch.round}"
 
 
+def labels(agents: Sequence[AgentSpec]) -> dict[str, str]:
+    """Display label per agent name: its model, with (A)/(B) when both sides run the same one."""
+    models = [a.model or a.name for a in agents]
+    same = len(set(models)) < len(models)
+    return {a.name: f"{m} ({chr(65 + i)})" if same else m for i, (a, m) in enumerate(zip(agents, models, strict=True))}
+
+
+def who(s: MatchState, name: str) -> str:
+    return labels(s.agents).get(name, name)
+
+
 def board(s: MatchState) -> str:
     final = s.final_scores()
-    return "  ".join(f"{a.name} {final[a.name]}" for a in s.agents)
+    return "  ".join(f"{who(s, a.name)} {final[a.name]}" for a in s.agents)
 
 
 def handicap_text(h: Handicap) -> str:
@@ -158,4 +171,4 @@ def leader(s: MatchState) -> str | None:
 
 def result(s: MatchState) -> str:
     top = leader(s)
-    return f"draw: {board(s)}" if top is None else f"winner: {top} · {board(s)}"
+    return f"draw: {board(s)}" if top is None else f"winner: {who(s, top)} · {board(s)}"

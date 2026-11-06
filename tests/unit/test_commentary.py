@@ -16,6 +16,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.models import Event, Rules
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.commentary import Commentary, scrub, snippet
+from claude_duel.presentation.common import labels
 from tests.helpers import FLAG, forfeit_events, match_events
 
 SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "commentary_fake_match.txt"
@@ -39,7 +40,7 @@ def test_resume_replays_history_then_continues(tmp_path: Path) -> None:
     play(settings, "m1", InMemoryMetrics())
     out = io.StringIO()
     play(settings, "m1", InMemoryMetrics(), _commentary(out, "m1"))
-    assert "alice (fake-1) vs bob (fake-1)" in out.getvalue()
+    assert "fake-1 (A) vs fake-1 (B)" in out.getvalue()
     assert "winner: " in out.getvalue()
 
 
@@ -93,3 +94,13 @@ def test_draw() -> None:
 def test_ledger_ceiling_cannot_exceed_key_limit() -> None:
     with pytest.raises(ValidationError, match="key_limit_usd"):
         BudgetLimits(lifetime_max_usd=60.0, key_limit_usd=50.0)
+
+
+def test_labels_use_models_and_disambiguate() -> None:
+
+    class A:
+        def __init__(self, n: str, m: str) -> None:
+            self.name, self.model = n, m
+
+    assert labels([A("alice", "m1"), A("bob", "m2")]) == {"alice": "m1", "bob": "m2"}  # type: ignore[list-item]
+    assert labels([A("alice", "m"), A("bob", "m")]) == {"alice": "m (A)", "bob": "m (B)"}  # type: ignore[list-item]

@@ -35,6 +35,9 @@ class Completion(BaseModel):
     output_tokens: int
     reasoning_tokens: int = 0  # thinking/reasoning tokens, already inside output_tokens and billed as output
     truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
+    reasoning_summary: str = (
+        ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
+    )
 
     @property
     def total_tokens(self) -> int:
