@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 
 from claude_duel.domain.prophecy import (
     TEMPLATES,
-    Challenge,
+    ChallengeFacts,
     Prophecy,
     RoundArtifacts,
     commit,
@@ -20,11 +20,11 @@ from claude_duel.domain.prophecy import (
     verify,
 )
 
-A = Challenge(cid="c1", size=100, tag="hash-check")
-B = Challenge(cid="c2", size=400, tag="vm")
+A = ChallengeFacts(cid="c1", size=100, tag="hash-check")
+B = ChallengeFacts(cid="c2", size=400, tag="vm")
 HIT = RoundArtifacts(challenges=(A, B), keystone="c2", captures=0, ghost_kills=0, stakes=(6_000, 0))
 MISS = RoundArtifacts(challenges=(B,), keystone=None, captures=3, ghost_kills=2, stakes=(1_000,))
-C = Challenge(cid="c3", size=50, tag="checksum")
+C = ChallengeFacts(cid="c3", size=50, tag="checksum")
 SHORT = RoundArtifacts(challenges=(A, B), keystone="c1", captures=2, ghost_kills=1, stakes=(1_000,))
 CHK = RoundArtifacts(challenges=(C,), keystone="c3")
 FIXTURES = {  # template -> (settles true, settles false)
