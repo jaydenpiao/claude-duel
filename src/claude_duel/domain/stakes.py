@@ -4,12 +4,13 @@ Stakes are positional: index i is the opponent's i-th challenge of the round in 
 allocation maps to the same challenges on replay. (Not to be confused with the spend ledger in adapters/store.)
 """
 
-from collections.abc import Sequence
+import hashlib
+from collections.abc import Mapping, Sequence
 from typing import TypeGuard
 
-from claude_duel.domain.models import LedgerRule
+from claude_duel.domain.models import Challenge, LedgerRule, MatchState
 
-__all__ = ["LedgerRule", "even_split", "settle_stakes"]
+__all__ = ["LedgerRule", "even_split", "keystone_commit", "keystone_salt", "keystone_targets", "settle_stakes"]
 
 
 def even_split(k: int, rule: LedgerRule) -> tuple[int, ...]:
@@ -27,11 +28,17 @@ def even_split(k: int, rule: LedgerRule) -> tuple[int, ...]:
     return tuple(rule.min_alloc if i < funded else 0 for i in range(k))
 
 
-def settle_stakes(raw: object, k: int, rule: LedgerRule) -> tuple[tuple[int, ...], bool]:
-    """The stakes to use and whether they fell back to ``even_split`` (the arena logs ``alloc_fallback``)."""
-    if _valid(raw, k, rule):
+def settle_stakes(
+    raw: object, k: int, rule: LedgerRule, zero: frozenset[int] = frozenset()
+) -> tuple[tuple[int, ...], bool]:
+    """The stakes to use and whether they fell back to ``even_split`` (the arena logs ``alloc_fallback``).
+
+    Indices in ``zero`` (targets a ghost already captured) must be staked 0; the fallback splits over the rest, so a
+    ghost's refund is real budget for the other targets."""
+    if _valid(raw, k, rule) and all(raw[i] == 0 for i in zero):
         return tuple(raw), False
-    return even_split(k, rule), True
+    rest = iter(even_split(k - len(zero), rule))
+    return tuple(0 if i in zero else next(rest) for i in range(k)), True
 
 
 def _valid(raw: object, k: int, rule: LedgerRule) -> TypeGuard[Sequence[int]]:
@@ -40,3 +47,45 @@ def _valid(raw: object, k: int, rule: LedgerRule) -> TypeGuard[Sequence[int]]:
     if not all(type(s) is int for s in raw):  # bool is not a stake
         return False
     return all(s == 0 or s >= rule.min_alloc for s in raw) and sum(raw) <= rule.attack_tokens
+
+
+def keystone_salt(seed: str, round_no: int, author: str) -> str:
+    """Deterministic from the match seed, so replay rebuilds it; logged only at reveal."""
+    return hashlib.sha256(f"{seed}:{round_no}:{author}:keystone".encode()).hexdigest()[:16]
+
+
+def keystone_commit(index: int | None, salt: str) -> str:
+    return hashlib.sha256(f"{'none' if index is None else index}:{salt}".encode()).hexdigest()
+
+
+def open_keystone(commit: str, salt: str, n: int) -> int | None:
+    """The index (or None, forfeited) that ``commit`` seals over ``n`` own challenges; the reveal logs it."""
+    candidates: list[int | None] = [*range(n), None]
+    for index in candidates:
+        if keystone_commit(index, salt) == commit:
+            return index
+    raise ValueError("keystone commit matches no index")
+
+
+def own_challenges(challenges: Mapping[str, Challenge], round_no: int, author: str) -> list[Challenge]:
+    """An author's challenges of one round in keystone (sorted id) order."""
+    return sorted((c for c in challenges.values() if c.round == round_no and c.author == author), key=lambda c: c.id)
+
+
+def pick_keystone(raw: object, own: Sequence[Challenge], valid: Mapping[str, bool]) -> int | None:
+    """The index used, or None (forfeit) for a non-int, out-of-range or invalid-challenge pick."""
+    if type(raw) is not int or not 0 <= raw < len(own):
+        return None
+    return raw if valid.get(own[raw].id, False) else None
+
+
+def keystone_targets(state: MatchState, round_no: int) -> dict[str, str]:
+    """author -> keystone challenge id, for revealed, non-forfeited keystones only (what the scorer sees)."""
+    out: dict[str, str] = {}
+    for key, ks in state.keystones.items():
+        r, author = key.split(":", 1)
+        if int(r) == round_no and ks.revealed and ks.index is not None:
+            own = own_challenges(state.challenges, round_no, author)
+            if ks.index < len(own):
+                out[author] = own[ks.index].id
+    return out
