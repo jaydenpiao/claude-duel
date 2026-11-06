@@ -1,107 +1,107 @@
 claude duel · match snap
-fake-1 (A) vs fake-1 (B)
+alice vs bob
 2 rounds · 2 challenges each per round · up to 4 tries
 
 ────────────────────────────────────────────────
 round 1/2
 ────────────────────────────────────────────────
-fake-1 (A) built a challenge guarding the arena's flag: Mirror
+alice built a challenge guarding the arena's flag: Mirror
   difficulty 1 · 7 lines
   │ import sys
   │ data = sys.stdin.read().strip()
   │ codes = [ord(c) for c in data]
   │ … (+3 lines)
-fake-1 (A) built a challenge guarding the arena's flag: Knock
+alice built a challenge guarding the arena's flag: Knock
   difficulty 2 · 12 lines
   │ import base64
   │ import binascii
   │ import json
   │ … (+8 lines)
-fake-1 (B) built a challenge guarding the arena's flag: Arithmetic gate
+bob built a challenge guarding the arena's flag: Arithmetic gate
   difficulty 2 · 8 lines
   │ import sys
   │ data = sys.stdin.read().strip()
   │ parts = data.split()
   │ … (+4 lines)
-fake-1 (B) built a challenge guarding the arena's flag: Maze
+bob built a challenge guarding the arena's flag: Maze
   difficulty 1 · 11 lines
   │ import sys
   │ grid = ["S.#", ".##", "..G"]
   │ r = c = 0
   │ … (+8 lines)
-arena check on fake-1 (A)'s 'Mirror': solvable ✓
-arena check on fake-1 (A)'s 'Knock': solvable ✓
-arena check on fake-1 (B)'s 'Arithmetic gate': solvable ✓
-arena check on fake-1 (B)'s 'Maze': solvable ✓
-fake-1 (B) attacks 'Mirror' (try 1/4)… no flag
-fake-1 (B) attacks 'Mirror' (try 2/4)… captured the flag ✓ +9
-fake-1 (B) attacks 'Knock' (try 1/4)… no flag
-fake-1 (B) attacks 'Knock' (try 2/4)… no flag
-fake-1 (B) attacks 'Knock' (try 3/4)… no flag
-fake-1 (B) attacks 'Knock' (try 4/4)… no flag
-  → defended (attempts exhausted), fake-1 (A) +20
-fake-1 (A) attacks 'Arithmetic gate' (try 1/4)… captured the flag ✓ +20
-fake-1 (A) attacks 'Maze' (try 1/4)… no flag
-fake-1 (A) attacks 'Maze' (try 2/4)… no flag
-fake-1 (A) attacks 'Maze' (try 3/4)… no flag
-fake-1 (A) attacks 'Maze' (try 4/4)… no flag
-  → defended (attempts exhausted), fake-1 (B) +10
-scoreboard after round 1: fake-1 (A) 40  fake-1 (B) 19
+arena check on alice's 'Mirror': solvable ✓
+arena check on alice's 'Knock': solvable ✓
+arena check on bob's 'Arithmetic gate': solvable ✓
+arena check on bob's 'Maze': solvable ✓
+bob attacks 'Mirror' (try 1/4)… no flag
+bob attacks 'Mirror' (try 2/4)… captured the flag ✓ +9
+bob attacks 'Knock' (try 1/4)… no flag
+bob attacks 'Knock' (try 2/4)… no flag
+bob attacks 'Knock' (try 3/4)… no flag
+bob attacks 'Knock' (try 4/4)… no flag
+  → defended (attempts exhausted), alice +20
+alice attacks 'Arithmetic gate' (try 1/4)… captured the flag ✓ +20
+alice attacks 'Maze' (try 1/4)… no flag
+alice attacks 'Maze' (try 2/4)… no flag
+alice attacks 'Maze' (try 3/4)… no flag
+alice attacks 'Maze' (try 4/4)… no flag
+  → defended (attempts exhausted), bob +10
+scoreboard after round 1: alice 40  bob 19
 spend: $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 2,718 · out 255 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 2,870 · out 268 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  alice: in 2,718 · out 255 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  bob: in 2,870 · out 268 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
 ────────────────────────────────────────────────
 round 2/2
 ────────────────────────────────────────────────
-fake-1 (A) built a challenge guarding the arena's flag: Mirror
+alice built a challenge guarding the arena's flag: Mirror
   difficulty 1 · 7 lines
   │ import sys
   │ data = sys.stdin.read().strip()
   │ codes = [ord(c) for c in data]
   │ … (+3 lines)
-fake-1 (A) built a challenge guarding the arena's flag: Knock
+alice built a challenge guarding the arena's flag: Knock
   difficulty 2 · 12 lines
   │ import base64
   │ import binascii
   │ import json
   │ … (+8 lines)
-fake-1 (B) built a challenge guarding the arena's flag: Arithmetic gate
+bob built a challenge guarding the arena's flag: Arithmetic gate
   difficulty 2 · 8 lines
   │ import sys
   │ data = sys.stdin.read().strip()
   │ parts = data.split()
   │ … (+4 lines)
-fake-1 (B) built a challenge guarding the arena's flag: Maze
+bob built a challenge guarding the arena's flag: Maze
   difficulty 1 · 11 lines
   │ import sys
   │ grid = ["S.#", ".##", "..G"]
   │ r = c = 0
   │ … (+8 lines)
-arena check on fake-1 (A)'s 'Mirror': solvable ✓
-arena check on fake-1 (A)'s 'Knock': solvable ✓
-arena check on fake-1 (B)'s 'Arithmetic gate': solvable ✓
-arena check on fake-1 (B)'s 'Maze': solvable ✓
-fake-1 (B) attacks 'Mirror' (try 1/4)… no flag
-fake-1 (B) attacks 'Mirror' (try 2/4)… captured the flag ✓ +19
-fake-1 (B) attacks 'Knock' (try 1/4)… no flag
-fake-1 (B) attacks 'Knock' (try 2/4)… no flag
-fake-1 (B) attacks 'Knock' (try 3/4)… no flag
-fake-1 (B) attacks 'Knock' (try 4/4)… no flag
-  → defended (attempts exhausted), fake-1 (A) +40
-fake-1 (A) attacks 'Arithmetic gate' (try 1/4)… captured the flag ✓ +40
-fake-1 (A) attacks 'Maze' (try 1/4)… no flag
-fake-1 (A) attacks 'Maze' (try 2/4)… no flag
-fake-1 (A) attacks 'Maze' (try 3/4)… no flag
-fake-1 (A) attacks 'Maze' (try 4/4)… no flag
-  → defended (attempts exhausted), fake-1 (B) +20
-scoreboard after round 2: fake-1 (A) 120  fake-1 (B) 58
+arena check on alice's 'Mirror': solvable ✓
+arena check on alice's 'Knock': solvable ✓
+arena check on bob's 'Arithmetic gate': solvable ✓
+arena check on bob's 'Maze': solvable ✓
+bob attacks 'Mirror' (try 1/4)… no flag
+bob attacks 'Mirror' (try 2/4)… captured the flag ✓ +19
+bob attacks 'Knock' (try 1/4)… no flag
+bob attacks 'Knock' (try 2/4)… no flag
+bob attacks 'Knock' (try 3/4)… no flag
+bob attacks 'Knock' (try 4/4)… no flag
+  → defended (attempts exhausted), alice +40
+alice attacks 'Arithmetic gate' (try 1/4)… captured the flag ✓ +40
+alice attacks 'Maze' (try 1/4)… no flag
+alice attacks 'Maze' (try 2/4)… no flag
+alice attacks 'Maze' (try 3/4)… no flag
+alice attacks 'Maze' (try 4/4)… no flag
+  → defended (attempts exhausted), bob +20
+scoreboard after round 2: alice 120  bob 58
 spend: $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  alice: in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  bob: in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 
 ────────────────────────────────────────────────
-winner: fake-1 (A) · fake-1 (A) 120  fake-1 (B) 58
+winner: alice · alice 120  bob 58
 30 model calls · in 11,176 · out 1,046 tokens · $0.0000 this match · $0.0031 of $33 cap
-  fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
-  fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  alice: in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+  bob: in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
