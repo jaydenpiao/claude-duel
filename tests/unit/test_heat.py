@@ -131,8 +131,8 @@ def test_invalid_challenges_neither_take_nor_give_heat() -> None:
 def test_heat_window_and_switch() -> None:
     chs, vals, _ = _round(LOOP, LOOP)
     old = [c.model_copy(update={"round": 5}) if c.id == "r2a" else c for c in chs]
-    assert heat(chs, vals, 2, LedgerRule()) == {"r2a": 100}
-    assert heat(old, vals, 5, LedgerRule()) == {}  # round 1 is outside a window of 2
+    assert heat(chs, vals, 2, LedgerRule(heat_window=2)) == {"r2a": 100}
+    assert heat(old, vals, 5, LedgerRule(heat_window=2)) == {}  # round 1 is outside a window of 2
     assert heat(chs, vals, 2, LedgerRule(heat_window=0)) == {}
 
 

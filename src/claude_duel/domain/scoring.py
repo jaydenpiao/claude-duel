@@ -189,23 +189,35 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     _check_stakes(facts)
     scores = classic(facts, rule)
     _cool(facts, rule, scores)
+    _stake_discounts(facts, rule, scores)
+    _keystone_bets(facts, rule, scores)
+    return scores
+
+
+def _stake_discounts(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """Each valid capture pays its discounted award (``_captures``) instead of the full classic award."""
     for attacker, classic_paid, paid in _captures(
         facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
     ).values():
         scores[attacker] -= classic_paid - paid
-    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
-    # heat line: the keystone bet and the novelty penalty stay independent.
-    for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
+
+
+def _keystone_bets(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """A revealed keystone: a defender-side bet (ADR 0006 holds); an invalid keystone forfeits.
+
+    Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    heat line: the keystone bet and the novelty penalty stay independent.
+    """
+    for author, cid in facts.keystones.items():
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
         if stone is None or stone.spec is None or ok is None or not ok.valid:
-            continue  # an invalid keystone forfeits
+            continue
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, max(1, hit.attempts), rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
             scores[author] += _defense(stone, facts.round_no, rule)
-    return scores
 
 
 def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
