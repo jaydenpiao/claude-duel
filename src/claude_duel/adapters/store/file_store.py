@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 from pathlib import Path
 
 from claude_duel.domain.errors import MatchLockedError, MatchNotFoundError
 from claude_duel.domain.models import MatchState
+
+_REPLAY_ID = re.compile(r"^[A-Za-z0-9-]+$")  # gcloud -I reads one path per line: no newlines or odd names
 
 
 class FileLock:
@@ -87,3 +90,21 @@ class FileMatchStore:
 
     def lock(self, match_id: str) -> FileLock:
         return FileLock(self._path(match_id).with_suffix(".lock"))
+
+    def replays(self) -> list[tuple[str, list[Path]]]:
+        """Each match's ``<id>.events.jsonl`` and ``<id>.json`` (absolute, existing); ``*.secret`` is never listed.
+
+        A match with any symlinked file is left out: a planted link could point anywhere (another secret, credentials).
+        """
+        root = self._root.resolve()
+        out: list[tuple[str, list[Path]]] = []
+        for secret in sorted(root.glob("*.secret")):
+            mid = secret.name.removesuffix(".secret")
+            if not _REPLAY_ID.match(mid):
+                continue
+            paths = (secret, root / f"{mid}.events.jsonl", root / f"{mid}.json")
+            if any(p.is_symlink() for p in paths):
+                continue
+            if files := [p for p in paths[1:] if p.is_file()]:
+                out.append((mid, files))
+        return out

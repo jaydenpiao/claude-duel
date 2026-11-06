@@ -6,7 +6,7 @@ import platform
 from dataclasses import dataclass, field
 
 from claude_duel.domain import events as ev
-from claude_duel.domain import stakes
+from claude_duel.domain import ghosts, stakes
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, capture_points, heat_of_state, score_round
 
@@ -75,6 +75,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
             folded.rules,
             keystones,
             folded.heat_refs,
+            ghosts.round_hits(folded, r),
         )
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")

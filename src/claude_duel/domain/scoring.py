@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
+from claude_duel.domain.ghosts import ghost_award
 from claude_duel.domain.heat import heat_lines
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
@@ -19,6 +20,7 @@ class RoundFacts:
     attacks: Mapping[str, Attack]  # by challenge id
     keystones: Mapping[str, str] = field(default_factory=dict)  # author -> revealed keystone challenge id (ledger)
     heat: Mapping[str, int] = field(default_factory=dict)  # challenge id -> heat_penalty line (ledger, ADR 0006 add.)
+    ghost_hits: Mapping[str, str] = field(default_factory=dict)  # challenge id -> ghost from the log (deep ghosts on)
 
 
 Scorer = Callable[[RoundFacts, ScoringRule], dict[str, int]]
@@ -33,6 +35,7 @@ def score_round(
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
     heat_refs: Mapping[str, Sequence[str]] | None = None,
+    ghost_hits: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     challenges = list(challenges)
     by_challenge = {a.challenge_id: a for a in attacks.values()}
@@ -44,6 +47,7 @@ def score_round(
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
         heat=round_heat(challenges, validations, by_challenge, round_no, rules, heat_refs),
+        ghost_hits=ghost_hits or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
 
@@ -72,15 +76,20 @@ def _captures(
     round_no: int,
     rule: ScoringRule,
 ) -> dict[str, tuple[str, int, int]]:
-    """Staked captures: challenge id -> (attacker, full solve award, what the stake paid). The one source for both
-    the ledger scorer's discount and the logged ``points``."""
+    """Ledger captures: challenge id -> (attacker, what classic paid, what the capture pays). Staked captures are
+    discounted by stake use; ghost captures (stake 0, deep ghosts) pay ``ghost_award``. The one source for both the
+    ledger scorer and the logged ``points``."""
     out = {}
     for ch in challenges:
         atk = attacks.get(ch.id)
         v = validations.get(ch.id)
-        if ch.spec is not None and v is not None and v.valid and atk is not None and atk.solved and atk.stake:
-            full = solve_award(ch.spec, round_no, atk.attempts, rule)
-            out[ch.id] = (atk.attacker, full, stake_award(full, atk.tokens_used, atk.stake))
+        if ch.spec is None or v is None or not v.valid or atk is None or not atk.solved:
+            continue
+        classic_paid = solve_award(ch.spec, round_no, max(1, atk.attempts), rule)  # ghosts log attempts=0
+        if atk.ghost is not None:
+            out[ch.id] = (atk.attacker, classic_paid, ghost_award(classic_paid))
+        elif atk.stake:
+            out[ch.id] = (atk.attacker, classic_paid, stake_award(classic_paid, atk.tokens_used, atk.stake))
     return out
 
 
@@ -116,7 +125,7 @@ def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             continue
         atk = facts.attacks.get(ch.id)
         if atk is not None and atk.solved:
-            scores[atk.attacker] += solve_award(ch.spec, facts.round_no, atk.attempts, rule)
+            scores[atk.attacker] += solve_award(ch.spec, facts.round_no, max(1, atk.attempts), rule)
         else:
             award = defense_award(ch.spec, facts.round_no, rule)
             scores[ch.author] += award // 2 if ch.probe_solved else award
@@ -177,17 +186,13 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     its author ``base // 2`` when captured. Heat is a separate penalty
     line on the author (``facts.heat``, ADR 0006 addendum); it never touches the defense award.
     """
-    for a in facts.attacks.values():
-        if a.solved and a.stake is None:
-            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
-        if a.solved and a.stake == 0:
-            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
+    _check_stakes(facts)
     scores = classic(facts, rule)
     _cool(facts, rule, scores)
-    for attacker, full, paid in _captures(
+    for attacker, classic_paid, paid in _captures(
         facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
     ).values():
-        scores[attacker] -= full - paid
+        scores[attacker] -= classic_paid - paid
     # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
     # heat line: the keystone bet and the novelty penalty stay independent.
     for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
@@ -197,7 +202,7 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
             continue  # an invalid keystone forfeits
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
-            scores[author] -= solve_award(stone.spec, facts.round_no, hit.attempts, rule) // 2
+            scores[author] -= solve_award(stone.spec, facts.round_no, max(1, hit.attempts), rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
             scores[author] += _defense(stone, facts.round_no, rule)
     return scores
@@ -216,6 +221,21 @@ def _defense(ch: Challenge, round_no: int, rule: ScoringRule) -> int:
     assert ch.spec is not None
     award = defense_award(ch.spec, round_no, rule)
     return award // 2 if ch.probe_solved else award
+
+
+def _check_stakes(facts: RoundFacts) -> None:
+    ids = {c.id for c in facts.challenges}  # attacks may span every round; check only this one's
+    for a in (a for a in facts.attacks.values() if a.challenge_id in ids):
+        if a.ghost is not None:  # free capture: only real if the log's ghost_run hit it, and staked 0 (refunded)
+            if not a.solved or facts.ghost_hits.get(a.challenge_id) != a.ghost:
+                raise EventLogCorruptError(f"tampered: ghost capture on {a.challenge_id} has no matching ghost_run hit")
+            if a.stake:
+                raise EventLogCorruptError(f"tampered: ghost capture on {a.challenge_id} was staked {a.stake}, not 0")
+            continue
+        if a.solved and a.stake is None:
+            raise EventLogCorruptError(f"ledger: solved attack on {a.challenge_id} has no stake")
+        if a.solved and a.stake == 0:
+            raise EventLogCorruptError(f"tampered: capture on {a.challenge_id}, which was staked 0 (skipped)")
 
 
 def stake_award(full: int, used: int, stake: int) -> int:
