@@ -121,15 +121,16 @@ def bradley_terry(rs: Iterable[Result], iters: int = 200) -> dict[str, float]:
 
 
 def ratings(rs: list[Result], boot: int = 200, seed: int = 0) -> list[Rating]:
-    """Ratings sorted best first; ``lo``/``hi`` are the bootstrap 2.5th/97.5th percentiles of the BT score."""
+    """Ratings sorted best first; ``lo``/``hi`` are the bootstrap 2.5th/97.5th percentiles of the BT score over the
+    resamples that include the entrant (no 1500 fill-in)."""
     rs = sorted(rs)
     point, display = bradley_terry(rs), elo(rs)
     rng = random.Random(seed)  # noqa: S311 - a reproducible bootstrap, not a secret
     samples: dict[str, list[float]] = {n: [] for n in point}
     for _ in range(boot):
         fit = bradley_terry([rng.choice(rs) for _ in rs], iters=60)
-        for n in point:
-            samples[n].append(fit.get(n, ELO_START))
+        for n, v in fit.items():  # an entrant left out of a resample has no estimate there (#138)
+            samples[n].append(v)
     count = {n: sum(n in (x.a, x.b) for x in rs) for n in point}
     out = []
     for n, v in point.items():
