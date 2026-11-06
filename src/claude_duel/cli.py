@@ -25,13 +25,17 @@ from claude_duel.app.container import (
     build_public_reader,
     build_results,
     build_store,
+    build_uploader,
     git_sha,
+    make_sandbox,
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
+from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -40,7 +44,7 @@ from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
-from claude_duel.domain.models import MatchState, Stage
+from claude_duel.domain.models import Event, MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
@@ -66,6 +70,7 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--view",
             choices=("auto", "arena", "commentary"),
@@ -108,7 +113,7 @@ def _parser() -> argparse.ArgumentParser:
     db_sub = db_p.add_subparsers(dest="db_cmd", required=True)
     db_sub.add_parser("migrate", help="apply pending results DB migrations (MIGRATE_DATABASE_URL, else DATABASE_URL)")
     out_p = sub.add_parser("export", help="write the static public JSON from the read-only views (EXPORT_DATABASE_URL)")
-    out_p.add_argument("--out", type=Path, default=Path("llm-duels-export.json"), help="output path")
+    out_p.add_argument("--out", type=Path, default=Path(DEFAULT_OUT), help="output path")
     exp = sub.add_parser("experiment", help="run a pre-registered experiment (paired framing micro-matches)")
     exp_sub = exp.add_subparsers(dest="experiment", required=True)
     stakes = exp_sub.add_parser("stakes", help="framing A/B/C, one shared run cap (docs/runs/stakes-prereg.md)")
@@ -117,8 +122,10 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--run-max-usd", type=float, help="raise run_max_usd for this run only (max $2.00)")
     stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
     stakes.add_argument("--format", choices=("text", "json"), default="text")
-    replay_p = sub.choices["replay"]
-    replay_p.add_argument("--transcript", action="store_true")
+    sub.choices["replay"].add_argument("--transcript", action="store_true")
+    sub.choices["replay"].add_argument(
+        "--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)"
+    )
     return p
 
 
@@ -205,7 +212,10 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    report = replay(build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id))
+    snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
+    if args.view == "arena":
+        _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
+    report = replay(snapshot, events)
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
@@ -214,12 +224,27 @@ def _dispatch(args: argparse.Namespace) -> int:
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
-    return 0 if report.consistent else 1
+    if not args.verify:
+        return 0 if report.consistent else 1
+    bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
+    print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
+    return 0 if report.consistent and not bad else 1
+
+
+def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:
+    view = ArenaView(Console(), mid, settings.budget.lifetime_max_usd, build_ledger(settings).total_usd, pace=pace)
+    try:
+        for e in events:
+            view(e)
+    finally:
+        view.close()
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
-    files = backup(settings.store_dir, bucket or settings.replay_bucket)
-    print(f"backed up {len(files)} replay files")
+    result = backup(build_store(settings), build_uploader(), bucket or settings.replay_bucket)
+    for why in result.skipped:
+        print(f"skipped {why}", file=sys.stderr)
+    print(f"backed up {len(result.files)} replay files")
     return 0
 
 

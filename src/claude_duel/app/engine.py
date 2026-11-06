@@ -12,10 +12,10 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, memory, policy, stakes, terrain, variety
+from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, flag_of, redact, shares_fragment
+from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -50,6 +50,7 @@ _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
 TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+SUMMARY_CHARS = 240  # reasoning summary kept per call in call_charged
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
@@ -238,6 +239,8 @@ class MatchEngine:
             output_tokens=completion.output_tokens,
             reasoning_tokens=completion.reasoning_tokens,
             truncated=completion.truncated,
+            purpose=request.purpose,
+            summary=self._summary(state, completion.reasoning_summary),
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
@@ -368,17 +371,21 @@ class MatchEngine:
         return spec, problem, probed
 
     @staticmethod
+    def _summary(state: MatchState, text: str) -> str:
+        """Reasoning summary for the log: one line, capped, every flag of the match and flag-shaped text redacted."""
+        line = scrub(" ".join(text.split()))
+        cids = set(state.challenges) | set(state.build_errors)
+        flags = [flag_of(state.secret, c, e) for c in cids for e in range(len(state.build_errors.get(c, [])) + 1)]
+        line = redact(line, tuple(flags)) if state.secret else line
+        return line[:SUMMARY_CHARS] + ("…" if len(line) > SUMMARY_CHARS else "")
+
+    @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
         """Invariant: no event ever carries any flag (or variant) of the match, live or from a dead try."""
-        if not state.secret:
-            return
         body = event.model_dump_json()
-        cids = set(state.challenges) | set(state.build_errors)
-        if isinstance(cid := event.data.get("challenge_id"), str):
-            cids.add(cid)
-        for cid in sorted(cids):
-            for epoch in range(len(state.build_errors.get(cid, [])) + 1):
-                assert_no_flag(body, flag_of(state.secret, cid, epoch), f"event {event.type}")
+        cid = event.data.get("challenge_id")
+        for flag in match_flags(state, [cid] if isinstance(cid, str) else []):
+            assert_no_flag(body, flag, f"event {event.type}")
 
     @staticmethod
     def _flag_for(state: MatchState, cid: str) -> str:
@@ -547,6 +554,7 @@ class MatchEngine:
 
     # -- stage 3: attack --------------------------------------------------
     def _attack(self, state: MatchState) -> None:
+        self._ghosts(state)  # before allocation: hits are public in the allocate prompt and force stake 0
         if state.rules.ledger is not None:
             self._draw_terrain(state)
             for agent in state.agents:
@@ -559,7 +567,13 @@ class MatchEngine:
             if key in state.attacks:
                 continue
             stake = self._stake(state, ch, attacker)
-            if stake == 0:
+            ghost = self._ghost_hit(state, ch.id)
+            if ghost is not None:
+                attack = Attack(
+                    challenge_id=ch.id, attacker=attacker, solved=True, attempts=0, tokens_used=0,
+                    reason=f"ghost: {ghost}", stake=None if stake is None else 0, ghost=ghost,
+                )  # fmt: skip
+            elif stake == 0:
                 attack = Attack(
                     challenge_id=ch.id, attacker=attacker, solved=False, attempts=0, tokens_used=0,
                     reason="skipped: stake 0", stake=0,
@@ -591,6 +605,34 @@ class MatchEngine:
         drawn = terrain.draw_round(state.seed, state.round, refs)
         self._checkpoint(state, ev.TERRAIN_DRAWN, round=state.round, terrains=drawn)
 
+    def _ghosts(self, state: MatchState) -> None:
+        """Deep: replay past captures' winning payloads against this round's valid challenges. $0 API, seeded order,
+        one checkpoint per run so resume never reruns; a challenge already hit is not run again."""
+        deep = state.rules.deep
+        if deep is None or not deep.ghosts:
+            return
+        valid = [c for c in state.round_challenges(state.round) if state.validations[c.id].valid and c.spec]
+        plan = ghosts.ghost_schedule(
+            state.seed, state.round, ghosts.ghosts_before(state, state.round), valid, deep.max_ghost_runs
+        )
+        for ghost, ch in plan:
+            run_key = ghosts.run_key(state.round, ghost.id, ch.id)
+            if run_key in state.ghost_runs or self._ghost_hit(state, ch.id) is not None:
+                continue
+            assert ch.spec is not None
+            flag = self._flag_for(state, ch.id)
+            run = self._run_challenge(ch.spec.source, ghost.payload, flag, state, "ghost")
+            hit = flag in run.stdout
+            sha = hashlib.sha256(redact(run.stdout, (flag,)).encode()).hexdigest()
+            self._checkpoint(
+                state, ev.GHOST_RUN, round=state.round, ghost_id=ghost.id, target=ch.id, hit=hit, stdout_sha=sha
+            )
+
+    @staticmethod
+    def _ghost_hit(state: MatchState, challenge_id: str) -> str | None:
+        """The ghost that captured ``challenge_id`` this round, if any."""
+        return ghosts.round_hits(state, state.round).get(challenge_id)
+
     @staticmethod
     def _targets(state: MatchState, attacker: str) -> list[Challenge]:
         """The opponent's challenges this round, in stake order (by id)."""
@@ -615,6 +657,7 @@ class MatchEngine:
         if key in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
+        hits = ghosts.round_hits(state, state.round)
         rows = [
             (
                 c.id,
@@ -624,6 +667,7 @@ class MatchEngine:
             )
             for c in targets
         ]
+        ghosted = frozenset(i for i, c in enumerate(targets) if c.id in hits)
         own = stakes.own_challenges(state.challenges, state.round, attacker)
         valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
         own_rows = (
@@ -638,7 +682,14 @@ class MatchEngine:
             pass
         else:
             prompt = agents.allocate_prompt(
-                attacker, state.round, rule.attack_tokens, rule.min_alloc, rows, self._memory(state, attacker), own_rows
+                attacker,
+                state.round,
+                rule.attack_tokens,
+                rule.min_alloc,
+                rows,
+                self._memory(state, attacker),
+                own_rows,
+                {i: hits[targets[i].id] for i in sorted(ghosted)},
             )
             for cid in state.challenges:
                 assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -651,7 +702,7 @@ class MatchEngine:
                         raw, pick = move.stakes, move.keystone
                 except MalformedOutputError:
                     self._metrics.incr("model.malformed", purpose="allocate")
-        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule)
+        chosen, fallback = stakes.settle_stakes(raw, len(targets), rule, ghosted)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
         # sealed with the allocation: same call, so it costs nothing extra
@@ -774,6 +825,7 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            ghosts.round_hits(state, state.round),
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
         lines = heat_of_state(state, state.round)

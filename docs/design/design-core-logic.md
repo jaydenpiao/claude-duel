@@ -2,7 +2,7 @@
 Status: draft for Elon, 2026-10-29. Design only, no repo code changed. Fight animation is parked (PR #178 stays as is, not merged).
 Changelog: 2026-10-29 — heat redesigned as a separate bounded defender-side penalty line (defense stays full base; ADR 0006 addendum §4.6); similarity = pre-order AST walk with documented threshold; invalid challenges excluded; heat disclosed in prompts and memory; tests 7, 9, 10 updated (overshoot bound, #171 caps).
 Changelog: 2026-10-29 — synced to build: keystone picked in the allocate call (not forge); keystone salt via sha256 (not mulberry32); terrain drawn after authoring+validation and logged before allocation/keystone commit; past keystones shown in memory.
-Fits: ADR 0007 (one `Rules` + `SCORERS` registry), ADR 0006 (defense >= capture; captures may only be discounted, never bonused), ADR 0004 (event-sourced replay), ADR 0003/0011 (sandbox), ADR 0009 (round memory), design-match-caps.md (CAPPED void).
+Fits: ADR 0007 (one `Rules` + `SCORERS` registry), ADR 0006 (defense >= capture; captures may only be discounted, never bonused), ADR 0004 (event-sourced replay), ADR 0003/0011 (sandbox), ADR 0009 (round memory), ADR 0014 (CAPPED void).
 
 ## 0. Urgent finding while researching prices
 - **gpt-4.1-nano was shut down by OpenAI on 2026-10-23** ([model page: "Status: Shut down"](https://developers.openai.com/api/docs/models/gpt-4.1-nano), [deprecation notice](https://community.openai.com/t/deprecation-notice-upcoming-model-shutdowns-in-2026/1379553)). The README and the difficulty gate (`gate_model`) still default to it. Live runs on it will fail.
@@ -150,7 +150,7 @@ $33 launch budget:
 - dev/tuning: $6 (~100 matches)
 - launch matches: $20 (~330 matches at $0.06)
 - reserve: $7
-- Set `lifetime_max_usd = 33` (the current default is 40) and `match_max_usd = 0.25`. A match that hits its cap becomes a CAPPED void (design-match-caps.md).
+- Set `lifetime_max_usd = 33` (the current default is 40) and `match_max_usd = 0.25`. A match that hits its cap becomes a CAPPED void (ADR 0014).
 
 ## 7. Acceptance tests
 1. **Determinism**: same seed + same recorded model outputs (fake provider) → byte-identical event log hash and final scores across 2 runs and across `duel replay`.

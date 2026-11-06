@@ -117,13 +117,22 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # Feature switches default off so a log pinned before they existed replays as written; the ledger
+    # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
-        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+        default=False, description="each author commits to one challenge: defended x2, captured -base//2"
     )
-    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
-    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    terrain: Literal["none", "seeded"] = "none"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+
+
+class DeepRule(_Frozen):
+    """Deep layer (design-core-logic deep-layer doc), phase 1: Ghost Codex replay, no imports. Ledger only."""
+
+    ghosts: bool = False  # replay past captures' payloads against the opponent's new challenges, $0 API
+    max_ghost_runs: int = Field(default=24, ge=0, le=200)  # sandbox runs per round
 
 
 RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
@@ -166,6 +175,7 @@ class Rules(_Frozen):
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
     ledger: LedgerRule | None = Field(default=None, description="Sealed Ledger stakes (mode ledger); None = off")
+    deep: DeepRule | None = Field(default=None, description="deep layer on top of ledger; None = off")
     wallet: WalletRule = WalletRule()
     clock: ClockRule = ClockRule()
     difficulty_gate: bool = Field(
@@ -196,6 +206,8 @@ class Rules(_Frozen):
                 f"ledger: {self.challenges_per_round} challenges per round cannot each get min_alloc "
                 f"{self.ledger.min_alloc} from attack_tokens {self.ledger.attack_tokens}"
             )
+        if self.deep is not None and self.ledger is None:
+            raise ValueError("deep layer needs ledger")
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
@@ -212,7 +224,7 @@ class Rules(_Frozen):
 class ChallengeSpec(_Frozen):
     """What an author submits."""
 
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
@@ -284,6 +296,7 @@ class Attack(_Frozen):
     usd_micros: int = 0
     stake: int | None = Field(default=None, ge=0)  # ledger mode: tokens the attacker allocated here (0 = skipped)
     stake_overshoot: int = Field(default=0, ge=0)  # ledger: tokens past the stake (input estimate gap only)
+    ghost: str | None = None  # deep: id of the ghost that captured this with no live attack (stake refunded)
 
     @classmethod
     def of(cls, challenge_id: str, attacker: str, history: list[AttackAttempt], *, solved: bool, reason: str) -> Attack:
@@ -381,6 +394,7 @@ class MatchState(BaseModel):
     scores: dict[str, int] = Field(default_factory=dict)
     scored_rounds: list[int] = Field(default_factory=list)
     attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
+    ghost_runs: dict[str, bool] = Field(default_factory=dict)  # "<round>:<ghost id>><challenge id>" -> hit
     build_errors: dict[str, list[str]] = Field(default_factory=dict)
     last_seq: int = -1
     failure: str | None = None
