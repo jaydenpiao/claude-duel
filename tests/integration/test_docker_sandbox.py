@@ -142,7 +142,8 @@ def test_runner_blocks_os_in_container(sb: DockerSandbox) -> None:  # round 2 N1
 
 
 def test_cpu_seconds_limit(sb: DockerSandbox) -> None:
-    r = sb.run("while True:\n    pass\n", "", FLAG, LIM.model_copy(update={"cpu_seconds": 1, "wall_seconds": 10}))
+    # Generous wall limit: on a loaded host, 1 CPU-second under --cpus can take well over 10s of wall time.
+    r = sb.run("while True:\n    pass\n", "", FLAG, LIM.model_copy(update={"cpu_seconds": 1, "wall_seconds": 60}))
     assert not r.timed_out
     assert r.killed_reason == "signal"
 
