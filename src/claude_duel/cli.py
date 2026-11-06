@@ -25,6 +25,7 @@ from claude_duel.app.container import (
     build_public_reader,
     build_results,
     build_store,
+    build_uploader,
     git_sha,
     migrate_results,
 )
@@ -212,6 +213,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.view == "arena":
         _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
     report = replay(build_store(settings).load(args.match_id), events)
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
@@ -231,8 +234,10 @@ def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> 
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
-    files = backup(settings.store_dir, bucket or settings.replay_bucket)
-    print(f"backed up {len(files)} replay files")
+    result = backup(build_store(settings), build_uploader(), bucket or settings.replay_bucket)
+    for why in result.skipped:
+        print(f"skipped {why}", file=sys.stderr)
+    print(f"backed up {len(result.files)} replay files")
     return 0
 
 
@@ -276,7 +281,7 @@ def _estimate(settings: Settings, mode: str | None, model: str | None) -> int:
     check_model_allowed(chosen)
     try:
         names = [mode] if mode else sorted(MODES)
-        rows = [estimate(preset(n), chosen, settings.budget) for n in names]
+        rows = [estimate(preset(n), chosen, settings.budget, settings.agents) for n in names]
     except KeyError as exc:
         raise ConfigError(str(exc.args[0])) from exc
     print(render(rows))
