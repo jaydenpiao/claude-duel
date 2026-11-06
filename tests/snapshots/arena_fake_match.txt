@@ -1,10 +1,20 @@
-claude duel · alice (fake-1) vs bob (fake-1)
+claude duel · alice vs bob
 round 2/2 · match snap
 
 alice ██████████████████████████████████████████████████   120 ▁█
 bob   ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
 alice ━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
+alice · done · in 5,440 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.00…
+  ▣ Knock: Find the input that reveals the flag (b64).
+  ▸ try 3 on 'Maze' → missed
+  ▸ attack: 247 in / 8 out · $0.0000 · 0.0s
+  ▸ try 4 on 'Maze' → missed
+bob · done · in 5,748 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000…
+  ▣ Maze: Find the input that reveals the flag (password).
+  ▸ try 3 on 'Knock' → missed
+  ▸ attack: 237 in / 8 out · $0.0000 · 0.0s
+  ▸ try 4 on 'Knock' → missed
 alice: in 5,440 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
 bob: in 5,748 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 now: match over
