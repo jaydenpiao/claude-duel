@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from claude_duel.domain.models import AgentSpec, MatchState, Stage
+from claude_duel.domain.series import decide
 
 ELO_START, ELO_K = 1500.0, 32.0
 
@@ -68,14 +69,8 @@ def entrant(agent: AgentSpec) -> str:
 
 
 def raw_winner(state: MatchState) -> str | None:
-    """Winner on raw ``scores`` (no ``score_offset``), then fewer attack tokens; None on a full tie."""
-    (a, sa), (b, sb) = sorted((x.name, state.scores.get(x.name, 0)) for x in state.agents)
-    if sa != sb:
-        return a if sa > sb else b
-    spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
-    if spent[a] != spent[b]:
-        return a if spent[a] < spent[b] else b
-    return None
+    """Winner on raw ``scores`` (no ``score_offset``) with the shared tiebreak (``series.decide``)."""
+    return decide(state, state.scores)
 
 
 def results(states: Iterable[MatchState]) -> list[Result]:
