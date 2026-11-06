@@ -10,6 +10,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
 - Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed; one role query for sync/export checks; psycopg moved to the optional `db` extra; export name in one constant (quality L23-L28, L30).
 - `duel estimate` prices an agent's own `max_output_tokens` (wallet cap still lowers it), so thinking-model runs are not understated.
 - `[[agents]] max_output_tokens` sets one agent's per-call output cap (thinking models), overriding `[rules] max_output_tokens`; the wallet cap still lowers it.

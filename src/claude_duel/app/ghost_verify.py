@@ -32,18 +32,13 @@ def verify_ghosts(state: MatchState, events: list[Event], sandbox: Sandbox) -> l
     return bad
 
 
-def _schedule_gaps(state: MatchState, events: list[Event]) -> list[str]:
-    """Replan each scored round as the engine does and compare it with the logged ghost runs."""
+def _planned_keys(state: MatchState, logged: dict[str, bool]) -> tuple[set[str], list[str]]:
+    """Replan each scored round as the engine does; report planned keys and missing logged runs."""
     deep = state.rules.deep
-    if deep is None or not deep.ghosts:
-        return []
-    logged = {
-        ghosts.run_key(int(str(e.data["round"])), str(e.data["ghost_id"]), str(e.data["target"])): bool(e.data["hit"])
-        for e in events
-        if e.type == ev.GHOST_RUN
-    }
-    bad: list[str] = []
+    assert deep is not None
+    assert deep.ghosts
     planned: set[str] = set()
+    bad: list[str] = []
     for rnd in sorted(state.scored_rounds):
         valid = [
             c
@@ -61,10 +56,27 @@ def _schedule_gaps(state: MatchState, events: list[Event]) -> list[str]:
                 bad.append(f"ghost run {key}: tampered: planned run missing from the log")
             elif logged[key]:
                 hit.add(ch.id)
-    scored = set(state.scored_rounds)
-    bad += [
+    return planned, bad
+
+
+def _unplanned(logged: dict[str, bool], planned: set[str], scored: set[int]) -> list[str]:
+    """Logged ghost runs that are not in the recomputed schedule for a scored round."""
+    return [
         f"ghost run {k}: tampered: not in the recomputed schedule"
         for k in sorted(logged)
         if k not in planned and int(k.split(":", 1)[0]) in scored
     ]
-    return bad
+
+
+def _schedule_gaps(state: MatchState, events: list[Event]) -> list[str]:
+    """Replan each scored round as the engine does and compare it with the logged ghost runs."""
+    deep = state.rules.deep
+    if deep is None or not deep.ghosts:
+        return []
+    logged = {
+        ghosts.run_key(int(str(e.data["round"])), str(e.data["ghost_id"]), str(e.data["target"])): bool(e.data["hit"])
+        for e in events
+        if e.type == ev.GHOST_RUN
+    }
+    planned, bad = _planned_keys(state, logged)
+    return bad + _unplanned(logged, planned, set(state.scored_rounds))
