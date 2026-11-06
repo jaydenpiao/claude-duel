@@ -24,6 +24,7 @@ _TAGS = (  # first match wins; names seen anywhere in the source
     ("state-machine", {"state", "transitions"}),
     ("checksum", {"ord", "sum", "crc32", "checksum"}),
 )
+TECHNIQUES = tuple(tag for tag, _ in _TAGS)  # every technique tag memory can emit (prophecy templates use them)
 
 
 def technique(source: str) -> str:
