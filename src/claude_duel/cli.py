@@ -69,13 +69,13 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--view",
             choices=("auto", "arena", "commentary"),
             default="auto",
             help="text output style; auto: arena on a terminal, commentary otherwise",
         )
-    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
@@ -122,9 +122,6 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--override-reason", default="", help="required with --run-max-usd; logged and ledgered")
     stakes.add_argument("--format", choices=("text", "json"), default="text")
     sub.choices["replay"].add_argument("--transcript", action="store_true")
-    sub.choices["replay"].add_argument(
-        "--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)"
-    )
     sub.choices["replay"].add_argument(
         "--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)"
     )
