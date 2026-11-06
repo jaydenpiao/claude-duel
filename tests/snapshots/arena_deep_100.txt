@@ -12,9 +12,6 @@ fake-1 (B): r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
 🛡 fake-1 (B) defended 'Mirror' +20
-· 🛡 fake-1 (B) defended 'Mirror' +20
-· fake-1 (B) +5 for fake-1 (A)'s 'Mirror'
-· fake-1 (B) +5 for fake-1 (A)'s 'Maze'
 · fake-1 (A) +10 for fake-1 (B)'s 'Arithmetic gate'
 · 🔥 fake-1 (A)'s 'Knock' heat 100% -20
 · 🔥 fake-1 (B)'s 'Maze' heat 100% -10
