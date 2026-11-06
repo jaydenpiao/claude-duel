@@ -134,9 +134,18 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
         raise ConfigError(f"cannot read config {path}: {exc}") from exc
 
 
+def _refuse_file_keys(data: dict[str, Any]) -> None:
+    """API keys come from env only; a key in a config file is refused."""
+    for key in data:
+        if key == "api_keys" or key.endswith("_api_key"):
+            envs = ", ".join(v.key_env for v in VENDORS.values())
+            raise ConfigError(f"config key {key!r} is not allowed; set the API key in env ({envs})")
+
+
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
     data = _read_toml(path)
+    _refuse_file_keys(data)
     _overlay(data, _ENV_SCALARS, env)
     for section, mapping in _ENV_SECTIONS.items():
         nested = dict(data.get(section, {}))
