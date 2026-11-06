@@ -179,6 +179,11 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
     for i, p in enumerate(m.players):
         parts.extend(_lane(p, COLORS[i % len(COLORS)]))
     parts.extend(
+        Text(f"{p.name}: {p.cost}", style=f"dim {COLORS[i % len(COLORS)]}", no_wrap=True, overflow="ellipsis")
+        for i, p in enumerate(m.players)
+        if p.cost
+    )
+    parts.extend(
         Text(f"{p.name}: {m.ledger[p.key]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
         for i, p in enumerate(m.players)
         if m.ledger.get(p.key)
@@ -339,8 +344,7 @@ class ArenaView(MatchFold):
         )
         p = self._player(a.attacker)
         if p is not None:
-            tried = _short(s.attempts[str(e.data["key"])][-1].payload, 30)
-            p.act(f"try {a.try_no} on {a.title!r}: {tried!r} → {'captured ✓' if a.captured else 'missed'}")
+            p.act(f"try {a.try_no} on {a.title!r} → {'captured ✓' if a.captured else 'missed'}")
         if a.captured:
             self.model.flash = f"⚔ {who(s, a.attacker)} captured {who(s, a.author)}'s flag ✓ +{a.award}"
             self.model.log(self.model.flash)
