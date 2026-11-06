@@ -5,8 +5,8 @@ alice ████████████████████████�
 bob   ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
 alice ━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-alice: in 5,312 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
-bob: in 5,620 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+alice: in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
+bob: in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 now: match over
 🛡 bob defended 'Maze' +20
 · ⚔ bob captured alice's flag ✓ +19
