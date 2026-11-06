@@ -11,7 +11,7 @@ def test_design_spec_mentions_resolve() -> None:
     shipped = {p.name for p in (ROOT / "docs" / "design").glob("design-*.md")}
     named = {
         (m, str(p.relative_to(ROOT)))
-        for base in ("src", "tests", "docs/adr")
+        for base in ("src", "tests", "docs/adr", "docs/design")
         for p in (ROOT / base).rglob("*")
         if p.suffix in {".py", ".md"}
         for m in NAME.findall(p.read_text(encoding="utf-8"))

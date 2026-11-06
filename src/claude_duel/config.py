@@ -41,9 +41,10 @@ class Settings(BaseModel):
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
-    docker_image: str = "python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2"
+    docker_image: str = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
+    replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)
 
     @model_validator(mode="before")
     @classmethod
@@ -79,6 +80,7 @@ _ENV_SCALARS = {
     "DUEL_METRICS": "metrics",
     "DUEL_DOCKER_RUNTIME": "docker_runtime",
     "DUEL_STORE_DIR": "store_dir",
+    "DUEL_REPLAY_BUCKET": "replay_bucket",
     "DUEL_LOG_LEVEL": "log_level",
     "DUEL_GATE_MODEL": "gate_model",
     "DUEL_PROVIDER_TIMEOUT": "provider_timeout",
@@ -142,9 +144,18 @@ def _check_scoring_available(rules: Rules) -> None:
         )
 
 
+def _refuse_file_keys(data: dict[str, Any]) -> None:
+    """API keys come from env only; a key in a config file is refused."""
+    for key in data:
+        if key == "api_keys" or key.endswith("_api_key"):
+            envs = ", ".join(v.key_env for v in VENDORS.values())
+            raise ConfigError(f"config key {key!r} is not allowed; set the API key in env ({envs})")
+
+
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
     data = _read_toml(path)
+    _refuse_file_keys(data)
     _overlay(data, _ENV_SCALARS, env)
     for section, mapping in _ENV_SECTIONS.items():
         nested = dict(data.get(section, {}))

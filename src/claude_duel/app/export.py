@@ -16,7 +16,9 @@ from claude_duel.domain.errors import FlagLeakError
 from claude_duel.domain.flags import scrub
 from claude_duel.ports import PublicSource, Row
 
-FORMAT = "llm-duels-export/1"
+EXPORT_NAME = "llm-duels-export"  # the post-rename public name, kept on purpose (quality L30)
+FORMAT = f"{EXPORT_NAME}/1"
+DEFAULT_OUT = f"{EXPORT_NAME}.json"
 FIELDS: dict[str, tuple[str, ...]] = {
     "matches": (
         "match_id",
