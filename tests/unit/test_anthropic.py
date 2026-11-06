@@ -51,6 +51,7 @@ def test_request_shape_and_usage() -> None:
 
     c = _claude(httpx.MockTransport(h)).complete(REQ)
     assert (c.text, c.input_tokens, c.output_tokens) == ('{"a": 1}', 11, 5)
+    assert c.reasoning_summary == "hmm"  # the thinking block (a summary on current Claude models) is kept
 
 
 def test_cache_tokens_count_as_input() -> None:
