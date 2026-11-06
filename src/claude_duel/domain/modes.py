@@ -36,13 +36,13 @@ MODES: dict[str, Rules] = {
     "blitz": Rules(
         mode="blitz", clock=ClockRule(bank_tokens=40_000, increment_tokens=500), scoring=ScoringRule(kind="timed")
     ),
-    # Sealed Ledger step 2 (design-core-logic.md): stakes + ledger scorer; keystone and terrain come in step 3.
+    # Sealed Ledger (design-core-logic.md): stakes, keystone, seeded terrain and novelty heat.
     "ledger": Rules(
         mode="ledger",
         challenges_per_round=3,
         max_attempts=3,
         scoring=ScoringRule(kind="ledger"),
-        ledger=LedgerRule(),
+        ledger=LedgerRule(keystone=True, terrain="seeded", heat_window=2),
         clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
     ),
