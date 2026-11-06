@@ -5,7 +5,7 @@ allowed, so an agent can overshoot by at most one call (same convention as ``Cos
 """
 
 from claude_duel.domain.errors import WalletEmptyError
-from claude_duel.domain.models import MatchState, Usage
+from claude_duel.domain.models import MatchState, Rules, Usage
 
 
 def empty(state: MatchState, agent: str) -> str | None:
@@ -39,3 +39,13 @@ def clock_fallen(state: MatchState, agent: str) -> str | None:
 def check(state: MatchState, agent: str) -> None:
     if (reason := empty(state, agent)) is not None:
         raise WalletEmptyError(reason)
+
+
+def wallets_exceed(rules: Rules, agents: int, match_max_usd: float) -> str | None:
+    """Warning when the per-agent USD wallets sum above ``match_max_usd``: the match cap then ends the match before
+    every wallet can be spent, so later agents get less than their wallet."""
+    per = rules.wallet.per_agent_usd
+    if per is None or per * agents <= match_max_usd:
+        return None
+    total = per * agents
+    return f"wallets {agents} x ${per} = ${total:.4f} exceed match_max_usd ${match_max_usd}; the match cap binds first"
