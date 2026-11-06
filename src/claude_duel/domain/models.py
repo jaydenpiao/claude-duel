@@ -199,6 +199,16 @@ class Rules(_Frozen):
         return data
 
     @model_validator(mode="after")
+    def _ledger_pairs_with_kind(self) -> Rules:
+        """Ledger stakes and ledger scoring come together (review M18): one without the other fails mid-match."""
+        if (self.ledger is None) == (self.scoring.kind == "ledger"):
+            raise ValueError(
+                'ledger scoring needs [rules.ledger] and [rules.ledger] needs scoring kind "ledger"; '
+                'use mode = "ledger"'
+            )
+        return self
+
+    @model_validator(mode="after")
     def _ledger_k_fits(self) -> Rules:
         """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
         if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
