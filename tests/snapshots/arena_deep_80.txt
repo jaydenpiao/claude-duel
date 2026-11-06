@@ -1,21 +1,24 @@
-claude duel · alice (fake-1) vs bob (fake-1)
+claude duel · fake-1 (A) vs fake-1 (B)
 round 2/2 · match deep
 
-alice ██████████████████████████████████████████████████    56 █▁
-bob   █████████████████████████████████░░░░░░░░░░░░░░░░░    37 █▁
-alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
+fake-1 (A) ██████████████████████████████████████████████████    56 █▁
+fake-1 (B) █████████████████████████████████░░░░░░░░░░░░░░░░░    37 █▁
+fake-1 (A) ━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fake-1 (B)
 
-alice: in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defe…
-bob: in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
-alice: r2 stakes 0·6k·6k (fallback) · keystone #1
-bob: r2 stakes 0·12k·0 (fallback) · keystone #1
+fake-1 (A): in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003…
+fake-1 (B): in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002…
+fake-1 (A): r2 stakes 0·6k·6k (fallback) · keystone #1
+fake-1 (B): r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
-🛡 bob defended 'Mirror' +20
-· alice +10 for bob's 'Arithmetic gate'
-· 🔥 alice's 'Knock' heat 100% -20
-· 🔥 bob's 'Maze' heat 100% -10
-· 🔥 bob's 'Mirror' heat 100% -10
-· after round 2: alice 56  bob 37 · alice leads
+🛡 fake-1 (B) defended 'Mirror' +20
+· 🛡 fake-1 (B) defended 'Mirror' +20
+· fake-1 (B) +5 for fake-1 (A)'s 'Mirror'
+· fake-1 (B) +5 for fake-1 (A)'s 'Maze'
+· fake-1 (A) +10 for fake-1 (B)'s 'Arithmetic gate'
+· 🔥 fake-1 (A)'s 'Knock' heat 100% -20
+· 🔥 fake-1 (B)'s 'Maze' heat 100% -10
+· 🔥 fake-1 (B)'s 'Mirror' heat 100% -10
+· after round 2: fake-1 (A) 56  fake-1 (B) 37 · fake-1 (A) leads
 $0.0019 this match · $0.0000 of $50 cap
-🏆 winner: alice · alice 56  bob 37
+🏆 winner: fake-1 (A) · fake-1 (A) 56  fake-1 (B) 37

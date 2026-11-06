@@ -35,6 +35,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Arena, commentary and match card label each side by its model name (with (A)/(B) when both sides run the same model) instead of agent names.
 - `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
 - Deep layer phase 1: Ghost Codex replay (`ledger_deep` preset, `ghost_run` events, ghost captures pay max(1, full // 4); #210).
 - Arena ticker logs each terrain draw and each heat penalty line (#211).
