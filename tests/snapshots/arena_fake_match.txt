@@ -1,18 +1,18 @@
-claude duel · alice (fake-1) vs bob (fake-1)
+claude duel · fake-1 (A) vs fake-1 (B)
 round 2/2 · match snap
 
-alice ██████████████████████████████████████████████████   120 ▁█
-bob   ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
-alice ━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
+fake-1 (A) ██████████████████████████████████████████████████   120 ▁█
+fake-1 (B) ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
+fake-1 (A) ━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ fake-1 (B)
 
-alice: in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
-bob: in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+fake-1 (A): in 5,436 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/…
+fake-1 (B): in 5,740 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/…
 now: match over
-🛡 bob defended 'Maze' +20
-· ⚔ bob captured alice's flag ✓ +19
-· 🛡 alice defended 'Knock' +40
-· ⚔ alice captured bob's flag ✓ +40
-· 🛡 bob defended 'Maze' +20
-· after round 2: alice 120  bob 58 · alice leads
+🛡 fake-1 (B) defended 'Maze' +20
+· ⚔ fake-1 (B) captured fake-1 (A)'s flag ✓ +19
+· 🛡 fake-1 (A) defended 'Knock' +40
+· ⚔ fake-1 (A) captured fake-1 (B)'s flag ✓ +40
+· 🛡 fake-1 (B) defended 'Maze' +20
+· after round 2: fake-1 (A) 120  fake-1 (B) 58 · fake-1 (A) leads
 $0.0000 this match · $0.0031 of $33 cap
-🏆 winner: alice · alice 120  bob 58
+🏆 winner: fake-1 (A) · fake-1 (A) 120  fake-1 (B) 58
