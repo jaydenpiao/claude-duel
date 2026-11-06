@@ -149,13 +149,13 @@ def frame(m: ArenaModel, width: int, spinner: RenderableType | None = None) -> G
         for i, p in enumerate(m.players)
         if p.cost
     )
-    if m.ghosts:
-        parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
     parts.extend(
         Text(f"{p.name}: {m.ledger[p.name]}", style=COLORS[i % len(COLORS)], no_wrap=True, overflow="ellipsis")
         for i, p in enumerate(m.players)
         if m.ledger.get(p.name)
     )
+    if m.ghosts:
+        parts.append(Text(f"GHOSTS {m.ghosts}", style="dim", no_wrap=True, overflow="ellipsis"))
     parts.append(now)
     if m.flash:
         parts.append(Text(m.flash, style="bold", no_wrap=True, overflow="ellipsis"))
@@ -296,6 +296,17 @@ class ArenaView(MatchFold):
         lead = leader(s)
         self.model.log(f"after round {e.data['round']}: {board(s)}" + (f" · {lead} leads" if lead else " · level"))
 
+    def _staked(self, s: MatchState, e: Event) -> None:
+        stakes = "·".join(_k(int(x)) for x in cast("list[int]", e.data["stakes"]))
+        note = " (fallback)" if e.data.get("fallback") else ""
+        self.model.ledger[str(e.data["agent"])] = f"r{e.data['round']} stakes {stakes}{note}"
+
+    def _revealed(self, s: MatchState, e: Event) -> None:
+        idx = e.data.get("index")
+        key = f"keystone #{cast('int', idx) + 1}" if idx is not None else "no keystone"
+        agent = str(e.data["agent"])
+        self.model.ledger[agent] = " · ".join(x for x in (self.model.ledger.get(agent, ""), key) if x)
+
     def _ghost_ran(self, s: MatchState, e: Event) -> None:
         m = moment_of(e)
         if m is None:
@@ -317,17 +328,6 @@ class ArenaView(MatchFold):
                 per.setdefault(ch.author, []).append(f"#{n} {t.partition(':')[0]}")
         parts = [f"{a} {', '.join(sorted(ts, key=lambda x: int(x[1:].split()[0])))}" for a, ts in sorted(per.items())]
         self.model.log(f"terrain r{rnd}: {' · '.join(parts) or 'none'}")
-
-    def _staked(self, s: MatchState, e: Event) -> None:
-        stakes = "·".join(_k(int(x)) for x in cast("list[int]", e.data["stakes"]))
-        note = " (fallback)" if e.data.get("fallback") else ""
-        self.model.ledger[str(e.data["agent"])] = f"r{e.data['round']} stakes {stakes}{note}"
-
-    def _revealed(self, s: MatchState, e: Event) -> None:
-        idx = e.data.get("index")
-        key = f"keystone #{cast('int', idx) + 1}" if idx is not None else "no keystone"
-        agent = str(e.data["agent"])
-        self.model.ledger[agent] = " · ".join(x for x in (self.model.ledger.get(agent, ""), key) if x)
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self.model.log("resuming where the match stopped")
