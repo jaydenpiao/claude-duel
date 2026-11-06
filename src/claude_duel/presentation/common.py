@@ -31,6 +31,8 @@ HOOKS = {
     ev.MATCH_FAILED: "_failed",
     ev.MATCH_RECOVERED: "_recovered",
     ev.FINDING_FLAGGED: "_flagged",
+    ev.CALL_CHARGED: "_charged",
+    ev.BUILD_REJECTED: "_rejected",
     ev.GHOST_RUN: "_ghost_ran",
 }
 
@@ -113,10 +115,16 @@ def verdict_text(s: MatchState, e: Event) -> str:
 
 
 def labels(agents: Sequence[AgentSpec]) -> dict[str, str]:
-    """Display label per agent name: its model, with (A)/(B) when both sides run the same one."""
+    """Display label per agent: its model when models differ; its configured name when they match.
+
+    Same provider model id (both ``fake-1``, both ``gpt-5-nano``, …) used to append ``(A)``/``(B)`` and
+    hide config names like ``fake-1-s2`` / ``fake-1-s5``. Prefer the agent name in that case so skill tags
+    and other explicit display names stay on screen (CLI arena, commentary, card).
+    """
     models = [a.model or a.name for a in agents]
-    same = len(set(models)) < len(models)
-    return {a.name: f"{m} ({chr(65 + i)})" if same else m for i, (a, m) in enumerate(zip(agents, models, strict=True))}
+    if len(set(models)) < len(models):
+        return {a.name: a.name for a in agents}
+    return {a.name: m for a, m in zip(agents, models, strict=True)}
 
 
 def who(s: MatchState, name: str) -> str:
