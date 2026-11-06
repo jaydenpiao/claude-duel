@@ -31,6 +31,7 @@ HOOKS = {
     ev.MATCH_FAILED: "_failed",
     ev.MATCH_RECOVERED: "_recovered",
     ev.FINDING_FLAGGED: "_flagged",
+    ev.GHOST_RUN: "_ghost_ran",
 }
 
 

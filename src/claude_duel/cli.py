@@ -27,12 +27,14 @@ from claude_duel.app.container import (
     build_store,
     build_uploader,
     git_sha,
+    make_sandbox,
     migrate_results,
 )
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import write as write_export
+from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -67,13 +69,13 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--view",
             choices=("auto", "arena", "commentary"),
             default="auto",
             help="text output style; auto: arena on a terminal, commentary otherwise",
         )
-    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--pace", type=float, default=0.0, help="arena view: seconds to pause after each event (demos)"
         )
@@ -121,7 +123,7 @@ def _parser() -> argparse.ArgumentParser:
     stakes.add_argument("--format", choices=("text", "json"), default="text")
     sub.choices["replay"].add_argument("--transcript", action="store_true")
     sub.choices["replay"].add_argument(
-        "--view", choices=("arena",), help="redraw the match in the arena view from its log ($0)"
+        "--verify", action="store_true", help="re-run logged ghost runs in the sandbox ($0 API)"
     )
     return p
 
@@ -209,10 +211,10 @@ def _dispatch(args: argparse.Namespace) -> int:
     }
     if args.cmd in handlers:
         return handlers[args.cmd]()
-    events = build_event_log(settings).read(args.match_id)
+    snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
     if args.view == "arena":
         _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
-    report = replay(build_store(settings).load(args.match_id), events)
+    report = replay(snapshot, events)
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
@@ -221,7 +223,11 @@ def _dispatch(args: argparse.Namespace) -> int:
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
-    return 0 if report.consistent else 1
+    if not args.verify:
+        return 0 if report.consistent else 1
+    bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
+    print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
+    return 0 if report.consistent and not bad else 1
 
 
 def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:
