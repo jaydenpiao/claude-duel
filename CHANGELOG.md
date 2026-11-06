@@ -22,6 +22,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
+- `scoring = "ledger"` refused until the arena wiring lands (#208).
+- `gpt-4.1-nano` dropped from the allowlist; gpt-5-nano is the low default (#209).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
 - Hypothesis runs without a per-example deadline in CI.
@@ -59,6 +61,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Ledger keystone bet (#193), seeded terrain (#194), novelty heat (#198).
 - gpt-5 family routed via the Responses API with reasoning tokens counted.
 - Integrity control and attacker solver parity (ADR 0015).
+- Results index on Cloud SQL: `duel sync`, `duel db migrate` and `duel export` (ADR 0012, #151).
+- Provider registry: vendors declared once, shared HTTP error mapping, Anthropic adapter (ADR 0013, #154).
+- SECURITY.md interim private contact (#215).
 - Ledger keystone commit-reveal: each author seals one challenge (#193).
 - Ledger seeded terrain: a public stdin transform per challenge, drawn before allocation (#194).
 - Ledger novelty heat: an author's challenge close to their own recent ones earns less defense (#198).
