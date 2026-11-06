@@ -44,7 +44,7 @@ from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
-from claude_duel.domain.models import MatchState, Stage
+from claude_duel.domain.models import Event, MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
@@ -70,6 +70,7 @@ def _parser() -> argparse.ArgumentParser:
         sub.choices[name].add_argument(
             "--format", choices=("text", "json"), default="text", help="text: live commentary; json: one summary"
         )
+    for name in ("run", "resume", "replay"):
         sub.choices[name].add_argument(
             "--view",
             choices=("auto", "arena", "commentary"),
@@ -212,6 +213,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.cmd in handlers:
         return handlers[args.cmd]()
     snapshot, events = build_store(settings).load(args.match_id), build_event_log(settings).read(args.match_id)
+    if args.view == "arena":
+        _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
     report = replay(snapshot, events)
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
@@ -226,6 +229,15 @@ def _dispatch(args: argparse.Namespace) -> int:
     bad = verify_ghosts(snapshot, events, make_sandbox(settings, snapshot.agents))
     print(f"ghost runs verified {'✓' if not bad else '✗ ' + ', '.join(bad)}")
     return 0 if report.consistent and not bad else 1
+
+
+def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:
+    view = ArenaView(Console(), mid, settings.budget.lifetime_max_usd, build_ledger(settings).total_usd, pace=pace)
+    try:
+        for e in events:
+            view(e)
+    finally:
+        view.close()
 
 
 def _backup(settings: Settings, bucket: str | None) -> int:
