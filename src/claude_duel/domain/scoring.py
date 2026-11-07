@@ -1,6 +1,6 @@
 """Deterministic, pure scoring."""
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
@@ -34,6 +34,7 @@ def score_round(
     attacks: Mapping[str, Attack],
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
+    heat_refs: Mapping[str, Sequence[str]] | None = None,
     ghost_hits: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     challenges = list(challenges)
@@ -45,7 +46,7 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
-        heat=round_heat(challenges, validations, by_challenge, round_no, rules),
+        heat=round_heat(challenges, validations, by_challenge, round_no, rules, heat_refs),
         ghost_hits=ghost_hits or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
@@ -98,19 +99,20 @@ def round_heat(
     attacks: Mapping[str, Attack],
     round_no: int,
     rules: Rules,
+    refs: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
     """The round's ``heat_penalty`` lines (challenge id -> points), logged in ``round_scored.heat``; {} off ledger."""
     if rules.ledger is None:
         return {}
     return heat_lines(
-        challenges, validations, attacks, round_no, rules.ledger, lambda ch: _defense(ch, round_no, rules.scoring)
+        challenges, validations, attacks, round_no, rules.ledger, lambda ch: _defense(ch, round_no, rules.scoring), refs
     )
 
 
 def heat_of_state(state: MatchState, round_no: int) -> dict[str, int]:
     """``round_heat`` for a folded match: what ``round_scored.heat`` records (and replay recomputes)."""
     attacks = {a.challenge_id: a for a in state.attacks.values()}
-    return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules)
+    return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules, state.heat_refs)
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
