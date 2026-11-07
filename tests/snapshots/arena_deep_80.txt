@@ -22,10 +22,10 @@ bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
 🛡 bob defended 'Mirror' +20
-· 🛡 bob defended 'Mirror' +20
-· bob +5 for alice's 'Mirror'
-· bob +5 for alice's 'Maze'
 · alice +10 for bob's 'Arithmetic gate'
+· 🔥 alice's 'Knock' heat 100% -20
+· 🔥 bob's 'Maze' heat 100% -10
+· 🔥 bob's 'Mirror' heat 100% -10
 · after round 2: alice 56  bob 37 · alice leads
 $0.0019 this match · $0.0000 of $50 cap
 🏆 winner: alice · alice 56  bob 37
