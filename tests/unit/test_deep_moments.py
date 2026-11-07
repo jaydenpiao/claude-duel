@@ -18,6 +18,7 @@ from claude_duel.domain.flags import FLAG_PATTERN
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.modes import preset
 from claude_duel.domain.moments import GHOST_STRIKE, moments
+from claude_duel.domain.stakes import own_challenges
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.presentation.arena import ArenaView, frame
 from claude_duel.presentation.common import who
@@ -116,3 +117,27 @@ def test_ghost_row_is_hidden_without_ghosts(tmp_path: Path) -> None:
     play(Settings(store_dir=tmp_path, sandbox="subprocess", rules=rules), "plain", InMemoryMetrics(), view)
     view.close()
     assert "GHOSTS" not in _text(view, 100)
+
+
+def test_arena_logs_each_terrain_draw_and_heat_line(deep: tuple[Tap, MatchState]) -> None:
+    tap, state = deep
+    drawn = [e for e in tap.events if e.type == ev.TERRAIN_DRAWN]
+    heat = [line for e in tap.events if e.type == ev.ROUND_SCORED for line in e.data.get("heat", {}).values() if line]
+    seen = "\n".join(tap.frames)
+    assert drawn
+    for e in drawn:
+        for cid, t in e.data["terrains"].items():
+            ch = state.challenges[cid]
+            n = [c.id for c in own_challenges(state.challenges, ch.round, ch.author)].index(cid) + 1
+            assert re.search(rf"terrain r{e.data['round']}: .*{ch.author} [^·]*#{n} {t.partition(':')[0]}\b", seen)
+    assert heat
+    assert all(re.search(rf"heat \d+% -{line}\b", seen) for line in heat)
+
+
+def test_arena_hides_a_zero_heat_line_at_the_threshold(deep: tuple[Tap, MatchState]) -> None:
+    tap, state = deep
+    scored = next(e for e in tap.events if e.type == ev.ROUND_SCORED)
+    cid = next(c.id for c in state.challenges.values() if c.round == scored.data["round"])
+    view = ArenaView(Console(file=io.StringIO()), "deep", 50.0, lambda: 0.0)
+    view._scored(state, scored.model_copy(update={"data": {**scored.data, "heat": {cid: 0}}}))
+    assert not any("🔥" in line for line in view.model.ticker)
