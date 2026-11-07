@@ -7,7 +7,8 @@ from claude_duel.config import load_settings
 
 def _cfg(tmp_path: Path, kind: str) -> Path:
     p = tmp_path / "c.toml"
-    p.write_text(f'[rules.scoring]\nkind = "{kind}"\n')
+    ledger = "[rules.ledger]\n" if kind == "ledger" else ""  # M18: ledger scoring needs its stakes section
+    p.write_text(f'[rules.scoring]\nkind = "{kind}"\n{ledger}')
     return p
 
 
