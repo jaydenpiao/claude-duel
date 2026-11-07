@@ -17,7 +17,7 @@ from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain.models import Event, Rules
 from claude_duel.observability import InMemoryMetrics
-from claude_duel.presentation.arena import ArenaModel, ArenaView, Player, frame, meter, sparkline, tug
+from claude_duel.presentation.arena import ArenaModel, ArenaView, Player, _lane, _short, frame, meter, sparkline, tug
 from tests.helpers import FLAG, forfeit_events
 
 SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "arena_fake_match.txt"
@@ -122,3 +122,29 @@ def test_attack_started_animates_and_old_logs_replay(tmp_path: Path) -> None:
         ev.apply(folded, e)
     assert folded.scores == state.scores
     assert folded.attempts == state.attempts
+
+
+def test_replay_rewatches_in_arena(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUEL_SANDBOX", "subprocess")
+    assert cli.main(["run", "--match-id", "r", "--format", "json"]) == 0
+    capsys.readouterr()
+    assert cli.main(["replay", "r", "--view", "arena", "--pace", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "🏆 winner:" in out
+    assert "replay consistent=True" in out
+
+
+def test_lane_shows_phase_actions_preview_and_thought_without_flags() -> None:
+    p = Player("m1", "m1", key="alice", phase="attacking", preview=_short("Maze: DUEL{" + "ab" * 16 + "}"))
+    for i in range(5):
+        p.act(f"try {i}")
+    p.thought = "route around the wall"
+    text = "\n".join(t.plain for t in _lane(p, "cyan"))
+    assert "m1 · attacking" in text
+    assert "try 4" in text
+    assert "try 1" not in text  # the tail keeps the last 3
+    assert "💭 route around the wall" in text
+    assert "DUEL{ab" not in text
