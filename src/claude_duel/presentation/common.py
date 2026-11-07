@@ -34,6 +34,7 @@ HOOKS = {
     ev.CALL_CHARGED: "_charged",
     ev.BUILD_REJECTED: "_rejected",
     ev.GHOST_RUN: "_ghost_ran",
+    ev.TERRAIN_DRAWN: "_terrain",
 }
 
 
