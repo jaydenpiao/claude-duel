@@ -44,6 +44,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
+- Ledger heat (design R5): the comparison set now includes the opponent's earlier valid challenges in the match and the same model's valid challenges from its last 3 matches (frozen into `match_created.heat_refs`, so replay is exact). Penalty line, cap and ADR 0006 addendum unchanged.
 - Arena: a live lane per side (phase, challenge preview, last actions with tokens/$/seconds, try inputs and results, solvability verdicts, reasoning summary). `call_charged` now records the call purpose and a short, flag-redacted reasoning summary when the vendor returns one.
 - Arena, commentary and match card label each side by its model name (with (A)/(B) when both sides run the same model) instead of agent names.
 - `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
