@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from claude_duel.app.engine import junk_inputs
+from claude_duel.app.engine import VALIDATION_TIME_FACTOR, junk_inputs
 from claude_duel.domain.flags import derive_flag, flag_of, shares_fragment
 from tests.helpers import run_bob
 
@@ -83,7 +83,8 @@ def test_a_check_that_hangs_on_wrong_input_is_rejected_fast(make_engine, new_sta
     took = time.monotonic() - t
     assert not state.validations[ch.id].valid
     assert any("timed out" in e for e in state.build_errors.get(ch.id, [])), state.build_errors
-    assert took < 2 * state.limits.wall_seconds + 8  # one probe timeout plus the fast runs and engine overhead
+    # early-exit on first hang; +1 wall +2s slack for docker/xdist overhead (CI hit ~10s vs 2*wall+2)
+    assert took < (VALIDATION_TIME_FACTOR + 1) * state.limits.wall_seconds + 2
 
 
 def test_validation_over_its_time_budget_is_rejected(make_engine, new_state, monkeypatch) -> None:  # type: ignore[no-untyped-def]
