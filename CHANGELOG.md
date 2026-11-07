@@ -6,11 +6,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
+- Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
+- Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).
 - Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
 - Program-form build prompt now says the solver runs alone (it cannot call the source's check or helpers), matching the engine; the NameError repair hint says the same. Composing was rejected: program sources run top-level stdin/FLAG code.
 - Prophecy templates take technique tags from `memory.TECHNIQUES` and derive `all_in` from `LedgerRule.attack_tokens`; export view names checked against `PUBLIC_VIEWS`; sync run status typed; one role query for sync/export checks; psycopg moved to the optional `db` extra; export name in one constant (quality L23-L28, L30).
@@ -42,6 +45,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Arena, commentary and match card label each side by its model name (with (A)/(B) when both sides run the same model) instead of agent names.
 - `duel replay <id> --view arena [--pace S]` re-watches a finished match in the arena view from its log ($0).
 - Deep layer phase 1: Ghost Codex replay (`ledger_deep` preset, `ghost_run` events, ghost captures pay max(1, full // 4); #210).
+- Arena ticker logs each terrain draw and each heat penalty line (#211).
 - `duel backup` refuses a bucket without public access prevention enforced, and also scans for octal, binary, base85 and base64/zlib-encoded flags before upload.
 - Ledger `round_scored` logs each staked capture's points, and replay checks them (#199).
 - `duel sync`, `duel db migrate` and `duel export` for the results index (#151).

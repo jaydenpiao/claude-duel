@@ -19,7 +19,7 @@ from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
-from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
+from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import capture_points
 from claude_duel.domain.series import game_winner
@@ -115,10 +115,23 @@ def test_estimate_ledger_bounded_by_stakes() -> None:
     assert row.tokens < plain.tokens
 
 
+LEDGER = ScoringRule(kind="ledger")
+
+
 def test_ledger_rules_reject_unfundable_k() -> None:
     with pytest.raises(ValidationError, match="min_alloc"):
-        Rules(challenges_per_round=4, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
-    assert Rules(challenges_per_round=3, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+        Rules(challenges_per_round=4, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
+    assert Rules(challenges_per_round=3, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+
+
+def test_ledger_scoring_needs_ledger_rules() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(scoring=LEDGER)
+
+
+def test_ledger_rules_need_ledger_scoring() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(ledger=LedgerRule())
 
 
 def _log_hash(event_log, match_id: str) -> str:  # type: ignore[no-untyped-def]
@@ -377,6 +390,19 @@ def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) 
     assert any(a.solved and a.stake for a in state.attacks.values())
     result = replay(state, old)
     assert result.consistent, result.mismatches
+
+
+def test_missing_stakes_skip_attack_not_unlimited(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Ledger with no stakes for an attacker must skip attacks (stake 0), not leave them uncapped (#255)."""
+    eng = make_engine()
+    eng._allocate = lambda state, attacker: None  # type: ignore[method-assign]
+    state = eng.run(_ledger(new_state, "no-stakes"))
+    assert state.stage is Stage.COMPLETE
+    assert state.stakes == {}
+    assert state.attacks
+    assert all(a.stake == 0 and a.attempts == 0 and a.reason == "skipped: stake 0" for a in state.attacks.values())
+    # no attack calls: every challenge was skipped at stake 0
+    assert not any(e.type == ev.ATTACK_STARTED for e in event_log.read("no-stakes"))
 
 
 def test_resume_does_not_repay_allocate(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
