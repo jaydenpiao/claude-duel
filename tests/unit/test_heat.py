@@ -10,8 +10,17 @@ from hypothesis import strategies as st
 from claude_duel.app.agents import build_prompt
 from claude_duel.app.replay import _python_warning
 from claude_duel.domain import events as ev
-from claude_duel.domain.heat import heat, heat_lines, penalty, similarity, tokens
-from claude_duel.domain.models import Attack, Challenge, Event, LedgerRule, Validation
+from claude_duel.domain.heat import heat, heat_lines, history_refs, penalty, similarity, tokens
+from claude_duel.domain.models import (
+    AgentSpec,
+    Attack,
+    Challenge,
+    Event,
+    LedgerRule,
+    MatchState,
+    SandboxLimits,
+    Validation,
+)
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import defense_award, round_heat, score_round
 from tests.unit.test_domain import spec
@@ -39,6 +48,7 @@ class Machine:
         return self.stack
 print(Machine().run(list(json.loads(sys.stdin.read()))) == [3])
 """
+THIRD = "class K:\n    pass\n"
 RULES = preset("ledger")
 
 
@@ -67,7 +77,7 @@ def _round(
     chs = [
         Challenge(id="r1a", round=1, author="a", spec=spec(src1, difficulty=2)),
         Challenge(id="r2a", round=2, author="a", spec=spec(src2, difficulty=2)),
-        Challenge(id="r1b", round=1, author="b", spec=spec(src1, difficulty=2)),  # the opponent's never count
+        Challenge(id="r1b", round=1, author="b", spec=spec(THIRD, difficulty=2)),  # unlike both: adds no heat
     ]
     vals = {c.id: Validation(challenge_id=c.id, valid=valid1 or c.id != "r1a", reason="ok") for c in chs}
     atks = {
@@ -159,3 +169,56 @@ def test_replay_warns_on_a_python_minor_mismatch() -> None:
     assert _python_warning([created])
     same = created.model_copy(update={"data": {"python": platform.python_version()}})
     assert _python_warning([same]) == []
+
+
+def test_the_opponents_earlier_challenges_count_too() -> None:
+    """Design R5: copying the opponent's last-round design heats like copying your own."""
+    chs = [
+        Challenge(id="r1a", round=1, author="a", spec=spec(OTHER, difficulty=2)),
+        Challenge(id="r1b", round=1, author="b", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2a", round=2, author="a", spec=spec(RENAMED, difficulty=2)),
+    ]
+    vals = {c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}
+    assert heat(chs, vals, 2, LED) == {"r2a": similarity(RENAMED, LOOP)}
+
+
+def test_cross_match_refs_heat_and_round_trip_through_match_created() -> None:
+    chs = [Challenge(id="r1a", round=1, author="a", spec=spec(RENAMED, difficulty=2))]
+    vals = {"r1a": Validation(challenge_id="r1a", valid=True, reason="ok")}
+    assert heat(chs, vals, 1, LED) == {}
+    assert heat(chs, vals, 1, LED, {"a": [LOOP]}) == {"r1a": similarity(RENAMED, LOOP)}
+    assert heat(chs, vals, 1, LED, {"b": [LOOP]}) == {}  # only the author's own model history
+    state = _match("m0", "x", heat_refs={"a": [LOOP]})
+    data = ev.created_data(state)
+    assert data["heat_refs"] == {"a": [LOOP]}
+    assert "heat_refs" not in ev.created_data(_match("m1", "x"))  # old logs stay byte-identical
+    created = Event(seq=0, type=ev.MATCH_CREATED, data=data, trace_id="t")
+    assert ev.initial_state("m0", created).heat_refs == {"a": [LOOP]}
+
+
+def _match(mid: str, model: str, seq: int | None = None, **over: object) -> MatchState:
+    return MatchState(
+        match_id=mid,
+        created_seq=seq,
+        agents=(AgentSpec(name="a", model=model), AgentSpec(name="b", model="other")),
+        rules=RULES,
+        limits=SandboxLimits(),
+        **over,  # type: ignore[arg-type]
+    )
+
+
+def test_history_refs_take_the_same_models_last_three_valid_sources() -> None:
+    past = []
+    for i in range(5):
+        m = _match(f"p{i}", "x", seq=i)
+        m.challenges = {
+            "c": Challenge(id="c", round=1, author="a", spec=spec(f"# {i}\n" + LOOP, difficulty=2)),
+            "d": Challenge(id="d", round=1, author="a", spec=spec(OTHER, difficulty=2)),
+        }
+        m.validations = {
+            "c": Validation(challenge_id="c", valid=True, reason="ok"),
+            "d": Validation(challenge_id="d", valid=False, reason="bad"),
+        }
+        past.append(m)
+    refs = history_refs(reversed(past), [AgentSpec(name="me", model="x"), AgentSpec(name="you", model="zzz")])
+    assert refs == {"me": [f"# {i}\n" + LOOP for i in (2, 3, 4)]}
