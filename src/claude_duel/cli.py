@@ -10,7 +10,7 @@ import os
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from rich.console import Console
@@ -44,7 +44,7 @@ from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
 from claude_duel.domain.errors import ConfigError, DuelError
 from claude_duel.domain.events import fold
-from claude_duel.domain.models import Event, MatchState, Stage
+from claude_duel.domain.models import AgentSpec, Event, MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
 from claude_duel.domain.ratings import ratings, results
 from claude_duel.domain.scoring import match_stats
@@ -53,7 +53,6 @@ from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
-from claude_duel.presentation.common import labels
 
 _LOG = logging.getLogger(__name__)
 
@@ -217,14 +216,14 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.view == "arena":
         _rewatch(settings, args.match_id, events, max(args.pace, 0.0))
     report = replay(snapshot, events)
-    names = labels(snapshot.agents)
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if args.transcript:
         print("\n".join(report.transcript))
     print(
-        f"replay consistent={report.consistent} "
-        f" recomputed={_relabel(report.recomputed, names)} recorded={_relabel(report.recorded, names)}"
+        f"replay consistent={report.consistent}"
+        f" recomputed={_relabel(report.recomputed, snapshot.agents)}"
+        f" recorded={_relabel(report.recorded, snapshot.agents)}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
     )
     if not args.verify:
@@ -234,11 +233,14 @@ def _dispatch(args: argparse.Namespace) -> int:
     return 0 if report.consistent and not bad else 1
 
 
-def _relabel(scores: object, names: dict[str, str]) -> object:
-    """Key a per-agent score dict by model label instead of internal agent name."""
-    if isinstance(scores, dict):
-        return {names.get(k, k): v for k, v in scores.items()}
-    return scores
+def _relabel(scores: object, agents: Sequence[AgentSpec]) -> object:
+    """Key a per-agent score dict by model label (model+(A/B) when both sides share a model)."""
+    if not isinstance(scores, dict):
+        return scores
+    models = [a.model or a.name for a in agents]
+    same = len(set(models)) < len(models)
+    names = {a.name: f"{m} ({chr(65 + i)})" if same else m for i, (a, m) in enumerate(zip(agents, models, strict=True))}
+    return {names.get(k, k): v for k, v in scores.items()}
 
 
 def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> None:
