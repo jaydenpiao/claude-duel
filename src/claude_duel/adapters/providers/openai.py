@@ -17,6 +17,7 @@ from claude_duel.adapters.providers.http import raise_for_status
 from claude_duel.domain.errors import ProviderTimeoutError, TransientProviderError
 from claude_duel.ports import Completion, CompletionRequest
 
+HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
 # Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
@@ -41,6 +42,7 @@ class OpenAIProvider:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._model = model
+        self._summaries = True  # ask for reasoning summaries until the org turns out not to be verified for them
         self._client = httpx.Client(
             base_url=base_url,
             timeout=timeout,
@@ -55,18 +57,24 @@ class OpenAIProvider:
             if responses
             else ("/chat/completions", self._chat_body(request))
         )
-        try:
-            resp = self._client.post(path, json=body)
-        except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError("openai timeout") from exc
-        except httpx.TransportError as exc:
-            raise TransientProviderError(f"openai transport: {type(exc).__name__}") from exc
+        resp = self._post(path, body)
+        if responses and _summary_refused(resp, body):
+            self._summaries = False  # unverified org: drop the summary request for good, retry once (400s cost nothing)
+            resp = self._post(path, self._responses_body(request))
         raise_for_status(resp, "openai")
         try:
             data = resp.json()
             return _parse_responses(data) if responses else _parse_chat(data)
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise TransientProviderError("openai returned an unexpected body") from exc
+
+    def _post(self, path: str, body: dict[str, object]) -> httpx.Response:
+        try:
+            return self._client.post(path, json=body)
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("openai timeout") from exc
+        except httpx.TransportError as exc:
+            raise TransientProviderError(f"openai transport: {type(exc).__name__}") from exc
 
     def _chat_body(self, request: CompletionRequest) -> dict[str, object]:
         return {
@@ -95,9 +103,21 @@ class OpenAIProvider:
             "store": False,
         }
         effort = default_effort(self._model, request.reasoning_effort)
-        if effort is not None:
-            body["reasoning"] = {"effort": effort}
+        reasoning = ({"effort": effort} if effort is not None else {}) | (
+            {"summary": "auto"} if self._summaries else {}
+        )
+        if reasoning:
+            body["reasoning"] = reasoning
         return body
+
+
+def _summary_refused(resp: httpx.Response, body: dict[str, object]) -> bool:
+    """A 400 that rejects ``reasoning.summary`` (OpenAI requires a verified organization for summaries)."""
+    reasoning = body.get("reasoning")
+    if resp.status_code != HTTP_BAD_REQUEST or not isinstance(reasoning, dict) or "summary" not in reasoning:
+        return False
+    text = resp.text.lower()
+    return "summary" in text or "verif" in text
 
 
 def _parse_chat(data: Any) -> Completion:
