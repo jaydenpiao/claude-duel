@@ -120,6 +120,8 @@ class CallCharged(_Payload):
     output_tokens: int = 0
     reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
     truncated: bool = False
+    purpose: str = ""  # build / attack / ... (absent in older logs)
+    summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
 
 
 class BuildRejected(_Payload):
