@@ -11,9 +11,8 @@ from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import build_engine, build_event_log, build_store, pin_agents
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
-from claude_duel.domain import variety
 from claude_duel.domain import events as ev
-from claude_duel.domain import heat
+from claude_duel.domain import heat, variety
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
