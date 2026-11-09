@@ -414,6 +414,7 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+    heat_refs: dict[str, list[str]] = Field(default_factory=dict)  # agent -> sources from its model's last matches (R5)
 
     def handicap(self, name: str) -> Handicap:
         return next((a.handicap for a in self.agents if a.name == name), Handicap())
