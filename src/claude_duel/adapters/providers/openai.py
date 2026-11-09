@@ -20,7 +20,7 @@ from claude_duel.ports import Completion, CompletionRequest
 HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
 # Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
-MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
+MINIMAL_EFFORT_MODELS = ("gpt-6-luna", "gpt-5-nano", "gpt-5-mini")
 
 
 def default_effort(model: str, effort: str | None) -> str | None:

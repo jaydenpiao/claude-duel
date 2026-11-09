@@ -12,6 +12,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Default OpenAI model and difficulty-gate probe are `gpt-6-luna` (replacing deprecated `gpt-5-nano`, shutdown 2026-12-11). `MINIMAL_EFFORT_MODELS` includes luna.
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
 - Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).

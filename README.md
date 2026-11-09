@@ -35,7 +35,7 @@ duel backup [--bucket gs://…]       # copy finished matches' logs + state (fla
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
-To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`).
+To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-6-luna`).
 
 ## Architecture
 ```mermaid
@@ -94,9 +94,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_REPLAY_BUCKET` | `replay_bucket`: private `gs://` bucket for `duel backup` (public access prevention on) | unset |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
-| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
+| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-6-luna` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
-| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-5-nano` |
+| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-6-luna` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
