@@ -222,3 +222,51 @@ def test_history_refs_take_the_same_models_last_three_valid_sources() -> None:
         past.append(m)
     refs = history_refs(reversed(past), [AgentSpec(name="me", model="x"), AgentSpec(name="you", model="zzz")])
     assert refs == {"me": [f"# {i}\n" + LOOP for i in (2, 3, 4)]}
+
+
+def test_heat_vs_opponent_defaults_off_for_old_logs() -> None:
+    """M33: logs pinned without heat_vs_opponent keep own-only comparison (pre-#238)."""
+    own = LedgerRule(heat_window=2)  # heat_vs_opponent defaults False
+    assert own.heat_vs_opponent is False
+    chs = [
+        Challenge(id="r1a", round=1, author="a", spec=spec(OTHER, difficulty=2)),
+        Challenge(id="r1b", round=1, author="b", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2a", round=2, author="a", spec=spec(LOOP, difficulty=2)),  # copies b
+        Challenge(id="r2b", round=2, author="b", spec=spec(OTHER, difficulty=2)),
+    ]
+    vals = {c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}
+    assert heat(chs, vals, 2, own) == {}  # own-only: a's r1 OTHER != LOOP
+    wide = own.model_copy(update={"heat_vs_opponent": True})
+    assert "r2a" in heat(chs, vals, 2, wide)
+
+
+def test_pre_r5_heat_log_replays_clean() -> None:
+    """A heat-on ledger log from before #238 (no heat_vs_opponent) folds to own-only and matches logged heat."""
+    rule = LedgerRule(heat_window=2, heat_threshold_pct=70, heat_max_pct=50, heat_vs_opponent=True)
+    rules = preset("ledger").model_copy(update={"ledger": rule})
+    agents = (AgentSpec(name="a", skill=2), AgentSpec(name="b", skill=3))
+    created = Event(
+        seq=1,
+        type=ev.MATCH_CREATED,
+        trace_id="t",
+        data={
+            "seed": "s",
+            "agents": [a.model_dump() for a in agents],
+            "rules": rules.model_dump(),
+            "limits": SandboxLimits().model_dump(),
+        },
+    )
+    pinned = created.data["rules"]["ledger"]
+    del pinned["heat_vs_opponent"]  # pre-#238 writer
+    folded = ev.initial_state("old-heat", created).rules.ledger
+    assert folded is not None
+    assert folded.heat_vs_opponent is False
+    chs = [
+        Challenge(id="r1a", round=1, author="a", spec=spec(OTHER, difficulty=2)),
+        Challenge(id="r1b", round=1, author="b", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2a", round=2, author="a", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2b", round=2, author="b", spec=spec(OTHER, difficulty=2)),
+    ]
+    vals = {c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}
+    assert heat(chs, vals, 2, folded) == {}  # own-only: copying the opponent does not heat
+    assert "r2a" in heat(chs, vals, 2, rule)  # R5 on would heat — that must not be the fold default
