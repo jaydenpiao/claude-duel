@@ -37,6 +37,7 @@ class CardData:
     spend: str
     verified: bool
     digest: str
+    mismatches: tuple[str, ...] = ()
 
 
 def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> CardData:
@@ -53,6 +54,7 @@ def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> C
         ),
         verified=report.consistent,
         digest=log_digest(events),
+        mismatches=tuple(report.mismatches),
     )
 
 
@@ -76,10 +78,20 @@ def _bars(d: CardData) -> list[str]:
     return out
 
 
+def _verdict(d: CardData) -> str:
+    """Verified, a real mismatch, or heat left unchecked (not labeled as tampering)."""
+    if d.verified:
+        return "replay verified ✓"
+    unchecked = ("heat unverified", "score not checked")
+    if d.mismatches and all(any(part in item for part in unchecked) for item in d.mismatches):
+        return "replay unverified"
+    return "replay MISMATCH ✗"
+
+
 def card_svg(d: CardData) -> str:
     """Pure: the card as an SVG document."""
     names = " vs ".join(f"{n}" for n, _, _ in d.players)
-    verdict = f"replay verified ✓ · log {d.digest}" if d.verified else f"replay MISMATCH ✗ · log {d.digest}"
+    verdict = _verdict(d) + f" · log {d.digest}"
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" '
         'font-family="ui-monospace, Menlo, monospace">',

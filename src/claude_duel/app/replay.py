@@ -90,6 +90,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
             )
         except HeatBoundError as exc:
             mismatches.append(f"round {r} heat unverified: {exc}")
+            mismatches.append(f"round {r} score not checked")
             unverified = True
             continue
         if delta != event.data["delta"]:

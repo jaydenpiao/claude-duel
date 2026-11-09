@@ -44,6 +44,8 @@ from claude_duel.domain.models import (
 )
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import round_heat, score_round
+from claude_duel.presentation.arena import _heat_view
+from claude_duel.presentation.card import CardData, card_svg
 from tests.unit.test_domain import spec
 from tests.unit.test_heat import LOOP, RENAMED, _match
 
@@ -211,12 +213,13 @@ def test_too_many_challenges_or_legacy_refs_raise_before_lcs() -> None:
     assert work_cells() == 0
 
 
-def test_a_logged_cap_above_the_ceiling_is_clamped() -> None:
+def test_a_logged_cap_above_the_ceiling_is_not_clamped_into_a_score() -> None:
     reset_heat_cache()
     rule = LedgerRule(heat_window=1, heat_token_cap=10**9, heat_ref_cap=10**9)
-    chs = [_ch("r1a", 1, "a", _dense(2048, 1))]
-    heat(chs, _valid(chs), 1, rule, {"a": [_dense(2048, i) for i in range(REF_CAP + 12)]})
-    assert work_cells() == REF_CAP * TOKEN_CAP * TOKEN_CAP
+    chs = [_ch("r1a", 1, "a", LOOP)]
+    with pytest.raises(HeatBoundError):
+        heat(chs, _valid(chs), 1, rule, {"a": [LOOP] * (REF_CAP + 12)})
+    assert work_cells() == 0
 
 
 def test_pin_fills_and_clamps_only_when_heat_is_on() -> None:
@@ -245,9 +248,20 @@ def test_an_overflowing_window_keeps_the_newest_rounds() -> None:
     assert heat(newer, _valid(newer), 3, rule, {"a": ["v = 2\n"]})["r3a"] == 100
 
 
-def test_setting_one_cap_fills_the_other() -> None:
-    assert pinned_bound(LedgerRule(heat_window=1, heat_token_cap=32)) == (32, REF_CAP)
-    assert pinned_bound(LedgerRule(heat_window=1, heat_ref_cap=3)) == (TOKEN_CAP, 3)
+def test_a_partial_or_mistyped_pin_is_not_filled() -> None:
+    with pytest.raises(HeatBoundError):
+        pinned_bound(LedgerRule(heat_window=1, heat_token_cap=32))
+    with pytest.raises(HeatBoundError):
+        pinned_bound(LedgerRule(heat_window=1, heat_ref_cap=3))
+    for raw in (True, "256", 256.0):
+        led = LedgerRule.model_validate({"heat_window": 1, "heat_token_cap": raw, "heat_ref_cap": raw})
+        with pytest.raises(HeatBoundError):
+            pinned_bound(led)
+    # A new match still normalizes a missing config pin into the logged ceiling.
+    bare = preset("ledger").model_copy(update={"ledger": LedgerRule(heat_window=2, heat_token_cap=32)})
+    written = pin_heat_bound(bare)
+    assert written.ledger is not None
+    assert (written.ledger.heat_token_cap, written.ledger.heat_ref_cap) == (32, REF_CAP)
 
 
 def test_unpinned_prompt_does_not_claim_the_cap() -> None:
@@ -340,6 +354,7 @@ def test_legacy_dense_log_is_unverified_not_rescored() -> None:
     assert work_cells() == 0
     assert report.consistent is False
     assert any("heat unverified" in item for item in report.mismatches)
+    assert any("score not checked" in item for item in report.mismatches)
     assert not any("tampered" in item for item in report.mismatches)
     assert not any(item == "total score" for item in report.mismatches)
 
@@ -379,4 +394,80 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     assert work_cells() == prompted
     assert prompted - again == (6 * 27 + 6 * 33) * TOKEN_CAP * TOKEN_CAP
     assert prompted <= 4 * CELL_BUDGET
-    assert time.perf_counter() - started < 45
+    # Cell counts are the bound. 180s only catches a runaway walker; a slow runner has taken ~56s.
+    assert time.perf_counter() - started < 180
+
+
+def test_a_one_sided_pin_replays_as_unverified() -> None:
+    rules = _legacy_rules()
+    chs = [_ch("r1a", 1, "a", LOOP)]
+    vals, atks = _valid(chs), {"r1a": _held("r1a")}
+    delta = score_round(1, ["a", "b"], chs, vals, atks, rules)
+    hot = round_heat(chs, vals, atks, 1, rules)
+    _folded, events = _replay(rules, chs, {}, delta, hot, drop_caps=True)
+    created = events[0]
+    data = dict(created.data)
+    dumped = dict(data["rules"])  # type: ignore[arg-type]
+    ledger = dict(dumped["ledger"])
+    ledger["heat_ref_cap"] = REF_CAP
+    dumped["ledger"] = ledger
+    data["rules"] = dumped
+    events[0] = created.model_copy(update={"data": data})
+    folded = ev.fold("bound", events)
+    report = replay(folded, events)
+    assert report.consistent is False
+    assert any("heat unverified" in item for item in report.mismatches)
+    assert any("score not checked" in item for item in report.mismatches)
+
+
+def test_tokens_stop_inside_a_wide_compare() -> None:
+    src = "x = 1" + "==1" * 3000 + "\n"
+    assert len(src) < PARSE_BYTES
+    assert len(tokens(src)) == TOKEN_CAP
+    reset_heat_cache()
+    assert similarity(src, src, token_cap=TOKEN_CAP) == 100
+    assert work_cells() == TOKEN_CAP * TOKEN_CAP
+
+
+def test_card_says_unverified_when_heat_was_not_recomputed() -> None:
+    svg = card_svg(
+        CardData(
+            match_id="m",
+            players=[("a", "m", 1), ("b", "m", 0)],
+            costs=["", ""],
+            rounds="1/1",
+            headline="level",
+            spend="$0",
+            verified=False,
+            digest="0123456789abcdef",
+            mismatches=("round 1 heat unverified: heat exceeds the work bound", "round 1 score not checked"),
+        )
+    )
+    assert "replay unverified" in svg
+    assert "MISMATCH" not in svg
+
+
+def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
+    pinned = preset("ledger")
+    state = MatchState(
+        match_id="view",
+        agents=(AgentSpec(name="a"), AgentSpec(name="b")),
+        rules=pinned,
+        limits=SandboxLimits(),
+        heat_refs={"a": [LOOP]},
+    )
+    copied = _ch("r1a", 1, "a", RENAMED)
+    state.challenges = {copied.id: copied}
+    state.validations = _valid([copied])
+    assert _heat_view(state, 1)["r1a"] == similarity(RENAMED, LOOP, token_cap=TOKEN_CAP)
+    bare = state.model_copy(deep=True)
+    bare.heat_refs = {}
+    assert _heat_view(bare, 1) == {}
+    legacy = state.model_copy(deep=True)
+    assert legacy.rules.ledger is not None
+    legacy.rules = legacy.rules.model_copy(update={"ledger": LedgerRule(heat_window=1)})
+    dense = _ch("r1a", 1, "a", _dense(6144, 9))
+    legacy.challenges = {dense.id: dense}
+    legacy.validations = _valid([dense])
+    legacy.heat_refs = {"a": [_dense(6144, 8)]}
+    assert _heat_view(legacy, 1) == {}

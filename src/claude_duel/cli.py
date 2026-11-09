@@ -42,7 +42,7 @@ from claude_duel.app.session import play
 from claude_duel.app.sync import sync
 from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
-from claude_duel.domain.errors import ConfigError, DuelError
+from claude_duel.domain.errors import ConfigError, DuelError, HeatBoundError
 from claude_duel.domain.events import fold
 from claude_duel.domain.models import Event, MatchState, Stage
 from claude_duel.domain.modes import MODES, preset
@@ -235,7 +235,10 @@ def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> 
     view = ArenaView(Console(), mid, settings.budget.lifetime_max_usd, build_ledger(settings).total_usd, pace=pace)
     try:
         for e in events:
-            view(e)
+            try:
+                view(e)
+            except HeatBoundError:
+                continue  # the text report below still prints heat unverified
     finally:
         view.close()
 

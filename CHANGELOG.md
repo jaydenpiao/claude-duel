@@ -6,14 +6,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- Security: host-side heat similarity no longer runs an uncapped LCS on model-written source. New matches pin `heat_token_cap` (256) and `heat_ref_cap` (48); the in-match window is kept first and sources over 65536 bytes are not parsed. A log without those pins is recomputed exactly when it fits the ceiling, and reported `heat unverified` when it does not — it is not rescored with a different similarity.
+- Security: host-side heat similarity no longer runs an uncapped LCS on model-written source. New matches pin `heat_token_cap` (256) and `heat_ref_cap` (48) together; the in-match window is kept first and sources over 65536 bytes are not parsed. A log without those pins is recomputed exactly when it fits the ceiling. A partial pin, a non-int, or a value outside that ceiling is `heat unverified` and the round's score is `score not checked` — it is not filled, clamped, or rescored with a different similarity.
+- Held: the 256-token prefix is not a sound novelty rule. A sandbox-accepted preamble in front of a copied challenge can drop prefix similarity to 0 while a full-source LCS of the same pair stays hot, and `score_round` then omits the heat line. No replacement metric is shipped. Pre-pin logs are not rescored.
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
-- Upgrade note: logs scored after opponent heat landed (#238) and before `heat_vs_opponent` is pinned do not record that flag. The open heat-replay gate defaults the flag off, so those logs fold back to own-only heat and will not replay as scored. This bound does not change who is compared. Pre-pin logs that fit the token and reference ceiling still replay exactly, including that opponent comparison; logs between those two changes should be treated as a known replay gap once the flag defaults off, not as a verified match.
+- Series and tournament logs pin heat caps before the created event. Child matches, including pool matches, use that logged contract and do not pin again, so a `[rules.ledger]` overlay still verifies. Resume of a log written without the caps keeps those rules.
+- Upgrade note: logs scored after opponent heat landed (#238) and before `heat_vs_opponent` is pinned do not record that flag. PR 279 is still open and is not merged here. That gate defaults the flag off, so those logs would fold to own-only heat. The author filter has to run before the reference cap when the branches combine. This branch does not add the flag and does not invent a cap-pinned cohort. Pre-pin logs that fit the ceiling still replay exactly, including opponent comparison on this build.
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
 - Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).

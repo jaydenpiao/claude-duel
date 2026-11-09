@@ -72,27 +72,42 @@ def _raw(source: str) -> bytes | None:
     return None if len(raw) > PARSE_BYTES else raw
 
 
+def _extra(node: ast.AST) -> list[str]:
+    """Tokens a node emits besides its own type. One node must not run past the caller's limit."""
+    if isinstance(node, ast.Constant):
+        return [type(node.value).__name__]
+    if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp)):
+        return [type(node.op).__name__]
+    if isinstance(node, ast.Compare):
+        return [type(op).__name__ for op in node.ops]
+    return []
+
+
+def _add(out: list[str], limit: int, text: str) -> bool:
+    if len(out) >= limit:
+        return False
+    out.append(text)
+    return True
+
+
 def _walk(source: str, limit: int) -> tuple[str, ...]:
-    """First ``limit`` pre-order tokens, or () when the source does not parse."""
+    """First ``limit`` pre-order tokens, or () when the source does not parse. Never longer than ``limit``."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
         return ()
     out: list[str] = []
     stack: list[ast.AST] = list(reversed(tree.body))  # the Module root is in every file, so it is not a token
-    while stack:
-        if len(out) >= limit:
-            break
+    while stack and len(out) < limit:
         node = stack.pop()
         if isinstance(node, _SKIP):
             continue
-        out.append(type(node).__name__)
-        if isinstance(node, ast.Constant):
-            out.append(type(node.value).__name__)
-        elif isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp)):
-            out.append(type(node.op).__name__)
-        elif isinstance(node, ast.Compare):
-            out.extend(type(op).__name__ for op in node.ops)
+        if not _add(out, limit, type(node).__name__):
+            break
+        if any(not _add(out, limit, text) for text in _extra(node)):
+            break
+        if len(out) >= limit:
+            break
         stack.extend(reversed(list(ast.iter_child_nodes(node))))
     return tuple(out)
 
@@ -168,22 +183,48 @@ def _source(ch: Challenge) -> str:
     return ch.spec.source
 
 
+def _in_range(value: int | None, ceiling: int) -> int | None:
+    """A stored cap, or None when that side was not pinned. Anything else is not a usable pin."""
+    if value is None:
+        return None
+    if type(value) is not int or value < 1 or value > ceiling:
+        raise HeatBoundError()
+    return value
+
+
 def pinned_bound(rule: LedgerRule) -> tuple[int, int] | None:
-    """``(token_cap, ref_cap)`` clamped to the ceiling, or None when the log did not pin either cap."""
+    """``(token_cap, ref_cap)`` when both sides are in-range ints.
+
+    Both absent is legacy (``None``): exact LCS while it fits the ceiling. One side, a non-int, or a value
+    outside ``1..ceiling`` raises ``HeatBoundError`` instead of being filled or clamped into a verified score.
+    """
     if rule.heat_token_cap is None and rule.heat_ref_cap is None:
         return None
-    token = TOKEN_CAP if rule.heat_token_cap is None else min(rule.heat_token_cap, TOKEN_CAP)
-    ref = REF_CAP if rule.heat_ref_cap is None else min(rule.heat_ref_cap, REF_CAP)
+    token = _in_range(rule.heat_token_cap, TOKEN_CAP)
+    ref = _in_range(rule.heat_ref_cap, REF_CAP)
+    if token is None or ref is None:
+        raise HeatBoundError()
     return token, ref
 
 
+def _normalize_cap(value: int | None, ceiling: int) -> int:
+    """New-match pin: a missing or unusable config value becomes the ceiling. The log stores that int."""
+    if type(value) is int and 1 <= value <= ceiling:
+        return value
+    return ceiling
+
+
 def pin_heat_bound(rules: Rules) -> Rules:
-    """Pin the ceiling on a new match that uses heat, clamping anything above it. Heat off is unchanged."""
+    """Pin both caps on a new match that uses heat. Heat off is unchanged.
+
+    This is the write path (config → log). Reading a log does not clamp: ``pinned_bound`` refuses a partial
+    or out-of-range pin.
+    """
     led = rules.ledger
     if led is None or not led.heat_window:
         return rules
-    token = TOKEN_CAP if led.heat_token_cap is None else min(led.heat_token_cap, TOKEN_CAP)
-    ref = REF_CAP if led.heat_ref_cap is None else min(led.heat_ref_cap, REF_CAP)
+    token = _normalize_cap(led.heat_token_cap, TOKEN_CAP)
+    ref = _normalize_cap(led.heat_ref_cap, REF_CAP)
     if (led.heat_token_cap, led.heat_ref_cap) == (token, ref):
         return rules
     return rules.model_copy(update={"ledger": led.model_copy(update={"heat_token_cap": token, "heat_ref_cap": ref})})

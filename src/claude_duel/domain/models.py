@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Stage(StrEnum):
@@ -126,10 +126,18 @@ class LedgerRule(_Frozen):
     heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
-    # Absent (None) on logs scored before the host work bound: those recompute the full LCS only while they fit
-    # the ceiling in domain/heat.py, and are unverified past it. A new match pins both (open_match / the preset).
-    heat_token_cap: int | None = Field(default=None, ge=1, description="pinned AST-token prefix compared for heat")
-    heat_ref_cap: int | None = Field(default=None, ge=1, description="pinned max heat references per challenge")
+    # Both absent: legacy exact LCS while it fits the ceiling, unverified past it. A new match writes both
+    # (open_match / the preset). One side, a non-int, or a value outside 1..ceiling is not a pin.
+    heat_token_cap: int | None = Field(default=None, description="pinned AST-token prefix compared for heat")
+    heat_ref_cap: int | None = Field(default=None, description="pinned max heat references per challenge")
+
+    @field_validator("heat_token_cap", "heat_ref_cap", mode="before")
+    @classmethod
+    def _cap_is_an_int_or_absent(cls, value: object) -> object:
+        """Keep a real int. Bools, floats and strings are not coerced into a verified pin (they become 0)."""
+        if value is None or type(value) is int:
+            return value
+        return 0
 
 
 class DeepRule(_Frozen):

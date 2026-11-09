@@ -18,6 +18,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.events import CallCharged
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.heat import heat
@@ -371,7 +372,7 @@ class ArenaView(MatchFold):
             self.model.log(f"{who(s, atk.attacker)} +{pts} for {who(s, ch.author)}'s {title!r}")
         lines = {cid: line for cid, line in cast("dict[str, int]", e.data.get("heat", {})).items() if line}
         rnd = int(str(e.data["round"]))
-        hot = heat(s.challenges.values(), s.validations, rnd, s.rules.ledger) if lines and s.rules.ledger else {}
+        hot = _heat_view(s, rnd) if lines and s.rules.ledger else {}
         for cid, line in sorted(lines.items()):  # a 0 line (at the threshold) is not news
             ch = s.challenges.get(cid)
             if ch is not None:
@@ -424,3 +425,14 @@ class ArenaView(MatchFold):
         self.model.busy = False
         self.model.now = f"match failed during {s.failed_stage}"
         self.model.banner = f"failed: {scrub(s.failure or '')} · duel resume {s.match_id}"
+
+
+def _heat_view(state: MatchState, round_no: int) -> dict[str, int]:
+    """Similarity percents for the ticker. A legacy log past the ceiling is skipped, not a crashed rewatch."""
+    led = state.rules.ledger
+    if led is None:
+        return {}
+    try:
+        return heat(state.challenges.values(), state.validations, round_no, led, state.heat_refs)
+    except HeatBoundError:
+        return {}
