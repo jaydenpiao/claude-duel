@@ -9,9 +9,9 @@ similarity to its author's own valid challenges of the last ``heat_window`` roun
 """
 
 import ast
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
-from claude_duel.domain.models import Attack, Challenge, LedgerRule, Validation
+from claude_duel.domain.models import AgentSpec, Attack, Challenge, LedgerRule, MatchState, Validation
 
 _SKIP = (
     ast.expr_context,
@@ -70,10 +70,16 @@ def _valid(ch: Challenge, validations: Mapping[str, Validation]) -> bool:
 
 
 def heat(
-    challenges: Iterable[Challenge], validations: Mapping[str, Validation], round_no: int, rule: LedgerRule
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    round_no: int,
+    rule: LedgerRule,
+    refs: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
-    """challenge id -> best similarity to the author's own valid challenges of the last ``heat_window`` rounds,
-    for this round's valid challenges at or over ``heat_threshold_pct`` only. Invalid ones never take or give heat."""
+    """challenge id -> best similarity to the valid challenges of the last ``heat_window`` rounds (the author's own
+    and, design R5, the opponent's) plus ``refs[author]`` (sources from the same model's last matches, frozen in
+    ``match_created``), for this round's valid challenges at or over ``heat_threshold_pct`` only. Invalid ones
+    never take or give heat."""
     if not rule.heat_window:
         return {}
     every = sorted((c for c in challenges if _valid(c, validations)), key=lambda c: c.id)
@@ -81,10 +87,9 @@ def heat(
     for ch in (c for c in every if c.round == round_no):
         assert ch.spec is not None
         past = [
-            c.spec.source
-            for c in every
-            if c.author == ch.author and round_no - rule.heat_window <= c.round < round_no and c.spec is not None
+            c.spec.source for c in every if round_no - rule.heat_window <= c.round < round_no and c.spec is not None
         ]
+        past += list((refs or {}).get(ch.author, ()))
         top = max((similarity(ch.spec.source, s) for s in past), default=0)
         if top >= rule.heat_threshold_pct:
             out[ch.id] = top
@@ -107,14 +112,33 @@ def heat_lines(
     round_no: int,
     rule: LedgerRule,
     defense: DefenseFn,
+    refs: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
     """challenge id -> its ``heat_penalty`` line (0 at the threshold), for defended heated challenges only.
     ``attacks`` is keyed by challenge id; ``defense(ch)`` is what classic paid that defense."""
     chs = list(challenges)
-    hot = heat(chs, validations, round_no, rule)
+    hot = heat(chs, validations, round_no, rule, refs)
     out: dict[str, int] = {}
     for ch in chs:
         atk = attacks.get(ch.id)
         if ch.id in hot and not (atk is not None and atk.solved):
             out[ch.id] = penalty(defense(ch), hot[ch.id], rule)
+    return out
+
+
+def history_refs(past: Iterable[MatchState], agents: Iterable[AgentSpec], k: int = 3) -> dict[str, list[str]]:
+    """agent name -> valid challenge sources its model (same provider and model) built in its last ``k`` matches,
+    oldest first by ``created_seq``. Frozen into ``match_created`` so heat replays exactly."""
+    ordered = sorted(past, key=lambda m: (m.created_seq is None, m.created_seq or 0, m.match_id))
+    out: dict[str, list[str]] = {}
+    for spec in agents:
+        mine = [(m, a.name) for m in ordered for a in m.agents if (a.provider, a.model) == (spec.provider, spec.model)]
+        sources = [
+            c.spec.source
+            for m, name in mine[-k:]
+            for c in sorted(m.challenges.values(), key=lambda c: c.id)
+            if c.author == name and _valid(c, m.validations) and c.spec is not None
+        ]
+        if sources:
+            out[spec.name] = sources
     return out
