@@ -92,6 +92,7 @@ class MatchCreated(_Payload):
     rules: Rules
     limits: SandboxLimits
     family_bans: dict[str, list[str]] = {}  # R2 cross-match ban, frozen at creation; absent before it
+    heat_refs: dict[str, list[str]] = {}  # design R5: frozen cross-match heat references; absent when empty
 
 
 class StageChanged(_Payload):
@@ -385,7 +386,7 @@ def payload(event: Event) -> _Payload:
 
 def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
-    return {
+    data: dict[str, object] = {
         "seed": state.seed,
         "python": platform.python_version(),
         "framing_text": state.framing_text,
@@ -394,6 +395,9 @@ def created_data(state: MatchState) -> dict[str, object]:
         "limits": state.limits.model_dump(mode="json"),
         **({"family_bans": state.family_bans} if state.family_bans else {}),  # old logs stay byte-identical
     }
+    if state.heat_refs:  # omitted when empty, so older logs stay byte-identical
+        data["heat_refs"] = state.heat_refs
+    return data
 
 
 def apply(state: MatchState, event: Event) -> None:
@@ -418,6 +422,7 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         rules=p.rules,
         limits=p.limits,
         family_bans=p.family_bans,
+        heat_refs=p.heat_refs,
     )
 
 

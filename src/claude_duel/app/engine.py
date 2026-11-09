@@ -944,6 +944,7 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            state.heat_refs,
             ghosts.round_hits(state, state.round),
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
