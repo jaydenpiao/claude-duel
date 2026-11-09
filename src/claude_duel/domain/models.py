@@ -199,6 +199,16 @@ class Rules(_Frozen):
         return data
 
     @model_validator(mode="after")
+    def _ledger_pairs_with_kind(self) -> Rules:
+        """Ledger stakes and ledger scoring come together (review M18): one without the other fails mid-match."""
+        if (self.ledger is None) == (self.scoring.kind == "ledger"):
+            raise ValueError(
+                'ledger scoring needs [rules.ledger] and [rules.ledger] needs scoring kind "ledger"; '
+                'use mode = "ledger"'
+            )
+        return self
+
+    @model_validator(mode="after")
     def _ledger_k_fits(self) -> Rules:
         """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
         if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
@@ -404,6 +414,7 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+    heat_refs: dict[str, list[str]] = Field(default_factory=dict)  # agent -> sources from its model's last matches (R5)
 
     def handicap(self, name: str) -> Handicap:
         return next((a.handicap for a in self.agents if a.name == name), Handicap())

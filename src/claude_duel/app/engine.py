@@ -640,9 +640,12 @@ class MatchEngine:
         return sorted((c for c in state.round_challenges(state.round) if c.author == author), key=lambda c: c.id)
 
     def _stake(self, state: MatchState, ch: Challenge, attacker: str) -> int | None:
+        """Per-challenge stake for a ledger attacker. Missing stakes mean zero (skip), not unlimited (#255)."""
+        if state.rules.ledger is None:
+            return None
         stakes = state.stakes.get(f"{state.round}:{attacker}")
         if stakes is None:
-            return None
+            return 0
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
     def _allocate(self, state: MatchState, attacker: str) -> None:
@@ -825,6 +828,7 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            state.heat_refs,
             ghosts.round_hits(state, state.round),
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)

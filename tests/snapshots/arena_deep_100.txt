@@ -5,27 +5,27 @@ alice ████████████████████████�
 bob   ██████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░    37 █▁
 alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-alice · done · in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
+alice · done · in 13,391 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0004/defense
   ▣ Maze: Find the input that reveals the flag (password).
   ▸ try 2 on 'Mirror' → missed
   ▸ attack: 576 in / 8 out · $0.0000 · 0.0s
   ▸ try 3 on 'Mirror' → missed
-bob · done · in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+bob · done · in 12,043 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
   ▣ Mirror: Find the input that reveals the flag (reverse).
   ▸ try 2 on 'Knock' → missed
   ▸ attack: 610 in / 7 out · $0.0000 · 0.0s
   ▸ try 3 on 'Knock' → missed
-alice: in 13,298 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0003/defense
-bob: in 11,953 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice: in 13,391 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0004/defense
+bob: in 12,043 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
 alice: r2 stakes 0·6k·6k (fallback) · keystone #1
 bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
 now: match over
 🛡 bob defended 'Mirror' +20
-· 🛡 bob defended 'Mirror' +20
-· bob +5 for alice's 'Mirror'
-· bob +5 for alice's 'Maze'
 · alice +10 for bob's 'Arithmetic gate'
+· 🔥 alice's 'Knock' heat 100% -20
+· 🔥 bob's 'Maze' heat 100% -10
+· 🔥 bob's 'Mirror' heat 100% -10
 · after round 2: alice 56  bob 37 · alice leads
 $0.0019 this match · $0.0000 of $50 cap
 🏆 winner: alice · alice 56  bob 37
