@@ -2,6 +2,8 @@
 #   docker run --read-only --cap-drop ALL --security-opt no-new-privileges \
 #     --tmpfs /tmp --tmpfs /app/.duel:uid=10001,gid=10001,mode=0700 claude-duel ...
 FROM python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
+# zlib1g CVE-2026-76844 / CVE-2026-85091 (fixable); base pin not yet rebuilt.
+RUN apt-get update     && apt-get install -y --no-install-recommends --only-upgrade zlib1g     && rm -rf /var/lib/apt/lists/*
 RUN useradd --no-create-home --shell /usr/sbin/nologin --uid 10001 duel
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
