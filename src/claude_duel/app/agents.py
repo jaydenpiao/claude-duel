@@ -157,8 +157,9 @@ def heat_rule(rules: Rules) -> list[str]:
         return []
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
-        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
-        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+        f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
+        "(yours or your opponent's) or to one your model built in its last 3 matches "
+        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
     ]
 
 
@@ -202,7 +203,9 @@ def _program_rules(rules: Rules, round_no: int) -> list[str]:
         f"Minimal valid example (make yours harder; later rounds score more): {json.dumps(EXAMPLE_CHALLENGE)}",
         'SOLVER (recommended): you cannot run code, so do not work the answer out in your head. Give "solver": '
         "a short program under the same rules that prints the accepting input (it gets no stdin and is never shown "
-        "to the attacker); the arena runs it and uses its output as reference_payload (then leave reference_payload "
+        "to the attacker). It runs ALONE, without your source: it cannot call your check or helper functions, so "
+        "copy any it needs into the solver; the arena runs it and uses its output as reference_payload "
+        "(then leave reference_payload "
         '""). Example: if the challenge derives a 6-letter key from a seed with a loop and compares the input to '
         "it, the solver is that same loop ending in print(key).",
         _RETURN_KEYS,
@@ -245,7 +248,7 @@ _HINTS = (
     (
         "NameError",
         "Your solver used a name it never defined; it gets no stdin and only its own code"
-        " (in the check form it may call check() and your helpers). ",
+        " (in the check form it may call check() and your helpers; otherwise copy every helper it uses). ",
     ),
     (
         "reference payload does not reveal flag",

@@ -54,7 +54,7 @@ Status: accepted 2026-10-22; built in steps. Step 1 (done): `ScoringRule`, `Roun
 - `config.py`: `DUEL_MODE` env var plus preset merge.
 
 ## Cost
-Zero by itself. Every preset must declare an expected cost per match, computed by `duel estimate --mode X` (new, offline) as calls x avg tokens x `DEFAULT_PRICES`. With gpt-4.1-nano ($0.10/$0.40 per MTok) and ~2k input + 0.4k output tokens per call, a call costs ~$0.00036. A classic match (<= 80 calls by `match_max_calls`) is <= ~$0.03. All modes inherit `match_max_usd` (dev $0.25) and lifetime $33 < $50 key.
+Zero by itself. Every preset must declare an expected cost per match, computed by `duel estimate --mode X` (new, offline) as calls x avg tokens x `DEFAULT_PRICES`. With gpt-5-nano ($0.05/$0.40 per MTok) and ~2k input + 0.4k output tokens per call, a call costs ~$0.00026. A classic match (<= 80 calls by `match_max_calls`) is <= ~$0.02. All modes inherit `match_max_usd` (dev $0.25) and lifetime $33 < $50 key.
 
 ## Acceptance criteria
 - [ ] `Rules()` with no args scores byte-for-byte like `harder-challenges` HEAD: same commentary snapshot, same `round_scored` deltas.
@@ -68,3 +68,10 @@ Zero by itself. Every preset must declare an expected cost per match, computed b
 - Golden: one recorded fake match per preset under `tests/snapshots/modes/`; replay must equal the snapshot.
 - Config: preset + env override precedence; legacy top-level `solve_points` alias.
 - Replay with a mutated preset table: it still uses the logged rules.
+
+## Amendment: presets on main (2026-10-31)
+
+- `domain/modes.py` presets: `classic`, `quick`, `gated`, `checked` (ADR 0010), `efficiency`, `capped`, `blitz`
+  and `ledger` (#192). `ledger` sets `scoring.kind = "ledger"` with a `LedgerRule` (attack tokens split as stakes
+  across the opponent's challenges), 3 challenges per round, a 60k token clock and summary memory. A ledger scorer
+  without `[rules.ledger]`, or the reverse, is a config error; use the preset.

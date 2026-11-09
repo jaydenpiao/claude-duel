@@ -117,11 +117,13 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # Feature switches default off so a log pinned before they existed replays as written; the ledger
+    # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
-        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+        default=False, description="each author commits to one challenge: defended x2, captured -base//2"
     )
-    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
-    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    terrain: Literal["none", "seeded"] = "none"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
 
@@ -197,6 +199,16 @@ class Rules(_Frozen):
         return data
 
     @model_validator(mode="after")
+    def _ledger_pairs_with_kind(self) -> Rules:
+        """Ledger stakes and ledger scoring come together (review M18): one without the other fails mid-match."""
+        if (self.ledger is None) == (self.scoring.kind == "ledger"):
+            raise ValueError(
+                'ledger scoring needs [rules.ledger] and [rules.ledger] needs scoring kind "ledger"; '
+                'use mode = "ledger"'
+            )
+        return self
+
+    @model_validator(mode="after")
     def _ledger_k_fits(self) -> Rules:
         """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
         if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
@@ -222,7 +234,7 @@ class Rules(_Frozen):
 class ChallengeSpec(_Frozen):
     """What an author submits."""
 
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
@@ -402,6 +414,7 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+    heat_refs: dict[str, list[str]] = Field(default_factory=dict)  # agent -> sources from its model's last matches (R5)
 
     def handicap(self, name: str) -> Handicap:
         return next((a.handicap for a in self.agents if a.name == name), Handicap())

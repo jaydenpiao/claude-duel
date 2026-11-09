@@ -15,7 +15,7 @@ from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
-from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, shares_fragment
+from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -50,6 +50,7 @@ _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
 TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+SUMMARY_CHARS = 240  # reasoning summary kept per call in call_charged
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
@@ -238,6 +239,8 @@ class MatchEngine:
             output_tokens=completion.output_tokens,
             reasoning_tokens=completion.reasoning_tokens,
             truncated=completion.truncated,
+            purpose=request.purpose,
+            summary=self._summary(state, completion.reasoning_summary),
         )
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
@@ -366,6 +369,15 @@ class MatchEngine:
         hits = findings.scan_build(agent, state.round, (spec.title, spec.description), policy_reason)
         self._flag(state, hits, self._flag_for(state, cid))
         return spec, problem, probed
+
+    @staticmethod
+    def _summary(state: MatchState, text: str) -> str:
+        """Reasoning summary for the log: one line, capped, every flag of the match and flag-shaped text redacted."""
+        line = scrub(" ".join(text.split()))
+        cids = set(state.challenges) | set(state.build_errors)
+        flags = [flag_of(state.secret, c, e) for c in cids for e in range(len(state.build_errors.get(c, [])) + 1)]
+        line = redact(line, tuple(flags)) if state.secret else line
+        return line[:SUMMARY_CHARS] + ("…" if len(line) > SUMMARY_CHARS else "")
 
     @staticmethod
     def _no_flags(state: MatchState, event: Event) -> None:
@@ -628,9 +640,12 @@ class MatchEngine:
         return sorted((c for c in state.round_challenges(state.round) if c.author == author), key=lambda c: c.id)
 
     def _stake(self, state: MatchState, ch: Challenge, attacker: str) -> int | None:
+        """Per-challenge stake for a ledger attacker. Missing stakes mean zero (skip), not unlimited (#255)."""
+        if state.rules.ledger is None:
+            return None
         stakes = state.stakes.get(f"{state.round}:{attacker}")
         if stakes is None:
-            return None
+            return 0
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
     def _allocate(self, state: MatchState, attacker: str) -> None:
@@ -813,6 +828,7 @@ class MatchEngine:
             state.attacks,
             state.rules,
             stakes.keystone_targets(state, state.round),
+            state.heat_refs,
             ghosts.round_hits(state, state.round),
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
