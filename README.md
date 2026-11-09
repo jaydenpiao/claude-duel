@@ -92,6 +92,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 |---|---|---|
 | `DUEL_SANDBOX` | `sandbox` (`auto`/`docker`/`subprocess`) | `auto` |
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
+| `DUEL_REPLAY_BUCKET` | `replay_bucket`: private `gs://` bucket for `duel backup` (public access prevention on) | unset |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
 | `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |

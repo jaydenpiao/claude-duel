@@ -164,8 +164,9 @@ def heat_rule(rules: Rules) -> list[str]:
         return []
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
-        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
-        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+        f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
+        "(yours or your opponent's) or to one your model built in its last 3 matches "
+        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
     ]
 
 
