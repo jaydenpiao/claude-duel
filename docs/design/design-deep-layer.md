@@ -116,7 +116,7 @@ All layers are Rules sections (`rules.deep.*`) with pure scorer terms composed o
 - Prices from the model pages: [gpt-5-nano](https://developers.openai.com/api/docs/models/gpt-5-nano) $0.05 in / $0.40 out per 1M; [gpt-5-mini](https://developers.openai.com/api/docs/models/gpt-5-mini) $0.25 / $2.00.
 - Launch must complete before 2026-12-11. After that, default to the cheapest current non-deprecated OpenAI small model (pick at swap time; re-check the page), with gpt-6-luna as the default replacement (cheaper than OpenAI's suggested gpt-5.6-luna; gpt-5-mini remains a priced allowlist option).
 - Every match freezes model id + prices in `match_created`, so ratings across the swap stay comparable only through a 10-match bridge series (old vs new) logged in the corpus.
-- Default is now gpt-6-luna ($0.10/$0.50; Flex $0.05/$0.25 matches nano Standard). gpt-5-mini stays on the allowlist for explicit opts-in.
+- Default is now gpt-6-luna at Standard short-context rates, $0.10 in / $0.50 out per 1M ([pricing](https://developers.openai.com/api/docs/pricing)). That is an intentional cheaper alternative to the deprecation page's named replacement `gpt-5.6-luna` ($0.20 / $1.20). The adapter sets no Flex or Batch service tier, so the ledger bills those Standard rates. gpt-5-mini stays on the allowlist for explicit opts-in.
 
 ## 6. Costs (estimates, not measured)
 Base Ledger: ≈ $0.06/match with ×3 reasoning headroom (design-core-logic.md §6). Per match, 3 rounds, 2 sides, nano prices:

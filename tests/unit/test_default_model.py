@@ -8,6 +8,7 @@ from claude_duel.domain.errors import ConfigError
 def test_defaults_use_a_live_model_and_the_new_caps() -> None:
     s = Settings()
     assert s.default_model("openai") == s.gate_model == "gpt-6-luna"
+    assert DEFAULT_PRICES["gpt-6-luna"] == (0.10, 0.50)
     assert s.default_model("openai") in DEFAULT_PRICES
     lim = BudgetLimits()
     assert (lim.lifetime_max_usd, lim.match_max_usd) == (33.0, 0.25)

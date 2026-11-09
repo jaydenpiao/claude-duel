@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -34,15 +35,68 @@ RESP = {
 }
 
 
+# Published on the gpt-6-luna model page. "minimal" is absent, so a default payload that uses it is rejected.
+LUNA_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+
+
+def _body(req: httpx.Request) -> dict[str, object]:
+    payload: object = json.loads(req.content)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _effort(body: dict[str, object]) -> object:
+    reasoning = body.get("reasoning")
+    return reasoning.get("effort") if isinstance(reasoning, dict) else None
+
+
+def _rejecting(model: str, sent: list[httpx.Request], allow: Callable[[dict[str, object]], bool]) -> OpenAIProvider:
+    def h(req: httpx.Request) -> httpx.Response:
+        sent.append(req)
+        body = _body(req)
+        if not allow(body):
+            return httpx.Response(400, json={"error": {"message": f"rejected reasoning.effort: {_effort(body)}"}})
+        return httpx.Response(200, json=RESP)
+
+    return OpenAIProvider(SecretStr("sk-test-0000000000"), model, transport=httpx.MockTransport(h))
+
+
 def test_default_model_goes_to_responses_without_temperature() -> None:
     model = Settings().default_model("openai")
-    assert model.startswith(("gpt-5", "gpt-6"))
+    assert model == "gpt-6-luna"
     sent: list[httpx.Request] = []
     _provider(model, RESP, sent).complete(REQ)
     body = json.loads(sent[0].content)
     assert sent[0].url.path.endswith("/responses")
     assert "temperature" not in body
-    assert body["reasoning"] == {"effort": "minimal", "summary": "auto"}
+    assert "service_tier" not in body
+    assert body["reasoning"] == {"effort": "low", "summary": "auto"}
+
+
+def _luna_allows(body: dict[str, object]) -> bool:
+    return _effort(body) in LUNA_EFFORTS and "service_tier" not in body and "temperature" not in body
+
+
+def test_luna_default_is_rejected_if_it_sends_an_unsupported_effort() -> None:
+    """A 400 for ``minimal`` (or any effort outside the luna page) must not be the default payload."""
+    sent: list[httpx.Request] = []
+    assert _rejecting("gpt-6-luna", sent, _luna_allows).complete(REQ).text == "{}"
+    assert _effort(_body(sent[0])) == "low"
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_explicit_luna_effort_passes_the_supported_set(effort: str) -> None:
+    sent: list[httpx.Request] = []
+    req = REQ.model_copy(update={"reasoning_effort": effort})
+    assert _rejecting("gpt-6-luna", sent, _luna_allows).complete(req).text == "{}"
+    assert _effort(_body(sent[0])) == effort
+
+
+@pytest.mark.parametrize("model", ["gpt-5-nano", "gpt-5-mini"])
+def test_pinned_nano_and_mini_still_default_to_minimal(model: str) -> None:
+    sent: list[httpx.Request] = []
+    assert _rejecting(model, sent, lambda body: _effort(body) == "minimal").complete(REQ).text == "{}"
+    assert _effort(_body(sent[0])) == "minimal"
 
 
 @pytest.mark.parametrize("model", ["gpt-5-nano", "gpt-5-mini-2026", "gpt-5", "gpt-5.6-sol"])
