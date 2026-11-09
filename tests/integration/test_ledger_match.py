@@ -376,13 +376,14 @@ def test_pre_keystone_ledger_log_replays_with_features_off(make_engine, new_stat
 def test_ledger_preset_turns_the_features_on() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
-    assert (rule.keystone, rule.terrain, rule.heat_window, rule.heat_token_cap, rule.heat_ref_cap) == (
-        True,
-        "seeded",
-        2,
-        TOKEN_CAP,
-        REF_CAP,
-    )
+    assert (
+        rule.keystone,
+        rule.terrain,
+        rule.heat_window,
+        rule.heat_token_cap,
+        rule.heat_ref_cap,
+        rule.heat_compare,
+    ) == (True, "seeded", 2, TOKEN_CAP, REF_CAP, "full")
 
 
 def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]

@@ -128,8 +128,11 @@ class LedgerRule(_Frozen):
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
     # Both absent: legacy exact LCS while it fits the ceiling, unverified past it. A new match writes both
     # (open_match / the preset). One side, a non-int, or a value outside 1..ceiling is not a pin.
-    heat_token_cap: int | None = Field(default=None, description="pinned AST-token prefix compared for heat")
+    heat_token_cap: int | None = Field(default=None, description="paired heat pin; prefix width when compare=prefix")
     heat_ref_cap: int | None = Field(default=None, description="pinned max heat references per challenge")
+    # None with both caps absent: legacy LCS. None or prefix with both caps: the prefix pin.
+    # full: whole-source LCS. Anything else is not a pin.
+    heat_compare: str | None = Field(default=None, description="prefix or full; absent is not the whole-source rule")
 
     @field_validator("heat_token_cap", "heat_ref_cap", mode="before")
     @classmethod
@@ -138,6 +141,13 @@ class LedgerRule(_Frozen):
         if value is None or type(value) is int:
             return value
         return 0
+
+    @field_validator("heat_compare", mode="before")
+    @classmethod
+    def _compare_is_a_known_mode_or_absent(cls, value: object) -> object:
+        if value is None or value in ("prefix", "full"):
+            return value
+        return ""
 
 
 class DeepRule(_Frozen):

@@ -81,7 +81,11 @@ def test_ledger_overlay_series_and_tournament_share_the_heat_pin(tmp_path: Path)
     assert report.consistent, report.mismatches
     match = build_store(settings).load("overlay-g1")
     assert match.rules.ledger is not None
-    assert (match.rules.ledger.heat_token_cap, match.rules.ledger.heat_ref_cap) == (256, 48)
+    assert (match.rules.ledger.heat_token_cap, match.rules.ledger.heat_ref_cap, match.rules.ledger.heat_compare) == (
+        256,
+        48,
+        "full",
+    )
     logged = sr.fold("overlay", build_series_log(settings).read("overlay")).rules
     assert logged == match.rules
     tour = settings.model_copy(update={"store_dir": tmp_path / "tour"})

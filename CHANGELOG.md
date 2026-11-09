@@ -7,7 +7,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Security: host-side heat similarity no longer runs an uncapped LCS on model-written source. New matches pin `heat_token_cap` (256) and `heat_ref_cap` (48) together; the in-match window is kept first and sources over 65536 bytes are not parsed. A log without those pins is recomputed exactly when it fits the ceiling. A partial pin, a non-int, or a value outside that ceiling is `heat unverified` and the round's score is `score not checked` — it is not filled, clamped, or rescored with a different similarity.
-- Held: the 256-token prefix is not a sound novelty rule. A sandbox-accepted preamble in front of a copied challenge can drop prefix similarity to 0 while a full-source LCS of the same pair stays hot, and `score_round` then omits the heat line. No replacement metric is shipped. Pre-pin logs are not rescored.
+- New matches pin `heat_compare=full`: heat is the whole-source AST LCS again (a copied body is decided in linear time; other pairs use the DP only inside the cell budget). A log that pinned caps without `full` stays on the prefix rule. Pre-pin logs are not rescored. A short program buried in a long one still dilutes below the threshold, which is what the full LCS already did.
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).

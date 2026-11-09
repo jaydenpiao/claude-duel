@@ -19,6 +19,7 @@ from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.heat import (
     CELL_BUDGET,
     MAX_CHALLENGES,
+    PAIR_CELLS,
     PARSE_BYTES,
     REF_CAP,
     TOKEN_CAP,
@@ -373,7 +374,8 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     reset_heat_cache()
     started = time.perf_counter()
     got = heat(chs, _valid(chs), 3, rule, refs)
-    assert work_cells() == 6 * 39 * TOKEN_CAP * TOKEN_CAP
+    # Identical token sequences (names and int literals dropped) are a whole-source LCS of 100, no DP.
+    assert work_cells() == 0
     assert set(got) == {c.id for c in chs if c.round == 3}
     assert set(got.values()) == {100}
     again = work_cells()
@@ -391,9 +393,8 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     memory.summarize(state, "a", 3, state.rules.memory)
     prompted = work_cells()
     memory.summarize(state, "a", 3, state.rules.memory)
-    assert work_cells() == prompted
-    assert prompted - again == (6 * 27 + 6 * 33) * TOKEN_CAP * TOKEN_CAP
-    assert prompted <= 4 * CELL_BUDGET
+    assert work_cells() == prompted == 0
+    assert prompted <= CELL_BUDGET
     # Cell counts are the bound. 180s only catches a runaway walker; a slow runner has taken ~56s.
     assert time.perf_counter() - started < 180
 
@@ -418,6 +419,24 @@ def test_a_one_sided_pin_replays_as_unverified() -> None:
     assert report.consistent is False
     assert any("heat unverified" in item for item in report.mismatches)
     assert any("score not checked" in item for item in report.mismatches)
+
+
+def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
+    """Same token multiset, different order, too big for one DP: refuse or finish under the pair cap."""
+    left = "a = a + 1\n" * 4000
+    right = "a = 1 + a\n" * 4000
+    rule = preset("ledger").ledger
+    assert rule is not None
+    chs = [_ch("r1a", 1, "a", left), _ch("r2a", 2, "a", right)]
+    reset_heat_cache()
+    started = time.perf_counter()
+    try:
+        got = heat(chs, _valid(chs), 2, rule)
+    except HeatBoundError:
+        got = None
+    assert time.perf_counter() - started < 5
+    assert work_cells() <= PAIR_CELLS
+    assert got is None or got == {} or got["r2a"] < rule.heat_threshold_pct
 
 
 def test_tokens_stop_inside_a_wide_compare() -> None:

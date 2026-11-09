@@ -30,6 +30,10 @@ TOKEN_CAP = 256
 REF_CAP = 48
 MAX_CHALLENGES = 20  # two agents times challenges_per_round's maximum
 CELL_BUDGET = MAX_CHALLENGES * REF_CAP * TOKEN_CAP * TOKEN_CAP
+# Whole-source LCS materializes at most this many tokens. One DP is refused above PAIR_CELLS
+# (~0.4s); the call still stops at CELL_BUDGET. A copied body is decided without that DP.
+STORE_LIMIT = 32_768
+PAIR_CELLS = 4_000_000
 _MEMO_MAX = 64
 _TOKEN_MAX = 512
 
@@ -139,17 +143,10 @@ def tokens(source: str) -> tuple[str, ...]:
 
 
 def _lcs(a: tuple[str, ...], b: tuple[str, ...]) -> int:
-    """LCS length. Refuses a pair past ``TOKEN_CAP`` before the quadratic loop."""
+    """Prefix-pin LCS. Refuses a pair past ``TOKEN_CAP`` before the quadratic loop."""
     if len(a) > TOKEN_CAP or len(b) > TOKEN_CAP:
         raise HeatBoundError()
-    _Work.cells += len(a) * len(b)
-    prev = [0] * (len(b) + 1)
-    for x in a:
-        cur = [0]
-        for j, y in enumerate(b):
-            cur.append(prev[j] + 1 if x == y else max(prev[j + 1], cur[j]))
-        prev = cur
-    return prev[-1]
+    return _dp(a, b)
 
 
 def similarity(a: str, b: str, *, token_cap: int | None = None) -> int:
@@ -214,20 +211,40 @@ def _normalize_cap(value: int | None, ceiling: int) -> int:
     return ceiling
 
 
-def pin_heat_bound(rules: Rules) -> Rules:
-    """Pin both caps on a new match that uses heat. Heat off is unchanged.
+def compare_mode(rule: LedgerRule) -> str | None:
+    """``None`` legacy, ``prefix`` (caps without ``full``), or ``full`` (whole-source LCS).
 
-    This is the write path (config → log). Reading a log does not clamp: ``pinned_bound`` refuses a partial
-    or out-of-range pin.
+    A compare flag without both in-range caps, or any other flag value, is not a pin.
+    """
+    if rule.heat_compare not in (None, "prefix", "full"):
+        raise HeatBoundError()
+    if rule.heat_token_cap is None and rule.heat_ref_cap is None:
+        if rule.heat_compare is not None:
+            raise HeatBoundError()
+        return None
+    pinned_bound(rule)
+    if rule.heat_compare == "full":
+        return "full"
+    return "prefix"
+
+
+def pin_heat_bound(rules: Rules) -> Rules:
+    """Pin whole-source heat on a new match. Heat off is unchanged.
+
+    This is the write path (config → log). Reading a log does not clamp: a partial pin, an out-of-range
+    cap, or a compare flag without both caps stays unverified. A log that already says ``prefix`` is not
+    rewritten; only a new match is set to ``full``.
     """
     led = rules.ledger
     if led is None or not led.heat_window:
         return rules
     token = _normalize_cap(led.heat_token_cap, TOKEN_CAP)
     ref = _normalize_cap(led.heat_ref_cap, REF_CAP)
-    if (led.heat_token_cap, led.heat_ref_cap) == (token, ref):
+    if (led.heat_token_cap, led.heat_ref_cap, led.heat_compare) == (token, ref, "full"):
         return rules
-    return rules.model_copy(update={"ledger": led.model_copy(update={"heat_token_cap": token, "heat_ref_cap": ref})})
+    return rules.model_copy(
+        update={"ledger": led.model_copy(update={"heat_token_cap": token, "heat_ref_cap": ref, "heat_compare": "full"})}
+    )
 
 
 def _window(every: Sequence[Challenge], round_no: int, rule: LedgerRule) -> list[Challenge]:
@@ -269,7 +286,107 @@ def _plan(
     return tuple((ch.id, _source(ch), tuple(_references(window, history.get(ch.author, ()), rule))) for ch in current)
 
 
-def _percentages(plan: _Plan, token_cap: int | None, threshold: int) -> dict[str, int]:
+class _Seq:
+    tokens: tuple[str, ...] | None
+    length: int
+    counts: dict[str, int]
+
+    def __init__(self, tokens: tuple[str, ...] | None, length: int, counts: dict[str, int]) -> None:
+        self.tokens = tokens
+        self.length = length
+        self.counts = counts
+
+
+def _profile(source: str) -> _Seq | None:
+    """Whole-source token profile. ``None`` when the source is over the parse ceiling.
+
+    Tokens are kept only through ``STORE_LIMIT``. Counts cover the whole walk. A walk past that limit
+    still has a true length so a copied body can be recognized without a quadratic comparison.
+    """
+    if _raw(source) is None:
+        return None
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError):
+        return _Seq((), 0, {})
+    kept: list[str] = []
+    counts: dict[str, int] = {}
+    length = 0
+    stack: list[ast.AST] = list(reversed(tree.body))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _SKIP):
+            continue
+        for text in (type(node).__name__, *_extra(node)):
+            length += 1
+            counts[text] = counts.get(text, 0) + 1
+            if length <= STORE_LIMIT:
+                kept.append(text)
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+    stored = tuple(kept) if length <= STORE_LIMIT else None
+    return _Seq(stored, length, counts)
+
+
+def _is_subseq(small: tuple[str, ...], big: tuple[str, ...]) -> bool:
+    """True when every token of ``small`` occurs in ``big`` in order. Then LCS is ``len(small)``."""
+    if not small:
+        return True
+    index = 0
+    last = len(small)
+    for token in big:
+        if token == small[index]:
+            index += 1
+            if index == last:
+                return True
+    return False
+
+
+def _overlap(left: dict[str, int], right: dict[str, int]) -> int:
+    if len(left) > len(right):
+        left, right = right, left
+    return sum(min(count, right.get(name, 0)) for name, count in left.items())
+
+
+def _dp(a: tuple[str, ...], b: tuple[str, ...]) -> int:
+    """Exact LCS. The caller has already refused a pair above the cell budget."""
+    _Work.cells += len(a) * len(b)
+    prev = [0] * (len(b) + 1)
+    for token in a:
+        cur = [0]
+        for j, other in enumerate(b):
+            cur.append(prev[j] + 1 if token == other else max(prev[j + 1], cur[j]))
+        prev = cur
+    return prev[-1]
+
+
+def _full_similarity(a: str, b: str, threshold: int, room: int) -> int:
+    """Whole-source LCS percent. Exact when one side contains the other or the DP fits.
+
+    When the multiset ceiling is already under ``threshold``, the heat line matches full LCS without the
+    DP. Otherwise a pair that does not fit is refused (``HeatBoundError``), not prefix-scored.
+    """
+    left, right = _profile(a), _profile(b)
+    if left is None or right is None or left.length == 0 or right.length == 0:
+        if left is None or right is None:
+            raise HeatBoundError()
+        return 0
+    denom = max(left.length, right.length)
+    if (
+        left.tokens is not None
+        and right.tokens is not None
+        and (_is_subseq(left.tokens, right.tokens) or _is_subseq(right.tokens, left.tokens))
+    ):
+        return 100 * min(left.length, right.length) // denom
+    cells = left.length * right.length
+    if left.tokens is not None and right.tokens is not None and cells <= room and cells <= PAIR_CELLS:
+        return 100 * _dp(left.tokens, right.tokens) // denom
+    ceiling = 100 * _overlap(left.counts, right.counts) // denom
+    if ceiling < threshold:
+        return ceiling
+    raise HeatBoundError()
+
+
+def _percentages(plan: _Plan, mode: str | None, threshold: int) -> dict[str, int]:
     out: dict[str, int] = {}
     spent = 0
     for cid, src, past in plan:
@@ -278,13 +395,20 @@ def _percentages(plan: _Plan, token_cap: int | None, threshold: int) -> dict[str
         top = 0
         for ref in past:
             before = _Work.cells
-            top = max(top, similarity(src, ref, token_cap=token_cap))
+            top = max(top, _compare(src, ref, mode, threshold, CELL_BUDGET - spent))
             spent += _Work.cells - before
             if spent > CELL_BUDGET:
                 raise HeatBoundError()
         if top >= threshold:
             out[cid] = top
     return out
+
+
+def _compare(a: str, b: str, mode: str | None, threshold: int, room: int) -> int:
+    """Legacy and ``prefix`` keep the capped walk. ``full`` is the whole-source LCS, or a refusal."""
+    if mode == "full":
+        return _full_similarity(a, b, threshold, room)
+    return similarity(a, b, token_cap=None if mode is None else TOKEN_CAP)
 
 
 def heat(
@@ -301,14 +425,14 @@ def heat(
     if not rule.heat_window:
         return {}
     plan = _plan(challenges, validations, round_no, rule, refs)
-    bound = pinned_bound(rule)
-    key = _memo_key(rule, bound, plan)
+    mode = compare_mode(rule)
+    key = _memo_key(rule, mode, plan)
     if similarity is _REAL_SIMILARITY:
         cached = _MEMO.get(key)
         if cached is not None:
             _MEMO.move_to_end(key)
             return dict(cached)
-    out = _percentages(plan, None if bound is None else bound[0], rule.heat_threshold_pct)
+    out = _percentages(plan, mode, rule.heat_threshold_pct)
     if similarity is _REAL_SIMILARITY:
         _MEMO[key] = dict(out)
         while len(_MEMO) > _MEMO_MAX:
@@ -316,9 +440,9 @@ def heat(
     return out
 
 
-def _memo_key(rule: LedgerRule, bound: tuple[int, int] | None, plan: _Plan) -> tuple[object, ...]:
+def _memo_key(rule: LedgerRule, mode: str | None, plan: _Plan) -> tuple[object, ...]:
     compared = tuple((cid, _digest(src), tuple(_digest(s) for s in past)) for cid, src, past in plan)
-    return (rule.heat_threshold_pct, bound, compared)
+    return (rule.heat_threshold_pct, mode, compared)
 
 
 def _digest(source: str) -> bytes:

@@ -166,13 +166,13 @@ def heat_rule(rules: Rules) -> list[str]:
 
 
 def _heat_cap_sentence(led: LedgerRule) -> str:
-    """Disclose the pinned prefix and reference cap; empty when this match did not pin them."""
+    """Disclose how heat is compared; empty when this match did not pin the caps."""
     if led.heat_token_cap is None or led.heat_ref_cap is None:
         return ""
-    return (
-        f" Comparison uses the first {min(led.heat_token_cap, TOKEN_CAP)} AST tokens and at most "
-        f"{min(led.heat_ref_cap, REF_CAP)} references, this match's recent challenges first."
-    )
+    refs = f"at most {min(led.heat_ref_cap, REF_CAP)} references, this match's recent challenges first"
+    if led.heat_compare == "full":
+        return f" Comparison uses the whole program, not only its beginning, and {refs}."
+    return f" Comparison uses the first {min(led.heat_token_cap, TOKEN_CAP)} AST tokens and {refs}."
 
 
 def build_prompt(

@@ -115,9 +115,11 @@ def test_penalty_ramp_threshold_and_cap() -> None:
 def test_at_threshold_logs_a_zero_line_and_below_logs_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     chs, vals, atks = _round(LOOP, LOOP)
     by = {"r2a": atks["r2a"]}
+    # Prefix mode calls similarity. Whole-source mode does not, so this stub would not apply there.
+    prefix = LED.model_copy(update={"heat_compare": "prefix"})
     for sim, want in ((LED.heat_threshold_pct, {"r2a": 0}), (LED.heat_threshold_pct - 1, {})):
         monkeypatch.setattr("claude_duel.domain.heat.similarity", lambda a, b, s=sim, **_k: s)
-        assert heat_lines(chs, vals, by, 2, LED, lambda c: 20) == want
+        assert heat_lines(chs, vals, by, 2, prefix, lambda c: 20) == want
 
 
 def test_invalid_challenges_neither_take_nor_give_heat() -> None:
@@ -140,7 +142,7 @@ def test_forge_prompt_states_the_heat_rule() -> None:
     text = build_prompt("a", 1, 0, RULES, None)
     assert f">= {LED.heat_threshold_pct}% similar" in text
     assert f"up to {LED.heat_max_pct}%" in text
-    assert f"first {LED.heat_token_cap} AST tokens" in text
+    assert "whole program" in text
     assert "HEAT" not in build_prompt("a", 1, 0, preset("classic"), None)
 
 
