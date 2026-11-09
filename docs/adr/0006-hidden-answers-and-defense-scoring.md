@@ -30,3 +30,12 @@ Modes may charge the defender *penalty lines* (keystone captured, novelty heat),
    the interpreter version that parsed it is recorded in `match_created.python`.
 
 The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
+
+## Addendum: host work bound for heat similarity
+Heat's LCS runs in the engine process. New matches pin `LedgerRule.heat_token_cap` and `heat_ref_cap`
+(the ceiling is 256 tokens and 48 references; the in-match window is kept first; sources over 65536 bytes
+are not parsed). Replay of a pinned log uses that pin, so the logged heat stays exact. A log that does not
+pin the caps was scored with the full walk: replay recomputes it only when every compared source still fits
+the ceiling, and otherwise reports that round's heat unverified. It does not substitute the prefix score,
+and it does not call the round tampered. A parser overflow on deep nesting is an empty token sequence, the
+same as a source that does not parse.

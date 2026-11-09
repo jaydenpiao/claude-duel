@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from claude_duel.domain import events as ev
 from claude_duel.domain import ghosts, stakes
+from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, capture_points, heat_of_state, score_round
 
@@ -42,8 +43,9 @@ def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
     events = [e for e in events if e.seq <= snapshot.last_seq]
     folded = ev.fold(snapshot.match_id, events)
     mismatches = [f"snapshot.{name}" for name in _COMPARED if getattr(folded, name) != getattr(snapshot, name)]
-    recomputed = _rescore(folded, events, mismatches)
-    if recomputed != folded.scores:
+    recomputed, unverified = _rescore(folded, events, mismatches)
+    # A round past the heat ceiling was not rescored; its recorded total is not claimed exact.
+    if not unverified and recomputed != folded.scores:
         mismatches.append("total score")
     transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in events]
     return ReplayReport(not mismatches, recomputed, folded.scores, mismatches, transcript, _python_warning(events))
@@ -59,31 +61,40 @@ def _python_warning(events: list[Event]) -> list[str]:
     return [f"log written on Python {logged}, replayed on {here}: heat similarity may differ"]
 
 
-def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> dict[str, int]:
-    """Rescore every scored round from folded facts, noting rounds whose recorded delta differs."""
+def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> tuple[dict[str, int], bool]:
+    """Rescore every scored round from folded facts, noting rounds whose recorded delta differs.
+
+    Returns whether any round's heat was left unverified because the legacy comparison exceeds the work ceiling.
+    That round is not rescored and is not reported as tampered.
+    """
     names = [a.name for a in folded.agents]
     recomputed: dict[str, int] = {}
+    unverified = False
     for event in (e for e in events if e.type == ev.ROUND_SCORED):
         r = int(str(event.data["round"]))
-        keystones = stakes.keystone_targets(folded, r)
-        delta = score_round(
-            r,
-            names,
-            folded.challenges.values(),
-            folded.validations,
-            folded.attacks,
-            folded.rules,
-            keystones,
-            folded.heat_refs,
-            ghosts.round_hits(folded, r),
-        )
-        if delta != event.data["delta"]:
-            mismatches.append(f"round {r} score")
         points = capture_points(r, folded.challenges.values(), folded.validations, folded.attacks, folded.rules)
-        # logs written before #199 carry no points; the delta check above still covers their score
+        # logs written before #199 carry no points; the delta check below still covers their score
         if "points" in event.data and points != event.data["points"]:
             mismatches.append(f"round {r} points tampered")
+        try:
+            delta = score_round(
+                r,
+                names,
+                folded.challenges.values(),
+                folded.validations,
+                folded.attacks,
+                folded.rules,
+                stakes.keystone_targets(folded, r),
+                folded.heat_refs,
+                ghosts.round_hits(folded, r),
+            )
+        except HeatBoundError as exc:
+            mismatches.append(f"round {r} heat unverified: {exc}")
+            unverified = True
+            continue
+        if delta != event.data["delta"]:
+            mismatches.append(f"round {r} score")
         if heat_of_state(folded, r) != event.data.get("heat", {}):
             mismatches.append(f"round {r} heat tampered")
         recomputed = add_scores(recomputed, delta)
-    return recomputed
+    return recomputed, unverified

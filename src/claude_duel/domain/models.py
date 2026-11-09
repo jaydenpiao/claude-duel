@@ -126,6 +126,10 @@ class LedgerRule(_Frozen):
     heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+    # Absent (None) on logs scored before the host work bound: those recompute the full LCS only while they fit
+    # the ceiling in domain/heat.py, and are unverified past it. A new match pins both (open_match / the preset).
+    heat_token_cap: int | None = Field(default=None, ge=1, description="pinned AST-token prefix compared for heat")
+    heat_ref_cap: int | None = Field(default=None, ge=1, description="pinned max heat references per challenge")
 
 
 class DeepRule(_Frozen):

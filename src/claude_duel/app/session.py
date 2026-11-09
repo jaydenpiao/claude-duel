@@ -34,17 +34,20 @@ def open_match(
     try:
         state = store.load(match_id)
     except MatchNotFoundError:
+        rules = heat.pin_heat_bound(settings.rules)
         state = MatchState(
             match_id=match_id,
             secret=secrets.token_hex(32),
             framing_text=framing_text(settings.rules.framing),
             seed=seed if seed is not None else (settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16]),
             agents=agents if agents is not None else pin_agents(settings),
-            rules=settings.rules,
+            rules=rules,
             limits=settings.limits,
         )
-        if settings.rules.ledger is not None and settings.rules.ledger.heat_window:
-            state.heat_refs = heat.history_refs(_history(settings, match_id), state.agents)
+        if rules.ledger is not None and rules.ledger.heat_window:
+            state.heat_refs = heat.history_refs(
+                _history(settings, match_id), state.agents, source_limit=rules.ledger.heat_ref_cap
+            )
         store.save(state)
         if (why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)) is not None:
             log(_LOG, logging.WARNING, why, match_id=match_id)

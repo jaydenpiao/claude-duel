@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
-from claude_duel.domain.models import ChallengeSpec, Rules
+from claude_duel.domain.heat import REF_CAP, TOKEN_CAP
+from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
 SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
@@ -155,12 +156,23 @@ def heat_rule(rules: Rules) -> list[str]:
     led = rules.ledger
     if led is None or not led.heat_window:
         return []
+    caps = _heat_cap_sentence(led)
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
         f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
         "(yours or your opponent's) or to one your model built in its last 3 matches "
-        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new.{caps}"
     ]
+
+
+def _heat_cap_sentence(led: LedgerRule) -> str:
+    """Disclose the pinned prefix and reference cap; empty when this match did not pin them."""
+    if led.heat_token_cap is None or led.heat_ref_cap is None:
+        return ""
+    return (
+        f" Comparison uses the first {min(led.heat_token_cap, TOKEN_CAP)} AST tokens and at most "
+        f"{min(led.heat_ref_cap, REF_CAP)} references, this match's recent challenges first."
+    )
 
 
 def build_prompt(
