@@ -39,9 +39,26 @@ def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
     """Fold events from scratch, rescore every round from folded facts, and diff against the snapshot.
 
     Only events the snapshot has seen are compared; a crash can leave the log ahead (``duel resume`` catches up).
+    A heat log written before ``heat_vs_opponent`` with no ``heat_refs`` is own-only (#198) or opponent (#238)
+    heat; when own-only does not reproduce it, the opponent reading is tried and, if it does, reported with a note.
     """
     events = [e for e in events if e.seq <= snapshot.last_seq]
+    report = _report(snapshot, events, None)
+    led = snapshot.rules.ledger
+    if report.consistent or led is None or not led.heat_window or led.heat_vs_opponent is not None:
+        return report
+    wide = _report(snapshot, events, True)
+    if not wide.consistent:
+        return report
+    note = "heat_vs_opponent not logged: replayed with opponent heat (#238), which reproduces the log"
+    return ReplayReport(True, wide.recomputed, wide.recorded, [], wide.transcript, [*wide.warnings, note])
+
+
+def _report(snapshot: MatchState, events: list[Event], opponent: bool | None) -> ReplayReport:
     folded = ev.fold(snapshot.match_id, events)
+    if opponent is not None and folded.rules.ledger is not None:
+        led = folded.rules.ledger.model_copy(update={"heat_vs_opponent": opponent})
+        folded = folded.model_copy(update={"rules": folded.rules.model_copy(update={"ledger": led})})
     mismatches = [f"snapshot.{name}" for name in _COMPARED if getattr(folded, name) != getattr(snapshot, name)]
     recomputed = _rescore(folded, events, mismatches)
     if recomputed != folded.scores:
