@@ -11,7 +11,8 @@ from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import build_engine, build_event_log, build_store, pin_agents
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
-from claude_duel.domain import variety
+from claude_duel.domain import events as ev
+from claude_duel.domain import heat, variety
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
@@ -44,6 +45,8 @@ def open_match(
         )
         if settings.rules.variety:  # R2: frozen into match_created, so replay never rereads the store
             state.family_bans = variety.history_bans(_history(store, settings, match_id), state.agents)
+        if settings.rules.ledger is not None and settings.rules.ledger.heat_window:
+            state.heat_refs = heat.history_refs(_folded_history(settings, match_id), state.agents)
         store.save(state)
         if (why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)) is not None:
             log(_LOG, logging.WARNING, why, match_id=match_id)
@@ -84,6 +87,20 @@ def play(
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)
+
+
+def _folded_history(settings: Settings, match_id: str) -> list[MatchState]:
+    """Other matches in this store, folded from their logs (no secrets); unreadable logs are skipped."""
+    log_ = build_event_log(settings)
+    out = []
+    for other in log_.ids():
+        if other == match_id:
+            continue
+        try:
+            out.append(ev.fold(other, log_.read(other)))
+        except (EventLogCorruptError, ValueError, OSError, KeyError):
+            continue
+    return out
 
 
 def _warn_on_drift(settings: Settings, state: MatchState) -> None:

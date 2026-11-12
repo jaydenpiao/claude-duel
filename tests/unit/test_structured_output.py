@@ -112,5 +112,5 @@ def test_effort_is_sent_to_both_vendors_and_reasoning_tokens_are_counted() -> No
         "usage": {"input_tokens": 9, "output_tokens": 70, "output_tokens_details": {"reasoning_tokens": 64}},
     }
     out = OpenAIProvider(KEY, "gpt-6-luna", transport=_mock(seen, gpt_reply)).complete(req)
-    assert seen[1]["reasoning"] == {"effort": "low"}
+    assert seen[1]["reasoning"] == {"effort": "low", "summary": "auto"}
     assert (out.output_tokens, out.reasoning_tokens) == (70, 64)
