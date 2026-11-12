@@ -16,8 +16,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
-- Series and tournament logs pin heat caps before the created event. Child matches, including pool matches, use that logged contract and do not pin again, so a `[rules.ledger]` overlay still verifies. Resume of a log written without the caps keeps those rules.
-- Upgrade note: logs scored after opponent heat landed (#238) and before `heat_vs_opponent` is pinned do not record that flag. PR 279 is still open and is not merged here. That gate defaults the flag off, so those logs would fold to own-only heat. The author filter has to run before the reference cap when the branches combine. This branch does not add the flag and does not invent a cap-pinned cohort. Pre-pin logs that fit the ceiling still replay exactly, including opponent comparison on this build.
+- Heat pins (both caps, `full`, opponent heat) are set once when config loads, so series, tournament and pool children use the logged contract and never pin again; resume of a log written without the caps keeps those rules. An invalid or partial pin in a log is a corrupt-log error, not an unverified round. Heat state lives in a `HeatScorer` the engine, replay and arena own (no module caches).
+- With #279 merged here, the author filter runs before the reference cap, and the ledger preset and config load pin `heat_vs_opponent` on.
 - Config refuses API keys from TOML; env-only secrets (#242).
 - Warning when configured agent wallets exceed the match spend cap (#123).
 - Tournament bootstrap skips absent entrants (#124).
