@@ -74,6 +74,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
             folded.attacks,
             folded.rules,
             keystones,
+            folded.heat_refs,
             ghosts.round_hits(folded, r),
         )
         if delta != event.data["delta"]:
