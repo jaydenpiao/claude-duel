@@ -30,3 +30,10 @@ Modes may charge the defender *penalty lines* (keystone captured, novelty heat),
    the interpreter version that parsed it is recorded in `match_created.python`.
 
 The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
+
+## Addendum: vendor refusal (ADR 0016)
+A refused build pays `invalid_penalty`. A refused attack is one spent try; the
+attack continues with the remaining tries, and a valid challenge that was not
+captured still pays its defense award. A refused difficulty-gate probe is
+inconclusive, not held. See ADR 0016.
+
