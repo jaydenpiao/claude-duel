@@ -15,6 +15,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
 - Config refuses API keys from TOML; env-only secrets (#242).
 - Warning when configured agent wallets exceed the match spend cap (#123).
 - Tournament bootstrap skips absent entrants (#124).

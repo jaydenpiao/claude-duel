@@ -25,6 +25,7 @@ from claude_duel.domain.models import (
     ChallengeSpec,
     Event,
     Finding,
+    LedgerRule,
     MatchState,
     SandboxLimits,
     Stage,
@@ -668,6 +669,78 @@ class MatchEngine:
             return 0
         return stakes[[c.id for c in self._targets(state, attacker)].index(ch.id)]
 
+    def _allocate_rows(
+        self, state: MatchState, targets: list[Challenge]
+    ) -> tuple[list[tuple[str, str, str, bool]], frozenset[int], dict[str, str]]:
+        """Target rows for the allocate prompt and the indices a ghost already captured."""
+        hits = ghosts.round_hits(state, state.round)
+        rows = [
+            (
+                c.id,
+                _with_terrain(c.spec.title if c.spec else "", state.terrains.get(c.id)),
+                c.spec.source if c.spec else "",
+                bool(state.validations[c.id].valid),
+            )
+            for c in targets
+        ]
+        ghosted = frozenset(i for i, c in enumerate(targets) if c.id in hits)
+        return rows, ghosted, hits
+
+    def _allocate_move(
+        self,
+        state: MatchState,
+        attacker: str,
+        key: str,
+        rows: list[tuple[str, str, str, bool]],
+        own_rows: list[tuple[str, str, bool]] | None,
+        ghost_labels: dict[int, str],
+        rule: LedgerRule,
+    ) -> tuple[object, object]:
+        """Pay one allocate call, or skip it on resume after ALLOCATE_STARTED (#254)."""
+        if key in state.allocate_started:
+            return None, None  # already paid or started; settle without a second call
+        prompt = agents.allocate_prompt(
+            attacker,
+            state.round,
+            rule.attack_tokens,
+            rule.min_alloc,
+            rows,
+            self._memory(state, attacker),
+            own_rows,
+            ghost_labels,
+        )
+        for cid in state.challenges:
+            assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
+        self._checkpoint(state, ev.ALLOCATE_STARTED, agent=attacker, round=state.round)
+        if allowance.empty(state, attacker) is not None:
+            return None, None
+        completion = self._complete(state, attacker, prompt, "allocate")
+        try:
+            if not completion.truncated and not completion.refused:
+                move = agents.parse_allocation(completion.text)
+                return move.stakes, move.keystone
+        except MalformedOutputError:
+            self._metrics.incr("model.malformed", purpose="allocate")
+        return None, None
+
+    def _seal_keystone(
+        self,
+        state: MatchState,
+        attacker: str,
+        key: str,
+        pick: object,
+        own: list[Challenge],
+        valid: dict[str, bool],
+        rule: LedgerRule,
+    ) -> None:
+        """Seal a keystone with the allocation (same call, no extra cost) when not already sealed."""
+        if not rule.keystone or key in state.keystones:
+            return
+        index = stakes.pick_keystone(pick, own, valid)
+        salt = stakes.keystone_salt(state.seed, state.round, attacker)
+        commit = stakes.keystone_commit(index, salt)
+        self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
+
     def _allocate(self, state: MatchState, attacker: str) -> None:
         """Ledger: one paid call where the attacker splits its round's attack tokens; invalid -> even split.
 
@@ -680,17 +753,7 @@ class MatchEngine:
         if key in state.stakes:
             return  # idempotent resume
         targets = self._targets(state, attacker)
-        hits = ghosts.round_hits(state, state.round)
-        rows = [
-            (
-                c.id,
-                _with_terrain(c.spec.title if c.spec else "", state.terrains.get(c.id)),
-                c.spec.source if c.spec else "",
-                bool(state.validations[c.id].valid),
-            )
-            for c in targets
-        ]
-        ghosted = frozenset(i for i, c in enumerate(targets) if c.id in hits)
+        rows, ghosted, hits = self._allocate_rows(state, targets)
         own = stakes.own_challenges(state.challenges, state.round, attacker)
         valid = {c.id: bool(state.validations[c.id].valid) for c in own if c.id in state.validations}
         own_rows = (
@@ -698,42 +761,19 @@ class MatchEngine:
             if rule.keystone
             else None
         )
-        raw: object = None
-        pick: object = None
-        if key in state.allocate_started:
-            # already paid or started; settle without a second call (#254)
-            pass
-        else:
-            prompt = agents.allocate_prompt(
-                attacker,
-                state.round,
-                rule.attack_tokens,
-                rule.min_alloc,
-                rows,
-                self._memory(state, attacker),
-                own_rows,
-                {i: hits[targets[i].id] for i in sorted(ghosted)},
-            )
-            for cid in state.challenges:
-                assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
-            self._checkpoint(state, ev.ALLOCATE_STARTED, agent=attacker, round=state.round)
-            if allowance.empty(state, attacker) is None:
-                completion = self._complete(state, attacker, prompt, "allocate")
-                try:
-                    if not completion.truncated and not completion.refused:
-                        move = agents.parse_allocation(completion.text)
-                        raw, pick = move.stakes, move.keystone
-                except MalformedOutputError:
-                    self._metrics.incr("model.malformed", purpose="allocate")
+        raw, pick = self._allocate_move(
+            state,
+            attacker,
+            key,
+            rows,
+            own_rows,
+            {i: hits[targets[i].id] for i in sorted(ghosted)},
+            rule,
+        )
         chosen, fallback = stakes.settle_stakes(raw, len(targets), rule, ghosted)
         if fallback:
             self._metrics.incr("ledger.alloc_fallback")
-        # sealed with the allocation: same call, so it costs nothing extra
-        if rule.keystone and key not in state.keystones:
-            index = stakes.pick_keystone(pick, own, valid)
-            salt = stakes.keystone_salt(state.seed, state.round, attacker)
-            commit = stakes.keystone_commit(index, salt)
-            self._checkpoint(state, ev.KEYSTONE_SEALED, agent=attacker, round=state.round, commit=commit)
+        self._seal_keystone(state, attacker, key, pick, own, valid, rule)
         self._checkpoint(state, ev.STAKES_SET, agent=attacker, round=state.round, stakes=chosen, fallback=fallback)
 
     def _solve(self, state: MatchState, ch: Challenge, key: str, attacker: str, stake: int | None = None) -> Attack:
