@@ -8,7 +8,8 @@
 - ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
   bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset ceiling is only a cold-skip filter (if it
   is below the threshold, the exact LCS is too). Every source under ``PARSE_BYTES`` keeps its full walk, so a
-  long exact copy is compared (a copied body in linear time). A pair over the work guard is ``heat unchecked``:
+  long exact copy is compared (a copied body in linear time). Admission caps a source so every pair a legal
+  round can admit fits in ``WORK_BUDGET`` (``admit``); a pair over the work guard is ``heat unchecked``:
   it never raises, is charged 0, and is never scored on a bound (S13-4).
 
 All three go through ``compare``. LCS is exact in every regime, so old logs replay unchanged.
@@ -19,13 +20,14 @@ from __future__ import annotations
 from typing import Literal, NamedTuple
 
 from claude_duel.domain.errors import HeatBoundError
-from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP, Profile
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP, Profile, profile
 from claude_duel.domain.models import LedgerRule, Rules
 
 Regime = Literal["legacy", "prefix", "full"]
 MAX_CHALLENGES = 20  # two agents times challenges_per_round's maximum
 WORD = 64  # bits per machine word: the work unit of the bit-parallel LCS
 WORK_BUDGET = 1_000_000_000  # word operations per heat call (about 6 s); 32k x 32k tokens is 16.8M (~0.1 s)
+DENSE = 2  # advertised byte cap is admit//DENSE; a denser walk is still refused at heavy
 
 
 class Hot(NamedTuple):
@@ -83,6 +85,46 @@ def lcs(a: tuple[str, ...], b: tuple[str, ...]) -> int:
 def work(a: int, b: int) -> int:
     """Word operations ``lcs`` spends on walks of ``a`` and ``b`` tokens."""
     return max(a, b) * (min(a, b) // WORD + 1)
+
+
+def slots(rules: Rules) -> int:
+    """Current challenges times the reference cap: every pair one heat call may have to compare."""
+    current = min(MAX_CHALLENGES, 2 * rules.challenges_per_round)
+    led = rules.ledger
+    refs = REF_CAP if led is None or led.heat_ref_cap is None else led.heat_ref_cap
+    return max(1, current * max(1, refs))
+
+
+def admit(rules: Rules) -> int:
+    """Longest walk such that ``slots(rules)`` same-size pairs fit in ``WORK_BUDGET``."""
+    room = WORK_BUDGET // slots(rules)
+    lo, hi = 0, room
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if work(mid, mid) <= room:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def admit_bytes(rules: Rules) -> int:
+    """Byte cap advertised for full-heat admission; the walk is still checked against ``admit``."""
+    return max(1, admit(rules) // DENSE)
+
+
+def heavy(source: str, rules: Rules) -> str | None:
+    """Reason a full-heat source's walk would not fit the call, or None."""
+    led = rules.ledger
+    if led is None or not led.heat_window or led.heat_compare != "full":
+        return None
+    walked = profile(source)
+    if walked is None:
+        return None
+    n = admit(rules)
+    if walked.length > n:
+        return f"source exceeds {n} heat tokens"
+    return None
 
 
 def overlap(left: dict[str, int], right: dict[str, int]) -> int:

@@ -48,8 +48,7 @@ Every source under the 65536-byte parse ceiling keeps its full token walk. A pai
 `heat unchecked`: no penalty is charged on it, it is logged in `round_scored.heat_unchecked` (omit if empty),
 and it is shown as `heat unchecked`. A challenge is charged only on an exact similarity at or over the
 threshold. An upper bound (such as the multiset ceiling, which ran 9-33 points above the LCS on unrelated
-modules, S13-4) is never charged or shown as the similarity. Replay recomputes the same result. Admission
-caps sources at the 65536-byte parse ceiling under this rule.
+modules, S13-4) is never charged or shown as the similarity. Replay recomputes the same result. Admission caps sources so every pair a legal round can admit fits the work budget (and never past the 65536-byte parse ceiling).
 
 ## Addendum: vendor refusal (ADR 0016)
 A refused build pays `invalid_penalty`. A refused attack is one spent try; the

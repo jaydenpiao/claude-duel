@@ -244,10 +244,12 @@ class Rules(_Frozen):
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
-        """Escalation: authors get more room every round. Whole-source heat stops at what it parses."""
+        """Escalation: authors get more room every round. Whole-source heat stops at what one call can compare."""
         cap = self.max_source_bytes_base * round_no
         if self.ledger is not None and self.ledger.heat_window and self.ledger.heat_compare == "full":
-            return min(cap, PARSE_BYTES)
+            from claude_duel.domain.heat_bound import admit_bytes  # noqa: PLC0415
+
+            return min(cap, PARSE_BYTES, admit_bytes(self))
         return cap
 
     def output_cap(self, own: int | None = None) -> int:

@@ -17,6 +17,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
 from claude_duel.domain.heat import HeatScorer
+from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -553,7 +554,7 @@ class MatchEngine:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
         if spec.solver and not spec.reference_payload.strip():
             return "no reference input: the solver never printed one"
-        rejected = policy.check(spec, state.rules.max_source_bytes(round_no))
+        rejected = policy.check(spec, state.rules.max_source_bytes(round_no)) or heavy(spec.source, state.rules)
         if rejected:
             return rejected
         flag = self._flag_for(state, cid)

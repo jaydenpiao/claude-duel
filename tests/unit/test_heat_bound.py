@@ -19,10 +19,21 @@ from claude_duel.app.replay import replay
 from claude_duel.app.session import open_match
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
-from claude_duel.domain import memory
+from claude_duel.domain import memory, policy
 from claude_duel.domain.errors import EventLogCorruptError, HeatBoundError
 from claude_duel.domain.heat import HeatScorer, heat, heat_label, history_refs
-from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, overlap, pin_heat_bound, work
+from claude_duel.domain.heat_bound import (
+    MAX_CHALLENGES,
+    WORK_BUDGET,
+    Hot,
+    admit,
+    admit_bytes,
+    heavy,
+    overlap,
+    pin_heat_bound,
+    slots,
+    work,
+)
 from claude_duel.domain.heat_bound import lcs as bit_lcs
 from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP, profile, tokens
 from claude_duel.domain.models import (
@@ -509,11 +520,15 @@ def test_unparsed_reference_is_a_bound_and_history_skips_it() -> None:
     assert history_refs([match], [AgentSpec(name="me", model="x")]) == {"me": ["y = 2\n"]}
 
 
-def test_whole_source_heat_caps_admission_at_the_parse_ceiling() -> None:
+def test_whole_source_heat_caps_admission_at_the_work_budget() -> None:
+    """Full heat advertises a byte cap that a legal window can compare; legacy is still only the parse ceiling."""
     full = preset("ledger").model_copy(update={"max_source_bytes_base": 4096})
-    assert full.max_source_bytes(20) == PARSE_BYTES
-    assert full.max_source_bytes(2) == 8192
+    cap = admit_bytes(full)
+    assert cap < PARSE_BYTES
+    assert full.max_source_bytes(20) == cap
+    assert full.max_source_bytes(2) == min(8192, cap)
     assert _legacy_rules().model_copy(update={"max_source_bytes_base": 4096}).max_source_bytes(20) == 81920
+    assert slots(full) * work(admit(full), admit(full)) <= WORK_BUDGET
 
 
 def test_author_filter_applies_before_the_ref_cut() -> None:
@@ -607,10 +622,9 @@ def test_multiset_ceiling_skips_a_cold_pair() -> None:
 
 
 def test_exact_copy_past_32k_tokens_is_charged() -> None:
-    """An exact copy longer than the old 32,768-token drop must be compared and charged 100 (never unchecked).
-
-    The source is the review repro: the shipped sum template plus enough ``1`` lines to walk past 32,768 tokens
-    (~22 KiB). It fits the default byte cap in rounds 11-12 of a 12-round ledger match, not earlier.
+    """An exact copy longer than the old 32,768-token drop is still compared and charged 100 (never unchecked)
+    when it is already in the ledger. New full-heat admission refuses a walk this long: it would not fit a
+    packed window's work budget.
     """
     template = next(t for t in TEMPLATES if t.key == "sum")
     unit, prefix = profile("1\n"), profile(template.source)
@@ -622,10 +636,10 @@ def test_exact_copy_past_32k_tokens_is_charged() -> None:
     assert walked is not None
     assert walked.length == len(walked.tokens) > 32_768
     assert work(walked.length, walked.length) <= WORK_BUDGET
-    rules = Rules()
-    assert len(source.encode()) > rules.max_source_bytes(10)
-    assert len(source.encode()) <= rules.max_source_bytes(11) <= rules.max_source_bytes(12)
-    rule = preset("ledger").ledger
+    rules = preset("ledger")
+    assert len(source.encode()) > rules.max_source_bytes(20)
+    assert heavy(source, rules) is not None
+    rule = rules.ledger
     assert rule is not None
     sc = HeatScorer()
     assert sc.similarity(source, source, rule) == Hot(100, True)
@@ -633,3 +647,55 @@ def test_exact_copy_past_32k_tokens_is_charged() -> None:
     chs = [_ch("r11a", 11, "a", source), _ch("r12a", 12, "a", source)]
     assert sc.heat(chs, _valid(chs), 12, rule) == {"r12a": 100}
     assert sc.unchecked_ids(chs, _valid(chs), 12, rule) == []
+
+
+def _near_copy(target: int) -> tuple[str, str]:
+    """Two programs at ``target`` bytes: ``1`` / ``+1`` blocks swapped, plus the shipped sum template.
+
+    At 40,960 bytes this is the PR 282 review repro (76% exact, not a subsequence).
+    """
+    template = next(t for t in TEMPLATES if t.key == "sum").source
+    room = max(0, target - len(template.encode()))
+    # Mix that measured 76% at 40,959 bytes: 8,971 ones and 7,600 plus-ones.
+    plus_bytes = (3 * 7600) * room // (2 * 8971 + 3 * 7600)
+    n_plus = plus_bytes // 3
+    n_ones = (room - 3 * n_plus) // 2
+    a = "1\n" * n_ones + "+1\n" * n_plus + template
+    b = "+1\n" * n_plus + "1\n" * n_ones + template
+    while max(len(a.encode()), len(b.encode())) > target and n_ones:
+        n_ones -= 1
+        a = "1\n" * n_ones + "+1\n" * n_plus + template
+        b = "+1\n" * n_plus + "1\n" * n_ones + template
+    return a, b
+
+
+def test_packed_round20_near_copy_is_compared_exactly() -> None:
+    """A 40,960-byte 76% near-copy in a packed ledger 6-vs-6 window used to exhaust the 1e9 word budget;
+    later challenges came back heat unchecked and were charged 0. Admission now sizes the cap so every
+    pair the rules can admit fits, and a packed window at that cap is charged on the exact LCS.
+    """
+    rules = preset("ledger").model_copy(update={"rounds": 20})
+    cap = rules.max_source_bytes(20)
+    assert cap < 40_960
+    over, _ = _near_copy(40_960)
+    assert len(over.encode()) <= 40_960
+    assert policy.check(spec(over), cap) is not None
+    assert heavy(over, rules) is not None
+    left, right = _near_copy(cap)
+    assert max(len(left.encode()), len(right.encode())) <= cap
+    assert policy.check(spec(left), cap) is None
+    assert policy.check(spec(right), cap) is None
+    assert heavy(left, rules) is None
+    assert heavy(right, rules) is None
+    prev = [_ch(f"p{i}", 19, "a" if i < 3 else "b", left if i % 2 == 0 else right) for i in range(6)]
+    current = [_ch(f"c{i}", 20, "a" if i < 3 else "b", left if i % 2 == 0 else right) for i in range(6)]
+    chs = prev + current
+    rule = rules.ledger
+    assert rule is not None
+    sc = HeatScorer()
+    got = sc.scan(chs, _valid(chs), 20, rule)
+    assert sc.unchecked_ids(chs, _valid(chs), 20, rule) == []
+    assert set(got) == {c.id for c in current}
+    assert all(h.exact and h.pct >= rule.heat_threshold_pct for h in got.values())
+    assert sc.heat(chs, _valid(chs), 20, rule) == {cid: h.pct for cid, h in got.items()}
+    assert sc.work <= WORK_BUDGET

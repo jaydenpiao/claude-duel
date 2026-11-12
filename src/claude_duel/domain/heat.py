@@ -239,20 +239,29 @@ def history_refs(
     k: int = 3,
     *,
     source_limit: int | None = None,
+    token_limit: int | None = None,
 ) -> dict[str, list[str]]:
     """agent name -> valid challenge sources its model (same provider and model) built in its last ``k`` matches,
     oldest first by ``created_seq``. ``source_limit`` keeps the newest sources so a new match stores a bounded
-    list; sources heat would not parse are skipped. Frozen into ``match_created`` so heat replays exactly."""
+    list; sources heat would not parse, or whose walk exceeds ``token_limit``, are skipped. Frozen into
+    ``match_created`` so heat replays exactly."""
     ordered = sorted(past, key=lambda m: (m.created_seq is None, m.created_seq or 0, m.match_id))
     out: dict[str, list[str]] = {}
     for spec in agents:
         mine = [(m, a.name) for m in ordered for a in m.agents if (a.provider, a.model) == (spec.provider, spec.model)]
-        sources = [
-            _source(c)
-            for m, name in mine[-k:]
-            for c in sorted(m.challenges.values(), key=lambda c: c.id)
-            if c.author == name and _valid(c, m.validations) and raw(_source(c)) is not None
-        ]
+        sources: list[str] = []
+        for m, name in mine[-k:]:
+            for c in sorted(m.challenges.values(), key=lambda c: c.id):
+                if c.author != name or not _valid(c, m.validations):
+                    continue
+                src = _source(c)
+                if raw(src) is None:
+                    continue
+                if token_limit is not None:
+                    got = profile(src)
+                    if got is None or got.length > token_limit:
+                        continue
+                sources.append(src)
         if source_limit is not None:
             sources = sources[-source_limit:]
         if sources:
