@@ -1,6 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.heat import REF_CAP, TOKEN_CAP
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
 from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {

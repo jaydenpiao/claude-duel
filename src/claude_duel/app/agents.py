@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
-from claude_duel.domain.heat import REF_CAP, TOKEN_CAP
+from claude_duel.domain.heat_bound import regime
 from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
@@ -166,16 +166,17 @@ def heat_rule(rules: Rules) -> list[str]:
 
 
 def _heat_cap_sentence(led: LedgerRule) -> str:
-    """Disclose how heat is compared; empty when this match did not pin the caps."""
-    if led.heat_token_cap is None or led.heat_ref_cap is None:
+    """Disclose how heat is compared; empty when this match did not pin the caps (legacy)."""
+    mode = regime(led)
+    if mode == "legacy":
         return ""
-    refs = f"at most {min(led.heat_ref_cap, REF_CAP)} references, this match's recent challenges first"
-    if led.heat_compare == "full":
+    refs = f"at most {led.heat_ref_cap} references, this match's recent challenges first"
+    if mode == "full":
         return (
             f" Comparison uses the whole program, not only its beginning, and {refs}."
             " A pair too large to compare exactly is charged on an upper bound of its similarity."
         )
-    return f" Comparison uses the first {min(led.heat_token_cap, TOKEN_CAP)} AST tokens and {refs}."
+    return f" Comparison uses the first {led.heat_token_cap} AST tokens and {refs}."
 
 
 def build_prompt(

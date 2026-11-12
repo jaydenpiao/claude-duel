@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-HEAT_PARSE_BYTES = 65_536  # heat parses at most this much source; whole-source heat admits no more
+from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
+
+_TokenCap = Annotated[int, Field(strict=True, ge=1, le=TOKEN_CAP)]
+_RefCap = Annotated[int, Field(strict=True, ge=1, le=REF_CAP)]
 
 
 class Stage(StrEnum):
@@ -128,28 +131,19 @@ class LedgerRule(_Frozen):
     heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
-    # Both absent: legacy exact LCS while it fits the ceiling, unverified past it. A new match writes both
-    # (open_match / the preset). One side, a non-int, or a value outside 1..ceiling is not a pin.
-    heat_token_cap: int | None = Field(default=None, description="paired heat pin; prefix width when compare=prefix")
-    heat_ref_cap: int | None = Field(default=None, description="pinned max heat references per challenge")
-    # None with both caps absent: legacy LCS. None or prefix with both caps: the prefix pin.
-    # full: whole-source LCS. Anything else is not a pin.
-    heat_compare: str | None = Field(default=None, description="prefix or full; absent is not the whole-source rule")
+    # Heat pins (heat_bound.regime). Both caps absent: legacy (logs from before the caps). Both set: prefix,
+    # or full with heat_compare="full" (new matches). A partial pin, a non-int or an out-of-range cap is invalid.
+    heat_token_cap: _TokenCap | None = Field(default=None, description="paired heat pin; prefix width under prefix")
+    heat_ref_cap: _RefCap | None = Field(default=None, description="pinned max heat references per challenge")
+    heat_compare: Literal["prefix", "full"] | None = Field(default=None, description="full: whole-source heat")
 
-    @field_validator("heat_token_cap", "heat_ref_cap", mode="before")
-    @classmethod
-    def _cap_is_an_int_or_absent(cls, value: object) -> object:
-        """Keep a real int. Bools, floats and strings are not coerced into a verified pin (they become 0)."""
-        if value is None or type(value) is int:
-            return value
-        return 0
-
-    @field_validator("heat_compare", mode="before")
-    @classmethod
-    def _compare_is_a_known_mode_or_absent(cls, value: object) -> object:
-        if value is None or value in ("prefix", "full"):
-            return value
-        return ""
+    @model_validator(mode="after")
+    def _heat_pin_is_whole(self) -> LedgerRule:
+        if (self.heat_token_cap is None) != (self.heat_ref_cap is None):
+            raise ValueError("heat_token_cap and heat_ref_cap are pinned together")
+        if self.heat_compare is not None and self.heat_token_cap is None:
+            raise ValueError("heat_compare needs both heat caps")
+        return self
 
 
 class DeepRule(_Frozen):
@@ -248,7 +242,7 @@ class Rules(_Frozen):
         """Escalation: authors get more room every round. Whole-source heat stops at what it parses."""
         cap = self.max_source_bytes_base * round_no
         if self.ledger is not None and self.ledger.heat_window and self.ledger.heat_compare == "full":
-            return min(cap, HEAT_PARSE_BYTES)
+            return min(cap, PARSE_BYTES)
         return cap
 
     def output_cap(self, own: int | None = None) -> int:

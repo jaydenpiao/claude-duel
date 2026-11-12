@@ -9,7 +9,7 @@ import ast
 from collections import Counter
 
 from claude_duel.domain.flags import redact
-from claude_duel.domain.heat import heat_label, heat_scan
+from claude_duel.domain.heat import HeatScorer, heat_label
 from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
 from claude_duel.domain.scoring import heat_of_state
 from claude_duel.domain.stakes import keystone_targets
@@ -45,13 +45,17 @@ def _name(node: ast.AST) -> str:
     return node.attr if isinstance(node, ast.Attribute) else ""
 
 
-def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) -> str:
-    """Memory for ``agent`` after rounds 1..upto_round, at most ``rule.max_chars``; oldest rounds drop first."""
+def summarize(
+    state: MatchState, agent: str, upto_round: int, rule: MemoryRule, scorer: HeatScorer | None = None
+) -> str:
+    """Memory for ``agent`` after rounds 1..upto_round, at most ``rule.max_chars``; oldest rounds drop first.
+    ``scorer`` lets the engine reuse its heat memo across rounds."""
     if rule.kind == "none" or upto_round < 1:
         return ""
     opponent = state.opponent(agent)
     by_challenge = {a.challenge_id: a for a in state.attacks.values()}
-    rounds = [_round_block(state, r, agent, by_challenge, rule) for r in range(1, upto_round + 1)]
+    scorer = scorer or HeatScorer()
+    rounds = [_round_block(state, r, agent, by_challenge, rule, scorer) for r in range(1, upto_round + 1)]
     tail = [_tendencies(state, opponent, upto_round, by_challenge), f"Scoreboard: {_board(state)}"]
     if rule.kind == "summary+scratchpad":
         tail.append(_scratchpad(state, agent, upto_round))
@@ -63,15 +67,17 @@ def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) 
         rounds, dropped = rounds[1:], True
 
 
-def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attack], rule: MemoryRule) -> str:
+def _round_block(
+    state: MatchState, r: int, agent: str, attacks: dict[str, Attack], rule: MemoryRule, scorer: HeatScorer
+) -> str:
     lines = [f"Round {r}:"]
     stones = set(keystone_targets(state, r).values())  # revealed only, so past rounds never leak a sealed pick
     hot = (
-        heat_scan(state.challenges.values(), state.validations, r, state.rules.ledger, state.heat_refs)
+        scorer.scan(state.challenges.values(), state.validations, r, state.rules.ledger, state.heat_refs)
         if state.rules.ledger
         else {}
     )
-    penalties = heat_of_state(state, r) if r in state.scored_rounds else {}
+    penalties = heat_of_state(state, r, scorer) if r in state.scored_rounds else {}
     for ch in sorted(state.round_challenges(r), key=lambda c: c.id):
         atk = attacks.get(ch.id)
         mark = " (keystone)" if ch.id in stones else ""

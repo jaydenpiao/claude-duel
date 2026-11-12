@@ -17,7 +17,6 @@ from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create,
 from claude_duel.app.series import play_series
 from claude_duel.app.session import open_match
 from claude_duel.config import Settings
-from claude_duel.domain import heat
 from claude_duel.domain import series as sr
 from claude_duel.domain import tournament as tr
 from claude_duel.domain.models import AgentSpec, Challenge
@@ -51,7 +50,6 @@ def _play_tournament(
     settings: Settings, tournament_id: str, rule: tr.TournamentRule, metrics: Metrics
 ) -> tr.TournamentState:
     event_log = build_tournament_log(settings)
-    settings = settings.model_copy(update={"rules": heat.pin_heat_bound(settings.rules)})
     events = open_or_create(
         event_log,
         tournament_id,
@@ -80,9 +78,7 @@ def _play_tournament(
             pair_settings = settings.model_copy(
                 update={"agents": (specs[a], specs[b]), "seed": sr.game_seed(state.seed, len(state.pairings) + 1)}
             )
-            series = play_series(
-                pair_settings, sid, state.rule.series, metrics, budget=budget, caps=(cap,), normalize_heat=False
-            )
+            series = play_series(pair_settings, sid, state.rule.series, metrics, budget=budget, caps=(cap,))
             if not series.done():
                 return state  # a failed game: rerun to resume
             pairing = tr.Pairing(
@@ -144,7 +140,6 @@ def _attack_pool(
                 agents=agents,
                 seed=tr.tiebreak(state.seed, spec.name)[:16],
                 warn_drift=False,
-                pin_heat=False,
             )
             engine = build_engine(settings, metrics, store, match.agents, budget=budget)
             mine = [c for c in pool if c.author != spec.name]

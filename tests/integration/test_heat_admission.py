@@ -6,7 +6,7 @@ import ast
 
 from claude_duel.adapters.providers.fake import TEMPLATES
 from claude_duel.app.engine import MatchEngine
-from claude_duel.domain.heat import TOKEN_CAP, similarity
+from claude_duel.domain.heat_tokens import TOKEN_CAP
 from claude_duel.domain.models import (
     AgentSpec,
     Attack,
@@ -18,6 +18,7 @@ from claude_duel.domain.models import (
 )
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import round_heat, score_round
+from tests.helpers import similarity
 
 _SUM = next(t for t in TEMPLATES if t.key == "sum")
 _CELL_BUDGET = 8_000_000

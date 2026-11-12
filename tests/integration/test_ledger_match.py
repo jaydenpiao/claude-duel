@@ -19,7 +19,7 @@ from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
-from claude_duel.domain.heat import REF_CAP, TOKEN_CAP
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import capture_points

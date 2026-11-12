@@ -29,17 +29,13 @@ def open_match(
     agents: tuple[AgentSpec, ...] | None = None,
     seed: str | None = None,
     warn_drift: bool = True,
-    pin_heat: bool = True,
 ) -> MatchState:
-    """Load or create a match. New matches pin ``framing_text`` from the current framing rule.
-
-    ``pin_heat`` is for a match started from config. A series or tournament child passes False: its rules
-    are already the driver's logged contract (pinned when that log was created, left alone on resume).
-    """
+    """Load or create a match. New matches pin ``framing_text`` from the current framing rule and store
+    ``settings.rules`` as given (heat is pinned in config; a driver child gets the driver's logged rules)."""
     try:
         state = store.load(match_id)
     except MatchNotFoundError:
-        rules = heat.pin_heat_bound(settings.rules) if pin_heat else settings.rules
+        rules = settings.rules
         state = MatchState(
             match_id=match_id,
             secret=secrets.token_hex(32),
@@ -68,8 +64,6 @@ def play(
     metrics: Metrics,
     observer: EventObserver | None = None,
     budget: CostBudget | None = None,
-    *,
-    pin_heat: bool = True,
 ) -> MatchState:
     """Run or resume a match. A resumed match keeps its saved agents, models, rules and limits.
 
@@ -78,7 +72,7 @@ def play(
     """
     store = build_store(settings)
     with store.lock(match_id):
-        state = open_match(store, settings, match_id, pin_heat=pin_heat)
+        state = open_match(store, settings, match_id)
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)

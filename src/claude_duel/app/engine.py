@@ -16,6 +16,7 @@ from claude_duel.domain import contract, findings, ghosts, memory, policy, stake
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
+from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.models import (
     CAPTURED,
     Attack,
@@ -96,6 +97,7 @@ class MatchEngine:
         self._log = event_log
         self._metrics = metrics
         self._observer = IsolatedObserver(observer, metrics) if observer is not None else None
+        self._heat = HeatScorer()  # heat memo shared by scoring and memory across this engine's rounds
 
     # -- lifecycle -------------------------------------------------------
     def run(self, state: MatchState) -> MatchState:
@@ -409,7 +411,7 @@ class MatchEngine:
 
     def _memory(self, state: MatchState, agent: str) -> str:
         """Pure summary of the rounds before this one; checked against every flag of the match first."""
-        text = memory.summarize(state, agent, state.round - 1, state.rules.memory)
+        text = memory.summarize(state, agent, state.round - 1, state.rules.memory, self._heat)
         for cid in state.challenges:
             assert_no_flag(text, self._flag_for(state, cid), "memory")
         return text
@@ -836,11 +838,12 @@ class MatchEngine:
             stakes.keystone_targets(state, state.round),
             state.heat_refs,
             ghosts.round_hits(state, state.round),
+            scorer=self._heat,
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
-        lines = heat_of_state(state, state.round)
+        lines = heat_of_state(state, state.round, self._heat)
         extra: dict[str, object] = {"heat": lines} if lines else {}
-        if bound := heat_bound_of_state(state, state.round):
+        if bound := heat_bound_of_state(state, state.round, self._heat):
             extra["heat_bound"] = bound
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
 

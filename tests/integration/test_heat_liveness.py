@@ -10,7 +10,9 @@ import pytest
 from claude_duel.adapters.providers.fake import TEMPLATES, FakeProvider
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
-from claude_duel.domain.heat import PAIR_CELLS, _dp, _overlap, _profile, heat_scan, reset_heat_cache
+from claude_duel.domain.heat import HeatScorer
+from claude_duel.domain.heat_bound import PAIR_CELLS, lcs
+from claude_duel.domain.heat_tokens import profile
 from claude_duel.domain.memory import summarize
 from claude_duel.domain.models import MatchState, Stage
 from claude_duel.domain.modes import preset
@@ -56,20 +58,19 @@ def _state(new_state) -> MatchState:  # type: ignore[no-untyped-def]
 
 
 def test_fixture_is_over_the_pair_limit_and_its_bound_is_not_exact() -> None:
-    left, right = _profile(SOURCES[2]), _profile(SOURCES[3])
+    left, right = profile(SOURCES[2]), profile(SOURCES[3])
     assert left is not None
     assert right is not None
     assert left.tokens is not None
     assert right.tokens is not None
     assert (left.length, right.length) == (1683, 2383)
     assert left.length * right.length == 4_010_589 > PAIR_CELLS
-    exact = 100 * _dp(left.tokens, right.tokens) // right.length  # test-only, outside the match
-    ceiling = 100 * _overlap(left.counts, right.counts) // right.length
+    exact = 100 * lcs(left.tokens, right.tokens) // right.length  # test-only, outside the match
+    ceiling = 100 * sum(min(n, right.counts.get(t, 0)) for t, n in left.counts.items()) // right.length
     assert (exact, ceiling) == (65, 70)  # the match charges the ceiling and labels it a bound
 
 
 def test_over_budget_round_completes_resumes_and_replays(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
-    reset_heat_cache()
     rules = preset("ledger").model_copy(update={"rounds": 3})
     for r, src in SOURCES.items():  # every round's source fits that round's cap
         assert len(src.encode()) <= rules.max_source_bytes(r)
@@ -100,7 +101,7 @@ def test_over_budget_round_completes_resumes_and_replays(make_engine, new_state,
     assert not [e for e in events if e.type == ev.MATCH_FAILED and "heat" in str(e.data)]
     led = done.rules.ledger
     assert led is not None
-    hot = heat_scan(done.challenges.values(), done.validations, 3, led, done.heat_refs)
+    hot = HeatScorer().scan(done.challenges.values(), done.validations, 3, led, done.heat_refs)
     assert {cid: (hot[cid].pct, hot[cid].exact) for cid in alice3} == dict.fromkeys(alice3, (70, False))
     assert all(h.exact for cid, h in hot.items() if cid not in alice3)  # bob's repeated templates stay exact
     assert "heat <=70% (bound)" in summarize(done, "alice", 4, done.rules.memory)

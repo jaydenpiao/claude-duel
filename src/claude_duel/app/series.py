@@ -17,7 +17,6 @@ from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create,
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings
-from claude_duel.domain import heat
 from claude_duel.domain import series as sr
 from claude_duel.domain.models import Stage
 from claude_duel.ports import EventObserver, Metrics
@@ -34,16 +33,10 @@ def play_series(
     observer: EventObserver | None = None,
     budget: CostBudget | None = None,
     caps: tuple[SpendCap, ...] = (),
-    *,
-    normalize_heat: bool = True,
 ) -> sr.SeriesState:
-    """Play games until the series is decided. Resuming keeps the saved agents, seed and rule.
-
-    ``normalize_heat`` writes the heat caps into a new series log. A tournament passes False because it
-    already normalized the rules it stores and hands down.
-    """
+    """Play games until the series is decided. Resuming keeps the saved agents, seed and rule."""
     with build_driver_lock(settings, series_id, "series"):  # one driver per id; a second fails fast
-        return _play_series(settings, series_id, rule, metrics, observer, budget, caps, normalize_heat)
+        return _play_series(settings, series_id, rule, metrics, observer, budget, caps)
 
 
 def _play_series(
@@ -54,13 +47,10 @@ def _play_series(
     observer: EventObserver | None,
     budget: CostBudget | None,
     caps: tuple[SpendCap, ...],
-    normalize_heat: bool,
 ) -> sr.SeriesState:
     event_log = build_series_log(settings)
-    # Normalize before the created event so the series pin and every child match are the same rules.
-    # Resume ignores this and keeps the logged contract (pinned() below); children must not pin again.
-    if normalize_heat:
-        settings = settings.model_copy(update={"rules": heat.pin_heat_bound(settings.rules)})
+    # settings.rules is config (heat pinned in Settings) or a tournament's logged rules; resume and every child
+    # use the series' logged contract (pinned() below).
     events = open_or_create(
         event_log,
         series_id,
@@ -83,7 +73,7 @@ def _play_series(
         game_settings = settings.model_copy(
             update={"agents": sr.game_agents(state.agents, n), "seed": sr.game_seed(state.seed, n)}
         )
-        match = play(game_settings, state.game_id(n), metrics, observer, budget, pin_heat=False)
+        match = play(game_settings, state.game_id(n), metrics, observer, budget)
         if match.stage not in _COUNTED:
             return state  # failed game: `duel series` again resumes it
         decider = None
@@ -91,7 +81,7 @@ def _play_series(
             decider_settings = game_settings.model_copy(
                 update={"rules": settings.rules.model_copy(update={"rounds": 1}), "seed": sr.game_seed(state.seed, -n)}
             )
-            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget, pin_heat=False)
+            decider = play(decider_settings, f"{state.game_id(n)}-sd", metrics, observer, budget)
             if decider.stage not in _COUNTED:
                 return state
         game = sr.game_of(n, match, decider)

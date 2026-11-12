@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.ghosts import ghost_award
-from claude_duel.domain.heat import bound_ids, heat_lines
+from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -36,6 +36,8 @@ def score_round(
     keystones: Mapping[str, str] | None = None,
     heat_refs: Mapping[str, Sequence[str]] | None = None,
     ghost_hits: Mapping[str, str] | None = None,
+    *,
+    scorer: HeatScorer | None = None,
 ) -> dict[str, int]:
     challenges = list(challenges)
     by_challenge = {a.challenge_id: a for a in attacks.values()}
@@ -46,7 +48,7 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
-        heat=round_heat(challenges, validations, by_challenge, round_no, rules, heat_refs),
+        heat=round_heat(challenges, validations, by_challenge, round_no, rules, heat_refs, scorer=scorer),
         ghost_hits=ghost_hits or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
@@ -100,27 +102,32 @@ def round_heat(
     round_no: int,
     rules: Rules,
     refs: Mapping[str, Sequence[str]] | None = None,
+    *,
+    scorer: HeatScorer | None = None,
 ) -> dict[str, int]:
     """The round's ``heat_penalty`` lines (challenge id -> points), logged in ``round_scored.heat``; {} off ledger."""
     if rules.ledger is None:
         return {}
-    return heat_lines(
+    return (scorer or HeatScorer()).lines(
         challenges, validations, attacks, round_no, rules.ledger, lambda ch: _defense(ch, round_no, rules.scoring), refs
     )
 
 
-def heat_of_state(state: MatchState, round_no: int) -> dict[str, int]:
+def heat_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> dict[str, int]:
     """``round_heat`` for a folded match: what ``round_scored.heat`` records (and replay recomputes)."""
     attacks = {a.challenge_id: a for a in state.attacks.values()}
-    return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules, state.heat_refs)
+    return round_heat(
+        state.challenges.values(), state.validations, attacks, round_no, state.rules, state.heat_refs, scorer=scorer
+    )
 
 
-def heat_bound_of_state(state: MatchState, round_no: int) -> list[str]:
+def heat_bound_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
     """Heat lines this round charged on the upper bound (``round_scored.heat_bound``); [] when all were exact."""
     if state.rules.ledger is None:
         return []
-    lines = heat_of_state(state, round_no)
-    hot = bound_ids(state.challenges.values(), state.validations, round_no, state.rules.ledger, state.heat_refs)
+    scorer = scorer or HeatScorer()
+    lines = heat_of_state(state, round_no, scorer)
+    hot = scorer.bound_ids(state.challenges.values(), state.validations, round_no, state.rules.ledger, state.heat_refs)
     return [cid for cid in hot if cid in lines]
 
 

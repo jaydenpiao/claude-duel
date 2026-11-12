@@ -59,12 +59,12 @@ def test_verify_flags_a_game_with_other_rules(tmp_path: Path) -> None:
 
 
 def test_ledger_overlay_series_and_tournament_share_the_heat_pin(tmp_path: Path) -> None:
-    """A ``[rules.ledger]`` table replaces the preset ledger. The driver must pin caps before the log."""
+    """A ``[rules.ledger]`` table replaces the preset ledger. Config pins the caps once; drivers pass them down."""
     path = tmp_path / "overlay.toml"
     path.write_text('[rules]\nmode = "ledger"\n\n[rules.ledger]\nheat_window = 2\n', encoding="utf-8")
     loaded = load_settings(path, env={})
     assert loaded.rules.ledger is not None
-    assert loaded.rules.ledger.heat_token_cap is None
+    assert (loaded.rules.ledger.heat_token_cap, loaded.rules.ledger.heat_compare) == (256, "full")
     assert loaded.rules.ledger.keystone is False
     rules = loaded.rules.model_copy(update={"rounds": 1, "challenges_per_round": 1})
     settings = loaded.model_copy(

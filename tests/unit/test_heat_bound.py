@@ -7,6 +7,7 @@ import time
 from collections.abc import Mapping
 
 import pytest
+from pydantic import ValidationError
 
 from claude_duel.app.agents import build_prompt
 from claude_duel.app.container import build_store
@@ -15,26 +16,10 @@ from claude_duel.app.session import open_match
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import memory
-from claude_duel.domain.errors import HeatBoundError
-from claude_duel.domain.heat import (
-    CELL_BUDGET,
-    MAX_CHALLENGES,
-    PARSE_BYTES,
-    REF_CAP,
-    TOKEN_CAP,
-    Hot,
-    bound_ids,
-    heat,
-    heat_label,
-    heat_scan,
-    history_refs,
-    pin_heat_bound,
-    pinned_bound,
-    reset_heat_cache,
-    similarity,
-    tokens,
-    work_cells,
-)
+from claude_duel.domain.errors import EventLogCorruptError, HeatBoundError
+from claude_duel.domain.heat import HeatScorer, heat, heat_label, history_refs
+from claude_duel.domain.heat_bound import CELL_BUDGET, MAX_CHALLENGES, Hot, pin_heat_bound
+from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP, tokens
 from claude_duel.domain.models import (
     AgentSpec,
     Attack,
@@ -50,6 +35,7 @@ from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import round_heat, score_round
 from claude_duel.presentation.arena import _heat_view
 from claude_duel.presentation.card import CardData, card_svg
+from tests.helpers import similarity
 from tests.unit.test_domain import spec
 from tests.unit.test_heat import LOOP, RENAMED, _match
 
@@ -150,13 +136,13 @@ def test_short_sources_keep_full_similarity() -> None:
 def test_dense_prefix_matches_a_copy_and_legacy_does_not_run_lcs() -> None:
     src = _dense(6144, 1)
     assert len(tokens(src)) == TOKEN_CAP
-    reset_heat_cache()
+    sc = HeatScorer()
     started = time.perf_counter()
     with pytest.raises(HeatBoundError, match="work bound"):
-        similarity(src, _dense(6144, 2))
-    assert work_cells() == 0
-    assert similarity(src, src, token_cap=TOKEN_CAP) == 100
-    assert work_cells() == TOKEN_CAP * TOKEN_CAP
+        similarity(src, _dense(6144, 2), scorer=sc)
+    assert sc.cells == 0
+    assert similarity(src, _dense(6144, 2), token_cap=TOKEN_CAP, scorer=sc) == 100
+    assert sc.cells == 0  # one prefix holds the other: no DP
     assert time.perf_counter() - started < 2
 
 
@@ -177,9 +163,8 @@ def test_oversize_source_is_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
         seen.append(source)
         return real(source, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("claude_duel.domain.heat.ast.parse", counting)
+    monkeypatch.setattr("claude_duel.domain.heat_tokens.ast.parse", counting)
     src = "v = 1\n" + "x" * (PARSE_BYTES + 10)
-    reset_heat_cache()
     assert tokens(src) == ()
     with pytest.raises(HeatBoundError):
         similarity(src, LOOP)
@@ -198,43 +183,58 @@ def test_pinned_window_wins_and_dropped_history_is_not_parsed(monkeypatch: pytes
         seen.append(source)
         return real(source, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("claude_duel.domain.heat.ast.parse", counting)
-    reset_heat_cache()
+    monkeypatch.setattr("claude_duel.domain.heat_tokens.ast.parse", counting)
     got = heat([window, current], _valid([window, current]), 2, rule, {"a": [*old, "v = 1\n"]})
     assert got["r2a"] == similarity(RENAMED, LOOP, token_cap=TOKEN_CAP)
     assert all(not item.startswith("z = ") for item in seen)
 
 
 def test_too_many_challenges_or_legacy_refs_raise_before_lcs() -> None:
-    reset_heat_cache()
+    sc = HeatScorer()
     many = [_ch(f"c{i:02d}", 1, "a", LOOP) for i in range(MAX_CHALLENGES + 1)]
     pinned = LedgerRule(heat_window=1, heat_token_cap=8, heat_ref_cap=1)
     with pytest.raises(HeatBoundError):
-        heat(many, _valid(many), 1, pinned)
+        sc.heat(many, _valid(many), 1, pinned)
     one = [_ch("r1a", 1, "a", LOOP)]
     with pytest.raises(HeatBoundError):
-        heat(one, _valid(one), 1, LedgerRule(heat_window=1), {"a": [LOOP] * (REF_CAP + 1)})
-    assert work_cells() == 0
+        sc.heat(one, _valid(one), 1, LedgerRule(heat_window=1), {"a": [LOOP] * (REF_CAP + 1)})
+    assert sc.cells == 0
 
 
-def test_a_logged_cap_above_the_ceiling_is_not_clamped_into_a_score() -> None:
-    reset_heat_cache()
-    rule = LedgerRule(heat_window=1, heat_token_cap=10**9, heat_ref_cap=10**9)
-    chs = [_ch("r1a", 1, "a", LOOP)]
-    with pytest.raises(HeatBoundError):
-        heat(chs, _valid(chs), 1, rule, {"a": [LOOP] * (REF_CAP + 12)})
-    assert work_cells() == 0
-
-
-def test_pin_fills_and_clamps_only_when_heat_is_on() -> None:
+def test_pin_fills_both_caps_and_full_only_when_heat_is_on() -> None:
     assert pin_heat_bound(preset("classic")) is preset("classic")
     assert pin_heat_bound(preset("ledger")) is preset("ledger")
-    bare = preset("ledger").model_copy(
-        update={"ledger": LedgerRule(heat_window=2, heat_token_cap=10**6, heat_ref_cap=10**6)}
-    )
+    bare = preset("ledger").model_copy(update={"ledger": LedgerRule(heat_window=2)})
     pinned = pin_heat_bound(bare)
     assert pinned.ledger is not None
-    assert (pinned.ledger.heat_token_cap, pinned.ledger.heat_ref_cap) == (TOKEN_CAP, REF_CAP)
+    assert (pinned.ledger.heat_token_cap, pinned.ledger.heat_ref_cap, pinned.ledger.heat_compare) == (
+        TOKEN_CAP,
+        REF_CAP,
+        "full",
+    )
+    prefix = LedgerRule(heat_window=2, heat_token_cap=32, heat_ref_cap=3)
+    written = pin_heat_bound(bare.model_copy(update={"ledger": prefix})).ledger
+    assert written is not None
+    assert (written.heat_token_cap, written.heat_ref_cap, written.heat_compare) == (32, 3, "full")
+
+
+@pytest.mark.parametrize(
+    "pins",
+    [
+        {"heat_token_cap": 32},
+        {"heat_ref_cap": 3},
+        {"heat_compare": "full"},
+        {"heat_token_cap": 10**9, "heat_ref_cap": 10**9},
+        {"heat_token_cap": 0, "heat_ref_cap": 1},
+        {"heat_token_cap": True, "heat_ref_cap": True},
+        {"heat_token_cap": "256", "heat_ref_cap": "48"},
+        {"heat_token_cap": 256.0, "heat_ref_cap": 48.0},
+        {"heat_token_cap": 256, "heat_ref_cap": 48, "heat_compare": ""},
+    ],
+)
+def test_a_partial_mistyped_or_out_of_range_pin_is_invalid(pins: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        LedgerRule.model_validate({"heat_window": 1, **pins})
 
 
 def test_pinned_oversize_source_scores_as_empty() -> None:
@@ -250,22 +250,6 @@ def test_an_overflowing_window_keeps_the_newest_rounds() -> None:
     assert "r3a" not in cold
     newer = [_ch("r1a", 1, "a", "v = 1\n"), _ch("r2a", 2, "a", LOOP), _ch("r3a", 3, "a", RENAMED)]
     assert heat(newer, _valid(newer), 3, rule, {"a": ["v = 2\n"]})["r3a"] == 100
-
-
-def test_a_partial_or_mistyped_pin_is_not_filled() -> None:
-    with pytest.raises(HeatBoundError):
-        pinned_bound(LedgerRule(heat_window=1, heat_token_cap=32))
-    with pytest.raises(HeatBoundError):
-        pinned_bound(LedgerRule(heat_window=1, heat_ref_cap=3))
-    for raw in (True, "256", 256.0):
-        led = LedgerRule.model_validate({"heat_window": 1, "heat_token_cap": raw, "heat_ref_cap": raw})
-        with pytest.raises(HeatBoundError):
-            pinned_bound(led)
-    # A new match still normalizes a missing config pin into the logged ceiling.
-    bare = preset("ledger").model_copy(update={"ledger": LedgerRule(heat_window=2, heat_token_cap=32)})
-    written = pin_heat_bound(bare)
-    assert written.ledger is not None
-    assert (written.ledger.heat_token_cap, written.ledger.heat_ref_cap) == (32, REF_CAP)
 
 
 def test_unpinned_prompt_does_not_claim_the_cap() -> None:
@@ -333,7 +317,6 @@ def test_pinned_dense_heat_replays_and_a_forged_line_is_tampered() -> None:
     hot = round_heat(chs, vals, atks, 1, rules, refs)
     assert hot["r1a"] > 0
     folded, events = _replay(rules, chs, refs, delta, hot, drop_caps=False)
-    reset_heat_cache()
     report = replay(folded, events)
     assert report.consistent, report.mismatches
     forged = [
@@ -350,12 +333,10 @@ def test_legacy_dense_log_is_unverified_not_rescored() -> None:
     rules = _legacy_rules()
     src = _dense(6144, 3)
     chs = [_ch("r1a", 1, "a", src), _ch("r1b", 1, "b", src)]
-    reset_heat_cache()
     started = time.perf_counter()
     folded, events = _replay(rules, chs, {"a": [src], "b": [src]}, {"a": 1, "b": 1}, {"r1a": 1}, drop_caps=True)
     report = replay(folded, events)
     assert time.perf_counter() - started < 2
-    assert work_cells() == 0
     assert report.consistent is False
     assert any("heat unverified" in item for item in report.mismatches)
     assert any("score not checked" in item for item in report.mismatches)
@@ -374,16 +355,14 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     refs = {author: [_dense(6144, 100 + n) for n in range(27)] for author in ("a", "b")}
     rule = preset("ledger").ledger
     assert rule is not None
-    reset_heat_cache()
+    sc = HeatScorer()
     started = time.perf_counter()
-    got = heat(chs, _valid(chs), 3, rule, refs)
+    got = sc.heat(chs, _valid(chs), 3, rule, refs)
     # Identical token sequences (names and int literals dropped) are a whole-source LCS of 100, no DP.
-    assert work_cells() == 0
+    assert sc.cells == 0
     assert set(got) == {c.id for c in chs if c.round == 3}
     assert set(got.values()) == {100}
-    again = work_cells()
-    heat(chs, _valid(chs), 3, rule, refs)
-    assert work_cells() == again
+    assert sc.heat(chs, _valid(chs), 3, rule, refs) == got
     state = MatchState(
         match_id="dense",
         agents=(AgentSpec(name="a"), AgentSpec(name="b")),
@@ -393,16 +372,14 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     )
     state.challenges = {c.id: c for c in chs}
     state.validations = _valid(chs)
-    memory.summarize(state, "a", 3, state.rules.memory)
-    prompted = work_cells()
-    memory.summarize(state, "a", 3, state.rules.memory)
-    assert work_cells() == prompted == 0
-    assert prompted <= CELL_BUDGET
+    memory.summarize(state, "a", 3, state.rules.memory, sc)
+    memory.summarize(state, "a", 3, state.rules.memory, sc)
+    assert sc.cells == 0
     # Cell counts are the bound. 180s only catches a runaway walker; a slow runner has taken ~56s.
     assert time.perf_counter() - started < 180
 
 
-def test_a_one_sided_pin_replays_as_unverified() -> None:
+def test_a_one_sided_pin_is_a_corrupt_log() -> None:
     rules = _legacy_rules()
     chs = [_ch("r1a", 1, "a", LOOP)]
     vals, atks = _valid(chs), {"r1a": _held("r1a")}
@@ -417,11 +394,8 @@ def test_a_one_sided_pin_replays_as_unverified() -> None:
     dumped["ledger"] = ledger
     data["rules"] = dumped
     events[0] = created.model_copy(update={"data": data})
-    folded = ev.fold("bound", events)
-    report = replay(folded, events)
-    assert report.consistent is False
-    assert any("heat unverified" in item for item in report.mismatches)
-    assert any("score not checked" in item for item in report.mismatches)
+    with pytest.raises(EventLogCorruptError, match="bad payload"):
+        ev.fold("bound", events)
 
 
 def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
@@ -431,23 +405,24 @@ def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
     chs = [_ch("r1a", 1, "a", left), _ch("r2a", 2, "a", right)]
-    reset_heat_cache()
+    sc = HeatScorer()
     started = time.perf_counter()
-    got = heat_scan(chs, _valid(chs), 2, rule)
+    got = sc.scan(chs, _valid(chs), 2, rule)
     assert time.perf_counter() - started < 5
-    assert work_cells() == 0
+    assert sc.cells == 0
     assert got == {"r2a": Hot(100, False)}
     assert heat_label(got["r2a"]) == "<=100% (bound)"
-    assert bound_ids(chs, _valid(chs), 2, rule) == ["r2a"]
+    assert sc.bound_ids(chs, _valid(chs), 2, rule) == ["r2a"]
 
 
 def test_tokens_stop_inside_a_wide_compare() -> None:
     src = "x = 1" + "==1" * 3000 + "\n"
     assert len(src) < PARSE_BYTES
     assert len(tokens(src)) == TOKEN_CAP
-    reset_heat_cache()
-    assert similarity(src, src, token_cap=TOKEN_CAP) == 100
-    assert work_cells() == TOKEN_CAP * TOKEN_CAP
+    sc = HeatScorer()
+    other = "x = 1" + "<1" * 3000 + "\n"
+    assert similarity(src, other, token_cap=TOKEN_CAP, scorer=sc) < 100
+    assert sc.cells == TOKEN_CAP * TOKEN_CAP
 
 
 def test_card_says_unverified_when_heat_was_not_recomputed() -> None:
@@ -502,9 +477,9 @@ def test_a_spent_call_budget_charges_a_labeled_bound(monkeypatch: pytest.MonkeyP
     first, second = (_ch(cid, 2, "a", "a = 1 + a\n" * 5) for cid in ("r2a", "r2b"))
     chs = [old, first, second]
     monkeypatch.setattr("claude_duel.domain.heat.CELL_BUDGET", 35 * 35 + 10)
-    reset_heat_cache()
-    got = heat_scan(chs, _valid(chs), 2, rule)
-    assert work_cells() == 35 * 35
+    sc = HeatScorer()
+    got = sc.scan(chs, _valid(chs), 2, rule)
+    assert sc.cells == 35 * 35
     assert got["r2a"].exact
     assert got["r2a"].pct < 100
     assert got["r2b"] == Hot(100, False)
@@ -516,8 +491,7 @@ def test_unparsed_reference_is_a_bound_and_history_skips_it() -> None:
     assert rule is not None
     big = "x = 1\n" * (PARSE_BYTES // 6 + 1)
     chs = [_ch("r1a", 1, "a", "x = 1\n")]
-    reset_heat_cache()
-    assert heat_scan(chs, _valid(chs), 1, rule, {"a": [big]}) == {"r1a": Hot(100, False)}
+    assert HeatScorer().scan(chs, _valid(chs), 1, rule, {"a": [big]}) == {"r1a": Hot(100, False)}
     match = _match("p0", "x", seq=0)
     match.challenges = {"0": _ch("0", 1, "a", big), "1": _ch("1", 1, "a", "y = 2\n")}
     match.validations = _valid(list(match.challenges.values()))

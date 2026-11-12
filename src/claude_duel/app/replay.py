@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from claude_duel.domain import events as ev
 from claude_duel.domain import ghosts, stakes
 from claude_duel.domain.errors import HeatBoundError
+from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.domain.scoring import add_scores, capture_points, heat_bound_of_state, heat_of_state, score_round
 
@@ -68,6 +69,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
     That round is not rescored and is not reported as tampered.
     """
     names = [a.name for a in folded.agents]
+    scorer = HeatScorer()  # one memo for the whole replay
     recomputed: dict[str, int] = {}
     unverified = False
     for event in (e for e in events if e.type == ev.ROUND_SCORED):
@@ -87,6 +89,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
                 stakes.keystone_targets(folded, r),
                 folded.heat_refs,
                 ghosts.round_hits(folded, r),
+                scorer=scorer,
             )
         except HeatBoundError as exc:
             mismatches.append(f"round {r} heat unverified: {exc}")
@@ -95,9 +98,8 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
             continue
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")
-        if heat_of_state(folded, r) != event.data.get("heat", {}) or heat_bound_of_state(folded, r) != event.data.get(
-            "heat_bound", []
-        ):
+        logged = (event.data.get("heat", {}), event.data.get("heat_bound", []))
+        if (heat_of_state(folded, r, scorer), heat_bound_of_state(folded, r, scorer)) != logged:
             mismatches.append(f"round {r} heat tampered")
         recomputed = add_scores(recomputed, delta)
     return recomputed, unverified
