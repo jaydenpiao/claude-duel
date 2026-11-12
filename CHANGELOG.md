@@ -6,7 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- image: apt `--only-upgrade zlib1g` for trivy HIGH CVE-2026-76844 / CVE-2026-85091 (base pin not yet rebuilt).
+- image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).
 - Heat-on ledger logs written before `LedgerRule.heat_vs_opponent` replay as scored: own-only (#198) by default, opponent heat (#238) when `heat_refs` are logged, and replay retries the opponent reading (with a note) when neither tells (M35; no such logs were found in the box stores). Config load pins an explicit flag for every new heat-on log: the mode preset's value (on for `ledger`), else off (S13-5).
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
