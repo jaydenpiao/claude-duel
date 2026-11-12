@@ -34,7 +34,7 @@ from claude_duel.domain.models import (
 from claude_duel.domain.scoring import (
     capture_points,
     heat_of_state,
-    heat_unverified_of_state,
+    heat_unchecked_of_state,
     match_stats,
     score_round,
 )
@@ -843,8 +843,8 @@ class MatchEngine:
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
         lines = heat_of_state(state, state.round, self._heat)
         extra: dict[str, object] = {"heat": lines} if lines else {}
-        if unverified := heat_unverified_of_state(state, state.round, self._heat):
-            extra["heat_unverified"] = unverified
+        if unchecked := heat_unchecked_of_state(state, state.round, self._heat):
+            extra["heat_unchecked"] = unchecked
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
 
 

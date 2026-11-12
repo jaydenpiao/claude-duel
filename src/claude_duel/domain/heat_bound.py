@@ -6,8 +6,10 @@
   and the references fit ``REF_CAP``; past that ``HeatBoundError``, and replay reports the round unverified.
 - ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens.
 - ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
-  bit-parallel LCS inside the call's ``WORK_BUDGET``. A pair that cannot be compared exactly (budget spent, or a
-  walk past ``STORE_LIMIT``) is unverified: it never raises and never charges (S13-4). No upper bound is used.
+  bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset ceiling is only a cold-skip filter (if it
+  is below the threshold, the exact LCS is too). A pair over the work guard, or whose walk is past
+  ``STORE_LIMIT`` and not cold, is ``heat unchecked``: it never raises, is charged 0, and is never scored on a
+  bound (S13-4).
 
 All three go through ``compare``. LCS is exact in every regime, so old logs replay unchanged.
 """
@@ -28,8 +30,8 @@ WORK_BUDGET = 1_000_000_000  # word operations per heat call (about 6 s); 32k x 
 
 class Hot(NamedTuple):
     """A heat percent. ``exact`` False: some reference could not be compared, so ``pct`` is the best exact
-    similarity found (a lower bound of the true best); it is shown as unverified and charged only when that exact
-    value alone reaches the threshold."""
+    similarity found (a lower bound of the true best); it is shown as ``heat unchecked`` and charged only when
+    that exact value alone reaches the threshold, never on a bound."""
 
     pct: int
     exact: bool
@@ -83,6 +85,11 @@ def work(a: int, b: int) -> int:
     return max(a, b) * (min(a, b) // WORD + 1)
 
 
+def overlap(left: dict[str, int], right: dict[str, int]) -> int:
+    """Multiset intersection size; an upper bound on LCS length. Used only as a cold-skip filter."""
+    return sum(min(n, right.get(t, 0)) for t, n in left.items())
+
+
 def _is_subseq(small: tuple[str, ...], big: tuple[str, ...]) -> bool:
     """True when ``small`` occurs in ``big`` in order; then the LCS is ``len(small)``."""
     if not small:
@@ -109,21 +116,26 @@ def _view(walk: Profile | None, mode: Regime, width: int) -> Profile | None:
     return Profile(kept, len(kept), counts)
 
 
-UNVERIFIED = Hot(0, False)
+UNCHECKED = Hot(0, False)
 
 
-def compare(a: Profile | None, b: Profile | None, mode: Regime, width: int, room: int) -> tuple[Hot, int]:
-    """``(similarity, work spent)`` for one pair under ``mode``. ``room`` is the call's remaining work."""
+def compare(
+    a: Profile | None, b: Profile | None, mode: Regime, width: int, room: int, threshold: int
+) -> tuple[Hot, int]:
+    """``(similarity, work spent)`` for one pair under ``mode``. ``room`` is the call's remaining work.
+    ``threshold`` is ``heat_threshold_pct``: a pair whose multiset ceiling is below it is skipped as cold."""
     left, right = _view(a, mode, width), _view(b, mode, width)
     if left is None or right is None:
         if mode == "legacy":
             raise HeatBoundError()
-        return UNVERIFIED, 0  # over PARSE_BYTES: admission and history keep these out of new matches
+        return UNCHECKED, 0  # over PARSE_BYTES: admission and history keep these out of new matches
     if left.length == 0 or right.length == 0:
         return Hot(0, True), 0
     if mode == "legacy" and max(left.length, right.length) > TOKEN_CAP:
         raise HeatBoundError()
     denom = max(left.length, right.length)
+    if 100 * overlap(left.counts, right.counts) // denom < threshold:
+        return Hot(0, True), 0  # cold: the exact LCS cannot reach the threshold; never charge the ceiling
     ta, tb = left.tokens, right.tokens
     if ta is not None and tb is not None and (_is_subseq(ta, tb) or _is_subseq(tb, ta)):
         return Hot(100 * min(left.length, right.length) // denom, True), 0
@@ -132,4 +144,4 @@ def compare(a: Profile | None, b: Profile | None, mode: Regime, width: int, room
         return Hot(100 * lcs(ta, tb) // denom, True), spent
     if mode != "full":
         raise HeatBoundError()  # prefix and legacy pairs are at most TOKEN_CAP square: never here in practice
-    return UNVERIFIED, 0
+    return UNCHECKED, 0

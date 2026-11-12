@@ -225,7 +225,7 @@ class RoundScored(_Payload):
     delta: dict[str, int]
     points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
     heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
-    heat_unverified: list[str] = Field(default_factory=list)  # heat not compared exactly, never charged on a bound
+    heat_unchecked: list[str] = Field(default_factory=list)  # heat not compared exactly, charged 0, never a bound
 
 
 class FindingFlagged(_Payload):

@@ -21,9 +21,9 @@ from claude_duel.domain import events as ev
 from claude_duel.domain import memory
 from claude_duel.domain.errors import EventLogCorruptError, HeatBoundError
 from claude_duel.domain.heat import HeatScorer, heat, heat_label, history_refs
-from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, pin_heat_bound, work
+from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, overlap, pin_heat_bound, work
 from claude_duel.domain.heat_bound import lcs as bit_lcs
-from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP, tokens
+from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP, profile, tokens
 from claude_duel.domain.models import (
     AgentSpec,
     Attack,
@@ -418,16 +418,18 @@ def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
     assert got["r2a"].exact
     assert got["r2a"].pct < 100
     assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
-    assert sc.unverified_ids(chs, _valid(chs), 2, rule) == []
+    assert sc.unchecked_ids(chs, _valid(chs), 2, rule) == []
 
 
 def test_tokens_stop_inside_a_wide_compare() -> None:
-    src = "x = 1" + "==1" * 3000 + "\n"
+    """Prefix compare only spends work on the first heat_token_cap tokens, even when the source is wider."""
+    src, other = "a = a + 1\n" * 400, "a = 1 + a\n" * 400
     assert len(src) < PARSE_BYTES
-    assert len(tokens(src)) == TOKEN_CAP
+    walk = profile(src)
+    assert walk is not None
+    assert TOKEN_CAP == len(tokens(src)) < walk.length
     sc = HeatScorer()
-    other = "x = 1" + "<1" * 3000 + "\n"
-    assert similarity(src, other, token_cap=TOKEN_CAP, scorer=sc) < 100
+    assert 0 < similarity(src, other, token_cap=TOKEN_CAP, scorer=sc) < 100
     assert sc.work == work(TOKEN_CAP, TOKEN_CAP)
 
 
@@ -475,8 +477,8 @@ def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
     assert _heat_view(legacy, 1) == {}
 
 
-def test_a_spent_call_budget_is_unverified_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The second pair finds the call budget spent: no LCS, no raise, no charge, labeled unverified."""
+def test_a_spent_call_budget_is_unchecked_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second pair finds the call budget spent: no LCS, no raise, no charge, labeled heat unchecked."""
     rule = preset("ledger").ledger
     assert rule is not None
     old = _ch("r1a", 1, "a", "a = a + 1\n" * 5)
@@ -490,7 +492,7 @@ def test_a_spent_call_budget_is_unverified_not_charged(monkeypatch: pytest.Monke
     assert got["r2a"].pct < 100
     assert got["r2b"] == Hot(0, False)
     assert "r2b" not in sc.heat(chs, _valid(chs), 2, rule)
-    assert heat_label(got["r2b"]) == "unverified"
+    assert heat_label(got["r2b"]) == "heat unchecked"
     assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
 
 
@@ -555,9 +557,11 @@ def test_large_unrelated_programs_are_compared_exactly_and_not_heated() -> None:
 
 def test_bit_parallel_lcs_matches_the_dp() -> None:
     rng = random.Random(7)
+    alphabet = "".join(chr(33 + i) for i in range(80))
     for _ in range(500):
-        a = tuple(rng.choice("abcd") for _ in range(rng.randint(0, 40)))
-        b = tuple(rng.choice("abcd") for _ in range(rng.randint(0, 40)))
+        letters = alphabet[: rng.randint(2, 80)]
+        a = tuple(rng.choice(letters) for _ in range(rng.randint(0, 120)))
+        b = tuple(rng.choice(letters) for _ in range(rng.randint(0, 120)))
         prev = [0] * (len(b) + 1)
         for x in a:
             cur = [0]
@@ -567,7 +571,7 @@ def test_bit_parallel_lcs_matches_the_dp() -> None:
         assert bit_lcs(a, b) == prev[-1]
 
 
-def test_unverified_pair_is_never_charged() -> None:
+def test_unchecked_pair_is_never_charged() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
     chs = [_ch("r1b", 1, "b", "a = a + 1\n" * 5), _ch("r2a", 2, "a", "a = 1 + a\n" * 5)]
@@ -577,6 +581,25 @@ def test_unverified_pair_is_never_charged() -> None:
         got = sc.scan(chs, _valid(chs), 2, rule)
         assert got == {"r2a": Hot(0, False)}
         assert sc.heat(chs, _valid(chs), 2, rule) == {}
-        assert sc.unverified_ids(chs, _valid(chs), 2, rule) == ["r2a"]
-    assert heat_label(got["r2a"]) == "unverified"
-    assert heat_label(Hot(80, False)) == ">=80% (unverified)"
+        assert sc.unchecked_ids(chs, _valid(chs), 2, rule) == ["r2a"]
+    assert heat_label(got["r2a"]) == "heat unchecked"
+    assert heat_label(Hot(80, False)) == ">=80% (heat unchecked)"
+
+
+def test_multiset_ceiling_skips_a_cold_pair() -> None:
+    """S13-4: when the overlap bound is below the threshold, the exact LCS is not run and nothing is charged."""
+    rule = preset("ledger").ledger
+    assert rule is not None
+    left, right = "x = 1\n" * 40, "def f():\n    return 2\n" * 40
+    a, b = profile(left), profile(right)
+    assert a is not None
+    assert b is not None
+    bound = 100 * overlap(a.counts, b.counts) // max(a.length, b.length)
+    assert bound < rule.heat_threshold_pct
+    sc = HeatScorer()
+    assert sc.similarity(left, right, rule) == Hot(0, True)
+    assert sc.work == 0
+    chs = [_ch("r1a", 1, "a", left), _ch("r2b", 2, "b", right)]
+    assert sc.scan(chs, _valid(chs), 2, rule) == {}
+    assert sc.heat(chs, _valid(chs), 2, rule) == {}
+    assert sc.unchecked_ids(chs, _valid(chs), 2, rule) == []

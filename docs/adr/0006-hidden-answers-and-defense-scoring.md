@@ -42,9 +42,11 @@ same as a source that does not parse.
 
 Whole-source heat (`heat_compare=full`, new matches) never fails a match on work. A pair that is not a
 subsequence gets the exact LCS from a bit-parallel algorithm (Hyyro: one add/and/or per token over a
-`len(b)`-bit integer), inside a per-call work budget that real rounds do not reach. A pair it cannot compare
-exactly (budget spent, or a walk longer than the stored 32768 tokens) is unverified: no penalty is charged
-on it, it is logged in `round_scored.heat_unverified`, and it is shown as unverified. A challenge is charged
-only on an exact similarity at or over the threshold. An upper bound (such as the multiset ceiling, which
-ran 9-33 points above the LCS on unrelated modules, S13-4) is never charged or shown as the similarity.
-Replay recomputes the same result. Admission caps sources at the 65536-byte parse ceiling under this rule.
+`len(b)`-bit integer), inside a per-call work budget that real rounds do not reach. The multiset ceiling is
+only a cold-skip filter: if it is below the threshold, the exact LCS is too and the pair is not compared.
+A pair the call cannot compare exactly (budget spent, or a walk longer than the stored 32768 tokens) is
+`heat unchecked`: no penalty is charged on it, it is logged in `round_scored.heat_unchecked` (omit if empty),
+and it is shown as `heat unchecked`. A challenge is charged only on an exact similarity at or over the
+threshold. An upper bound (such as the multiset ceiling, which ran 9-33 points above the LCS on unrelated
+modules, S13-4) is never charged or shown as the similarity. Replay recomputes the same result. Admission
+caps sources at the 65536-byte parse ceiling under this rule.

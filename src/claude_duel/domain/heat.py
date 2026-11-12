@@ -53,7 +53,7 @@ class HeatScorer:
             return Hot(self._pair(a, b), True)
         width = rule.heat_token_cap or TOKEN_CAP
         budget = WORK_BUDGET if room is None else room
-        got, spent = compare(self.walk(a), self.walk(b), regime(rule), width, budget)
+        got, spent = compare(self.walk(a), self.walk(b), regime(rule), width, budget, rule.heat_threshold_pct)
         self.work += spent
         return got
 
@@ -67,7 +67,7 @@ class HeatScorer:
     ) -> dict[str, Hot]:
         """challenge id -> best similarity to the valid challenges of the last ``heat_window`` rounds (the
         author's own and, design R5, the opponent's) plus ``refs[author]`` (sources from the same model's last
-        matches, frozen in ``match_created``), for this round's valid challenges at or over the threshold, or unverified
+        matches, frozen in ``match_created``), for this round's valid challenges at or over the threshold, or unchecked
         (a reference not compared exactly). Invalid challenges never take or give heat."""
         if not rule.heat_window:
             return {}
@@ -102,7 +102,7 @@ class HeatScorer:
         rule: LedgerRule,
         refs: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, int]:
-        """Charged percents, for scoring: exact similarities at or over the threshold. An unverified challenge is
+        """Charged percents, for scoring: exact similarities at or over the threshold. An unchecked challenge is
         charged only on an exact match that alone reaches it, never on a bound. A display uses ``scan``."""
         hot = self.scan(challenges, validations, round_no, rule, refs)
         return {cid: h.pct for cid, h in hot.items() if h.pct >= rule.heat_threshold_pct}
@@ -128,7 +128,7 @@ class HeatScorer:
                 out[ch.id] = penalty(defense(ch), hot[ch.id], rule)
         return out
 
-    def unverified_ids(
+    def unchecked_ids(
         self,
         challenges: Iterable[Challenge],
         validations: Mapping[str, Validation],
@@ -136,7 +136,7 @@ class HeatScorer:
         rule: LedgerRule,
         refs: Mapping[str, Sequence[str]] | None = None,
     ) -> list[str]:
-        """Ids with a reference not compared exactly (``round_scored.heat_unverified``)."""
+        """Ids with a reference not compared exactly (``round_scored.heat_unchecked``)."""
         hot = self.scan(challenges, validations, round_no, rule, refs)
         return sorted(cid for cid, h in hot.items() if not h.exact)
 
@@ -215,11 +215,11 @@ def penalty(defense: int, h: int, rule: LedgerRule) -> int:
 
 
 def heat_label(hot: Hot) -> str:
-    """``65%`` exact; ``>=72% (unverified)`` when charged on an exact match with some reference not compared;
-    ``unverified`` when nothing compared reached the threshold."""
+    """``65%`` exact; ``>=72% (heat unchecked)`` when charged on an exact match with some reference not compared;
+    ``heat unchecked`` when nothing compared reached the threshold."""
     if hot.exact:
         return f"{hot.pct}%"
-    return f">={hot.pct}% (unverified)" if hot.pct else "unverified"
+    return f">={hot.pct}% (heat unchecked)" if hot.pct else "heat unchecked"
 
 
 def heat(

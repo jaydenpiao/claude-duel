@@ -174,7 +174,7 @@ def _heat_cap_sentence(led: LedgerRule) -> str:
     if mode == "full":
         return (
             f" Comparison uses the whole program, not only its beginning, and {refs}."
-            " A pair too large to compare exactly is unverified and never charged."
+            " A pair too large to compare exactly is heat unchecked and never charged."
         )
     return f" Comparison uses the first {led.heat_token_cap} AST tokens and {refs}."
 

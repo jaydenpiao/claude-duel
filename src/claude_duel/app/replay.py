@@ -10,7 +10,7 @@ from claude_duel.domain import ghosts, stakes
 from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.models import Event, MatchState
-from claude_duel.domain.scoring import add_scores, capture_points, heat_of_state, heat_unverified_of_state, score_round
+from claude_duel.domain.scoring import add_scores, capture_points, heat_of_state, heat_unchecked_of_state, score_round
 
 _COMPARED = (
     "stage",
@@ -115,8 +115,8 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
             continue
         if delta != event.data["delta"]:
             mismatches.append(f"round {r} score")
-        logged = (event.data.get("heat", {}), event.data.get("heat_unverified", []))
-        if (heat_of_state(folded, r, scorer), heat_unverified_of_state(folded, r, scorer)) != logged:
+        logged = (event.data.get("heat", {}), event.data.get("heat_unchecked", []))
+        if (heat_of_state(folded, r, scorer), heat_unchecked_of_state(folded, r, scorer)) != logged:
             mismatches.append(f"round {r} heat tampered")
         recomputed = add_scores(recomputed, delta)
     return recomputed, unverified

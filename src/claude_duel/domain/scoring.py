@@ -121,13 +121,13 @@ def heat_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = 
     )
 
 
-def heat_unverified_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
-    """This round's challenges with a heat reference not compared exactly (``round_scored.heat_unverified``)."""
+def heat_unchecked_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
+    """This round's challenges with a heat reference not compared exactly (``round_scored.heat_unchecked``)."""
     if state.rules.ledger is None:
         return []
     scorer = scorer or HeatScorer()
     rule, refs = state.rules.ledger, state.heat_refs
-    return scorer.unverified_ids(state.challenges.values(), state.validations, round_no, rule, refs)
+    return scorer.unchecked_ids(state.challenges.values(), state.validations, round_no, rule, refs)
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:

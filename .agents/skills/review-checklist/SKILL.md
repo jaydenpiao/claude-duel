@@ -13,7 +13,7 @@ Security
 - [ ] No flag in logs, events, prompts (`assert_no_flag`) or unredacted attacker output (`redact`).
 - [ ] No secrets printed, logged or committed; keys only from env.
 - [ ] Sandbox limits and policy not loosened without review; host env not passed to the sandbox; flag never on argv/env.
-- [ ] Heat similarity stays inside its pinned token and reference caps; legacy logs past that ceiling are unverified, not rescored with a different LCS. A penalty or a displayed similarity is never an upper bound; a pair not compared exactly is unverified.
+- [ ] Heat similarity stays inside its pinned token and reference caps; legacy logs past that ceiling are unverified, not rescored with a different LCS. A penalty or a displayed similarity is never an upper bound; a pair not compared exactly is `heat unchecked` and charged 0.
 - [ ] Real-model paths still fail closed without Docker.
 - [ ] `security` workflow green; new actions pinned to a SHA with least-privilege `permissions`.
 - [ ] Only allowlisted cheap models; budget caps checked before every call; quota errors not retried.
