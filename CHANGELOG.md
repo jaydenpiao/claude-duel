@@ -19,6 +19,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - Heat pins (both caps, `full`, opponent heat) are set once when config loads, so series, tournament and pool children use the logged contract and never pin again; resume of a log written without the caps keeps those rules. An invalid or partial pin in a log is a corrupt-log error, not an unverified round. Heat state lives in a `HeatScorer` the engine, replay and arena own (no module caches).
 - With #279 merged here, the author filter runs before the reference cap, and config load pins `heat_vs_opponent` to a bool (the mode preset's value, else off) beside the caps.
+- `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
 - Config refuses API keys from TOML; env-only secrets (#242).
 - Warning when configured agent wallets exceed the match spend cap (#123).
 - Tournament bootstrap skips absent entrants (#124).
