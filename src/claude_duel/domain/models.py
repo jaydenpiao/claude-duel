@@ -126,9 +126,10 @@ class LedgerRule(_Frozen):
     heat_window: int = Field(default=0, ge=0, le=20)  # past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
-    # Off by default so pre-#238 ledger logs (own-author heat only) replay as written; the ledger preset turns it on.
-    heat_vs_opponent: bool = Field(
-        default=False, description="compare against the opponent's earlier challenges too (design R5 / #238)"
+    # The ledger preset logs True. None = a log written before this flag: own-only (#198) or opponent (#238)
+    # heat, told apart by heat.vs_opponent (heat_refs) and, when that is silent, by replay (app/replay.py).
+    heat_vs_opponent: bool | None = Field(
+        default=None, description="compare against the opponent's earlier challenges too (design R5 / #238)"
     )
 
 

@@ -7,7 +7,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - image: apt `--only-upgrade zlib1g` for trivy HIGH CVE-2026-76844 / CVE-2026-85091 (base pin not yet rebuilt).
-- Pre-#238 ledger logs with heat on replay with own-author comparison only (`LedgerRule.heat_vs_opponent` defaults off; the ledger preset turns R5 opponent heat on).
+- Heat-on ledger logs written before `LedgerRule.heat_vs_opponent` replay as scored: own-only (#198) by default, opponent heat (#238) when `heat_refs` are logged, and replay retries the opponent reading (with a note) when neither tells (M35; no such logs were found in the box stores). The ledger preset logs the flag on.
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
