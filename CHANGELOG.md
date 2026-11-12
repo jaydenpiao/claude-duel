@@ -6,8 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).
 - Attack refusal is a typed `AttackAttempt.refused` field (omitted when false); challenge stdout can no longer spoof the engine's refusal or capture sentinels. A refused try is spent and the attack continues; a refused difficulty-gate probe is inconclusive, not held (ADR 0016).
-- image: apt `--only-upgrade zlib1g` for trivy HIGH CVE-2026-76844 / CVE-2026-85091 (base pin not yet rebuilt).
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
