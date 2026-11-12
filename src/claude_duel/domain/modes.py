@@ -37,6 +37,7 @@ MODES: dict[str, Rules] = {
             keystone=True,
             terrain="seeded",
             heat_window=2,
+            heat_vs_opponent=True,
             heat_token_cap=TOKEN_CAP,
             heat_ref_cap=REF_CAP,
             heat_compare="full",

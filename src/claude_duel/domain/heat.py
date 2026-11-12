@@ -2,9 +2,10 @@
 
 Computed from logged source only. Similarity is ``100 * LCS // max(len)`` (integer floor) over the AST walks of
 ``heat_tokens``. A defended challenge whose best similarity to the earlier valid challenges of the last
-``heat_window`` rounds (and to its model's frozen cross-match ``heat_refs``) is at least ``heat_threshold_pct``
-gets a ``heat_penalty`` line; its defense award never changes. Which comparison applies to a log, and the host
-work bound, are ``heat_bound.regime`` and ``heat_bound.compare``.
+``heat_window`` rounds (the author's own, and the opponent's when ``vs_opponent``) and to its model's frozen
+cross-match ``heat_refs`` is at least ``heat_threshold_pct`` gets a ``heat_penalty`` line; its defense award
+never changes. The author filter applies before the ``heat_ref_cap`` cut. Which comparison applies to a log, and
+the host work bound, are ``heat_bound.regime`` and ``heat_bound.compare``.
 
 ``HeatScorer`` holds the only state: a bounded cache of walks, a bounded memo of round results and a count of
 DP cells. The engine, replay and the arena each own one; a module-level call uses a fresh one.
@@ -181,8 +182,25 @@ def _plan(
     if len(current) > MAX_CHALLENGES:
         raise HeatBoundError()
     window = [c for c in every if round_no - rule.heat_window <= c.round < round_no]
+    wide = vs_opponent(rule, refs)
     history = refs or {}
-    return tuple((ch.id, _source(ch), tuple(_references(window, history.get(ch.author, ()), rule))) for ch in current)
+    return tuple(
+        (
+            ch.id,
+            _source(ch),
+            tuple(_references([c for c in window if wide or c.author == ch.author], history.get(ch.author, ()), rule)),
+        )
+        for ch in current
+    )
+
+
+def vs_opponent(rule: LedgerRule, refs: Mapping[str, Sequence[str]] | None) -> bool:
+    """Whether the opponent's challenges are references. A logged flag wins. A log from before the flag:
+    ``heat_refs`` were first written by #238, which also added the opponent, so refs mean True; otherwise
+    own-only (#198), and replay retries the opponent reading for a #238 log whose refs were empty."""
+    if rule.heat_vs_opponent is not None:
+        return rule.heat_vs_opponent
+    return bool(refs)
 
 
 def penalty(defense: int, h: int, rule: LedgerRule) -> int:

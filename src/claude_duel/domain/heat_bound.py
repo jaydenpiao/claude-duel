@@ -41,8 +41,9 @@ def regime(rule: LedgerRule) -> Regime:
 
 
 def pin_heat_bound(rules: Rules) -> Rules:
-    """Config rules -> the rules a new log stores: both caps (the ceiling when unset) and ``full``. Heat off is
-    unchanged. Only config is passed here; a logged contract (a resumed or child log) is never re-pinned."""
+    """Config rules -> the rules a new log stores: both caps (the ceiling when unset), ``full``, and opponent heat
+    (design R5) unless the config turned it off. Heat off is unchanged. Only config is passed here; a logged
+    contract (a resumed or child log) is never re-pinned."""
     led = rules.ledger
     if led is None or not led.heat_window:
         return rules
@@ -50,6 +51,7 @@ def pin_heat_bound(rules: Rules) -> Rules:
         "heat_token_cap": led.heat_token_cap or TOKEN_CAP,
         "heat_ref_cap": led.heat_ref_cap or REF_CAP,
         "heat_compare": "full",
+        "heat_vs_opponent": led.heat_vs_opponent is not False,
     }
     if all(getattr(led, k) == v for k, v in pins.items()):
         return rules

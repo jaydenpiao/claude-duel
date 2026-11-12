@@ -37,7 +37,7 @@ from claude_duel.presentation.arena import _heat_view
 from claude_duel.presentation.card import CardData, card_svg
 from tests.helpers import similarity
 from tests.unit.test_domain import spec
-from tests.unit.test_heat import LOOP, RENAMED, _match
+from tests.unit.test_heat import LOOP, OTHER, RENAMED, _match
 
 
 def _dense(n: int, salt: int) -> str:
@@ -503,3 +503,26 @@ def test_whole_source_heat_caps_admission_at_the_parse_ceiling() -> None:
     assert full.max_source_bytes(20) == PARSE_BYTES
     assert full.max_source_bytes(2) == 8192
     assert _legacy_rules().model_copy(update={"max_source_bytes_base": 4096}).max_source_bytes(20) == 81920
+
+
+def test_author_filter_applies_before_the_ref_cut() -> None:
+    """#279 x #282: own-only heat picks the author's own window before ``heat_ref_cap`` keeps the newest."""
+    own = LedgerRule(heat_window=2, heat_token_cap=TOKEN_CAP, heat_ref_cap=1, heat_compare="full")
+    own = own.model_copy(update={"heat_vs_opponent": False})
+    chs = [_ch("r1a", 1, "a", LOOP), _ch("r2b", 2, "b", OTHER), _ch("r3a", 3, "a", RENAMED)]
+    assert heat(chs, _valid(chs), 3, own) == {"r3a": 100}
+    wide = own.model_copy(update={"heat_vs_opponent": True})
+    assert heat(chs, _valid(chs), 3, wide) == {}  # the newest reference is b's unrelated source
+
+
+def test_config_pins_opponent_heat_unless_turned_off() -> None:
+    base = preset("ledger")
+    assert base.ledger is not None
+    unset = base.model_copy(update={"ledger": LedgerRule(heat_window=2)})
+    pinned = pin_heat_bound(unset).ledger
+    assert pinned is not None
+    assert pinned.heat_vs_opponent is True
+    off = base.model_copy(update={"ledger": LedgerRule(heat_window=2, heat_vs_opponent=False)})
+    kept = pin_heat_bound(off).ledger
+    assert kept is not None
+    assert kept.heat_vs_opponent is False
