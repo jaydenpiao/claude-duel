@@ -73,7 +73,11 @@ def summarize(state: MatchState, agent: str, upto_round: int, rule: MemoryRule) 
 def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attack], rule: MemoryRule) -> str:
     lines = [f"Round {r}:"]
     stones = set(keystone_targets(state, r).values())  # revealed only, so past rounds never leak a sealed pick
-    hot = heat(state.challenges.values(), state.validations, r, state.rules.ledger) if state.rules.ledger else {}
+    hot = (
+        heat(state.challenges.values(), state.validations, r, state.rules.ledger, state.heat_refs)
+        if state.rules.ledger
+        else {}
+    )
     penalties = heat_of_state(state, r) if r in state.scored_rounds else {}
     for ch in sorted(state.round_challenges(r), key=lambda c: c.id):
         atk = attacks.get(ch.id)

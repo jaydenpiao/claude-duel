@@ -210,12 +210,22 @@ def columns(row: object) -> list[str]:
     return [f.name for f in dataclasses.fields(row)]  # type: ignore[arg-type]
 
 
-def insert_rows(table: str, key: str | None, rows: Sequence[object], prefix: Sequence[object] = ()) -> Stmt:
-    """One statement inserting every row (``prefix`` values go first, e.g. a run id)."""
+MAX_PARAMS = 65_535  # Postgres bind-parameter limit per statement
+
+
+def insert_rows(table: str, key: str | None, rows: Sequence[object], prefix: Sequence[object] = ()) -> list[Stmt]:
+    """Insert statements for every row, chunked under ``MAX_PARAMS`` (``prefix`` values go first, e.g. a run id)."""
+    if not rows:
+        return []
     cols = columns(rows[0])
     names = [*(["sync_run_id"] if prefix else []), *cols]
-    params = [v for r in rows for v in (*prefix, *(getattr(r, c) for c in cols))]
-    return insert_sql(table, names, key, len(rows)), params
+    per = MAX_PARAMS // len(names)
+    stmts: list[Stmt] = []
+    for at in range(0, len(rows), per):
+        chunk = rows[at : at + per]
+        params = [v for r in chunk for v in (*prefix, *(getattr(r, c) for c in cols))]
+        stmts.append((insert_sql(table, names, key, len(chunk)), params))
+    return stmts
 
 
 class SqlResults:
@@ -240,15 +250,16 @@ class SqlResults:
         stmts: list[Stmt] = [
             ("insert into duel.match_first_seen (match_id) values (%s) on conflict do nothing", (p.match.match_id,))
         ]
-        events_at = -1
+        events = range(0)
         for rows in groups:
             if rows:
                 table, key = TABLE[type(rows[0])]
+                chunk = insert_rows(table, key, rows)
                 if table == "events":
-                    events_at = len(stmts)
-                stmts.append(insert_rows(table, key, rows))
+                    events = range(len(stmts), len(stmts) + len(chunk))
+                stmts += chunk
         counts = self._ex.batch(stmts)
-        return counts[events_at] if events_at >= 0 else 0
+        return sum(counts[i] for i in events)
 
     def start_run(self, run_id: str, git_sha: str | None) -> None:
         self._ex.batch([("insert into duel.sync_runs (id, git_sha) values (%s, %s)", (run_id, git_sha))])
@@ -283,7 +294,7 @@ class SqlResults:
             )
         ]
         if ratings:
-            stmts.append(insert_rows("rating_snapshots", None, ratings, prefix=(run_id,)))
+            stmts += insert_rows("rating_snapshots", None, ratings, prefix=(run_id,))
         self._ex.batch(stmts)
 
     @contextmanager
