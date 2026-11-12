@@ -50,3 +50,10 @@ and it is shown as `heat unchecked`. A challenge is charged only on an exact sim
 threshold. An upper bound (such as the multiset ceiling, which ran 9-33 points above the LCS on unrelated
 modules, S13-4) is never charged or shown as the similarity. Replay recomputes the same result. Admission
 caps sources at the 65536-byte parse ceiling under this rule.
+
+## Addendum: vendor refusal (ADR 0016)
+A refused build pays `invalid_penalty`. A refused attack is one spent try; the
+attack continues with the remaining tries, and a valid challenge that was not
+captured still pays its defense award. A refused difficulty-gate probe is
+inconclusive, not held. See ADR 0016.
+

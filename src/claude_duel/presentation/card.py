@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from xml.sax.saxutils import escape
 
 from claude_duel.app.replay import ReplayReport
+from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.presentation.common import agent_cost, result, who
@@ -50,12 +51,20 @@ def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> C
         headline=result(state),
         spend=(
             f"${state.usage.usd:.4f} · {state.usage.calls} model calls · "
-            f"in {state.usage.input_tokens:,} · out {state.usage.output_tokens:,} tokens"
+            f"in {state.usage.input_tokens:,} · out {state.usage.output_tokens:,} tokens" + _refusal_label(events)
         ),
         verified=report.consistent,
         digest=log_digest(events),
         mismatches=tuple(report.mismatches),
     )
+
+
+def _refusal_label(events: list[Event]) -> str:
+    """A spend-line suffix when the log recorded a refusal; empty for older logs and matches with none."""
+    n = sum(1 for e in events if e.type == ev.CALL_CHARGED and e.data.get("refused"))
+    if not n:
+        return ""
+    return f" · {n} model refusal" + ("s" if n != 1 else "")
 
 
 def _t(x: int, y: int, text: str, size: int = 20, fill: str = "#e5e7eb", weight: str = "normal") -> str:
