@@ -47,6 +47,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Model refusals (Anthropic `stop_reason=refusal`, OpenAI content-filter / `message.refusal`) are a forfeited turn, logged on `call_charged.refused` only when true so older logs stay byte-identical (ADR 0016).
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
 - Ledger heat (design R5): the comparison set now includes the opponent's earlier valid challenges in the match and the same model's valid challenges from its last 3 matches (frozen into `match_created.heat_refs`, so replay is exact). Penalty line, cap and ADR 0006 addendum unchanged.

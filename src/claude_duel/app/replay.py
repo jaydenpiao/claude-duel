@@ -32,6 +32,7 @@ class ReplayReport:
     mismatches: list[str]
     transcript: list[str]
     warnings: list[str] = field(default_factory=list)
+    refusals: int = 0  # call_charged events with refused=true; 0 on older logs that omit the field
 
 
 def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
@@ -46,7 +47,10 @@ def replay(snapshot: MatchState, events: list[Event]) -> ReplayReport:
     if recomputed != folded.scores:
         mismatches.append("total score")
     transcript = [f"#{e.seq:04d} {e.type} {e.data}" for e in events]
-    return ReplayReport(not mismatches, recomputed, folded.scores, mismatches, transcript, _python_warning(events))
+    refusals = sum(1 for e in events if e.type == ev.CALL_CHARGED and e.data.get("refused"))
+    return ReplayReport(
+        not mismatches, recomputed, folded.scores, mismatches, transcript, _python_warning(events), refusals
+    )
 
 
 def _python_warning(events: list[Event]) -> list[str]:

@@ -283,9 +283,10 @@ class ArenaView(MatchFold):
         if purpose in PHASE and s.stage is not Stage.ATTACK:
             p.phase = PHASE[purpose]
         cut = " · cut off at max tokens" if d.truncated else ""
+        declined = " · refused" if d.refused else ""
         p.act(
             f"{purpose}: {d.input_tokens:,} in / {d.output_tokens:,} out · "
-            f"${d.usd:.4f} · {d.elapsed_ms / 1000:.1f}s{cut}"
+            f"${d.usd:.4f} · {d.elapsed_ms / 1000:.1f}s{cut}{declined}"
         )
         if d.summary:
             p.thought = _short(d.summary, 120)

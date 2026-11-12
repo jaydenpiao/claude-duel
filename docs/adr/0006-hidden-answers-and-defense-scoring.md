@@ -30,3 +30,9 @@ Modes may charge the defender *penalty lines* (keystone captured, novelty heat),
    the interpreter version that parsed it is recorded in `match_created.python`.
 
 The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
+
+## Addendum: vendor refusal (ADR 0016)
+A model refusal is scored as a forfeited turn, not a weak attack: a refused build pays
+`invalid_penalty` and a refused attack ends without a capture, so a valid challenge still
+pays its defense award. See ADR 0016.
+
