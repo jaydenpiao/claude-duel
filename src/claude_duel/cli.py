@@ -223,6 +223,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     print(
         f"replay consistent={report.consistent} recomputed={report.recomputed} recorded={report.recorded}"
         + (f" mismatches={report.mismatches}" if report.mismatches else "")
+        + (f" refusals={report.refusals}" if report.refusals else "")
     )
     if not args.verify:
         return 0 if report.consistent else 1
