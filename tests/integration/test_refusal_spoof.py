@@ -13,7 +13,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain.models import CAPTURED, Stage
 from claude_duel.ports import Completion, CompletionRequest
 
-# Repro from /workspace/claude-duel-reviews/s13-refusal-spoof-test.py: a valid
+# Repro from security review S13-1: a valid
 # challenge whose miss path writes the engine's REFUSED sentinel with no newline.
 SRC = (
     "import sys\n\n"
