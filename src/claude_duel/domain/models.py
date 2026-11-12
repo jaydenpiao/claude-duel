@@ -290,10 +290,19 @@ class AttackAttempt(_Frozen):
     output: str
     tokens: int
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
+    refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
 
     @property
     def captured(self) -> bool:
+        """True only when the engine stored ``CAPTURED`` after seeing the flag in stdout."""
         return self.output == CAPTURED
+
+    def logged(self) -> dict[str, object]:
+        """Event payload: ``refused`` is present only when true, so older logs stay byte-identical."""
+        data = self.model_dump(mode="json")
+        if not data.get("refused"):
+            data.pop("refused", None)
+        return data
 
 
 class Attack(_Frozen):

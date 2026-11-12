@@ -9,9 +9,10 @@ from pydantic import SecretStr
 
 from claude_duel.adapters.providers.anthropic import AnthropicProvider
 from claude_duel.adapters.providers.openai import OpenAIProvider
+from claude_duel.app.engine import MALFORMED, REFUSED
 from claude_duel.app.replay import ReplayReport
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import Event
+from claude_duel.domain.models import AttackAttempt, Event
 from claude_duel.domain.public import public_data
 from claude_duel.ports import CompletionRequest
 from claude_duel.presentation.card import card_data, card_svg
@@ -145,3 +146,12 @@ def test_card_labels_refusals_only_when_present() -> None:
     svg = card_svg(card_data(state, ReplayReport(True, {}, {}, [], [], refusals=1), refused_events))
     assert "1 model refusal" in svg
     assert "refused" not in json.dumps(_charged(2).data)
+
+
+def test_attempt_omits_refused_when_false() -> None:
+    clean = AttackAttempt(payload="x", output="y", tokens=1)
+    assert clean.refused is False
+    assert "refused" not in clean.logged()
+    refused = AttackAttempt(payload=MALFORMED, output=REFUSED, tokens=1, refused=True)
+    assert refused.logged()["refused"] is True
+    assert refused.refused

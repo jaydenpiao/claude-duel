@@ -11,30 +11,35 @@ output part or `incomplete_details.reason == "content_filter"`.
 
 The adapters only treated a token-cap stop as special (`truncated`). A refusal then
 looked like a weak or malformed answer: format retries or extra attack tries could
-spend more tokens, and the result was scored as a failed attempt rather than a
-declined turn.
+spend more tokens, and an author's challenge could print the engine's refusal
+sentinel and end an opponent's attack after one try.
 
 ## Decision
-A vendor refusal is a forfeited turn, not a weak attack.
+A vendor refusal is a typed outcome (`Completion.refused`, `call_charged.refused`,
+`AttackAttempt.refused`). Control flow never compares run output to an engine
+sentinel; challenge stdout that would equal one is rewritten before it is stored.
 
-- Providers set `Completion.refused`. The call is still charged (the vendor billed it).
-- `call_charged.refused` is written only when true, the same omit-if-absent rule PR 282
-  used for `round_scored.heat_bound`, so older logs stay byte-identical and keep their
-  hash chain. Readers treat a missing field as false. Schema version stays 2.
-- There is no second paid call (unlike a truncated reply). The refusal body is not
-  parsed as an answer and is not stored.
+- Providers set `Completion.refused`. Every call is still charged (the vendor billed it).
+- `call_charged.refused` and `AttackAttempt.refused` are written only when true, the
+  same omit-if-absent rule PR 282 used for `round_scored.heat_bound`, so older logs
+  stay byte-identical and keep their hash chain. Readers treat a missing field as
+  false. Schema version stays 2.
+- There is no second paid call in the same try (unlike a truncated reply). The
+  refusal body is not parsed as an answer and is not stored.
 - Build: the challenge is forfeited immediately (`forfeit_reason` is the stable
   `REFUSED` string; the author pays `invalid_penalty`). Format retries are skipped.
-- Attack: one attempt is recorded (`output` is `REFUSED`) so resume does not re-pay,
-  then the attack ends. A valid challenge that was not captured still pays its defense
-  award. Further tries are not spent.
+- Attack: a refusal is one spent try (`AttackAttempt.refused`). The attack continues
+  with the remaining tries. A valid challenge that was not captured still pays its
+  defense award.
 - Allocate (ledger): even-split fallback, same as an invalid or truncated allocation.
-- Difficulty gate: a refusal is not a capture (the probe did not solve it).
+- Difficulty gate: a refused probe is inconclusive, not held and not solved. The
+  challenge stays valid and is not marked `probe_solved`.
 - Replay, the match card, the arena, and the public event projection label a refusal
   when the field is present; matches with none look as they did before.
 
 ## Consequences
-A model that declines a build is penalized like any other forfeit, and a model that
-declines an attack does not capture. That is the existing forfeit math, not a new
-scoring table. Old logs replay and rescore unchanged. Real-model spend is unchanged
-until a match is actually run; this ADR adds no vendor calls.
+A model that declines a build is penalized like any other forfeit. A model that
+declines an attack spends that try and may still capture on a later one; if it
+never captures, the defense award still pays. Old logs replay and rescore
+unchanged. Real-model spend is unchanged until a match is actually run; this ADR
+adds no vendor calls.
