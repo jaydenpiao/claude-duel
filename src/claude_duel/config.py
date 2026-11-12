@@ -14,7 +14,7 @@ from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.heat_bound import pin_heat_bound
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
-from claude_duel.domain.modes import preset
+from claude_duel.domain.modes import pin_opponent_heat, preset
 from claude_duel.domain.tournament import TournamentRule
 from claude_duel.domain.vendors import VENDORS
 
@@ -50,9 +50,10 @@ class Settings(BaseModel):
     @field_validator("rules", mode="after")
     @classmethod
     def _pin_heat(cls, rules: Rules) -> Rules:
-        """Config rules are what a new log stores, so heat is pinned here, once. A driver's children and every
-        resume take the logged rules via ``model_copy`` (no validation), so a logged contract is never re-pinned."""
-        return pin_heat_bound(rules)
+        """Config rules are what a new log stores, so heat is pinned here, once (opponent flag, then caps). A
+        driver's children and every resume take the logged rules via ``model_copy`` (no validation), so a logged
+        contract is never re-pinned."""
+        return pin_heat_bound(pin_opponent_heat(rules))
 
     @model_validator(mode="before")
     @classmethod

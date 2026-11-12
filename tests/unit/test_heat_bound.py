@@ -523,17 +523,17 @@ def test_author_filter_applies_before_the_ref_cut() -> None:
     assert heat(chs, _valid(chs), 3, wide) == {}  # the newest reference is b's unrelated source
 
 
-def test_config_pins_opponent_heat_unless_turned_off() -> None:
-    base = preset("ledger")
-    assert base.ledger is not None
-    unset = base.model_copy(update={"ledger": LedgerRule(heat_window=2)})
-    pinned = pin_heat_bound(unset).ledger
-    assert pinned is not None
-    assert pinned.heat_vs_opponent is True
-    off = base.model_copy(update={"ledger": LedgerRule(heat_window=2, heat_vs_opponent=False)})
-    kept = pin_heat_bound(off).ledger
-    assert kept is not None
-    assert kept.heat_vs_opponent is False
+def test_config_pins_opponent_heat_and_the_caps_together() -> None:
+    """S13-5 on top of the caps: an overlay inherits the preset's opponent heat; no preset means off."""
+
+    def pinned(mode: str, **ledger: object) -> LedgerRule:
+        rules = Settings.model_validate({"rules": {"mode": mode, "scoring": {"kind": "ledger"}, "ledger": ledger}})
+        assert rules.rules.ledger is not None
+        return rules.rules.ledger
+
+    on, off = pinned("ledger", heat_window=2), pinned("custom", heat_window=2)
+    assert (on.heat_vs_opponent, off.heat_vs_opponent) == (True, False)
+    assert (on.heat_token_cap, on.heat_ref_cap, on.heat_compare) == (TOKEN_CAP, REF_CAP, "full")
 
 
 def test_large_unrelated_programs_are_compared_exactly_and_not_heated() -> None:
