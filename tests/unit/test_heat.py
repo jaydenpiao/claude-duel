@@ -8,7 +8,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from claude_duel.app.agents import build_prompt
-from claude_duel.app.replay import _python_warning
+from claude_duel.app.replay import _python_warning, replay
+from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain.heat import heat, heat_lines, history_refs, penalty, similarity, tokens
 from claude_duel.domain.models import (
@@ -22,7 +23,7 @@ from claude_duel.domain.models import (
     Validation,
 )
 from claude_duel.domain.modes import preset
-from claude_duel.domain.scoring import defense_award, round_heat, score_round
+from claude_duel.domain.scoring import defense_award, heat_of_state, round_heat, score_round
 from tests.unit.test_domain import spec
 
 LOOP = """import sys
@@ -222,3 +223,118 @@ def test_history_refs_take_the_same_models_last_three_valid_sources() -> None:
         past.append(m)
     refs = history_refs(reversed(past), [AgentSpec(name="me", model="x"), AgentSpec(name="you", model="zzz")])
     assert refs == {"me": [f"# {i}\n" + LOOP for i in (2, 3, 4)]}
+
+
+def _copies_opponent() -> tuple[list[Challenge], dict[str, Validation]]:
+    """Round 2: ``a`` copies ``b``'s round-1 source; own-only heat misses it, opponent heat (R5) catches it."""
+    chs = [
+        Challenge(id="r1a", round=1, author="a", spec=spec(OTHER, difficulty=2)),
+        Challenge(id="r1b", round=1, author="b", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2a", round=2, author="a", spec=spec(LOOP, difficulty=2)),
+        Challenge(id="r2b", round=2, author="b", spec=spec(OTHER, difficulty=2)),
+    ]
+    return chs, {c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}
+
+
+def _old_log(opponent: bool, refs: dict[str, list[str]] | None = None) -> tuple[MatchState, list[Event]]:
+    """A heat-on ledger log written before ``heat_vs_opponent`` was logged, scored own-only (#198) or with R5 (#238)."""
+    rules = RULES.model_copy(update={"ledger": LedgerRule(heat_window=2)})
+    dumped = rules.model_dump(mode="json")
+    dumped["ledger"].pop("heat_vs_opponent")
+    data: dict[str, object] = {
+        "seed": "s",
+        "agents": [AgentSpec(name=n).model_dump(mode="json") for n in ("a", "b")],
+        "rules": dumped,
+        "limits": SandboxLimits().model_dump(mode="json"),
+    }
+    if refs:
+        data["heat_refs"] = refs
+    events = [Event(seq=0, type=ev.MATCH_CREATED, trace_id="t", data=data)]
+    chs, vals = _copies_opponent()
+    for ch in chs:
+        built = {"challenge": ch.model_dump(mode="json")}
+        events.append(Event(seq=len(events), type=ev.CHALLENGE_BUILT, trace_id="t", data=built))
+        checked = {"validation": vals[ch.id].model_dump(mode="json")}
+        events.append(Event(seq=len(events), type=ev.CHALLENGE_VALIDATED, trace_id="t", data=checked))
+    for cid, attacker in (("r2a", "b"), ("r2b", "a")):
+        atk = Attack(challenge_id=cid, attacker=attacker, solved=False, attempts=1, tokens_used=0, reason="held")
+        data = {"key": f"{cid}:{attacker}", "attack": atk.model_dump(mode="json")}
+        events.append(Event(seq=len(events), type=ev.CHALLENGE_ATTACKED, trace_id="t", data=data))
+    state = ev.fold("old-heat", events)
+    assert state.rules.ledger is not None
+    assert state.rules.ledger.heat_vs_opponent is None
+    writer = state.model_copy(
+        update={"rules": rules.model_copy(update={"ledger": LedgerRule(heat_window=2, heat_vs_opponent=opponent)})}
+    )
+    hot = heat_of_state(writer, 2)
+    delta = score_round(
+        2,
+        ["a", "b"],
+        writer.challenges.values(),
+        writer.validations,
+        writer.attacks,
+        writer.rules,
+        heat_refs=writer.heat_refs,
+    )
+    scored = {"round": 2, "delta": delta, "heat": hot}
+    events.append(Event(seq=len(events), type=ev.ROUND_SCORED, trace_id="t", data=scored))
+    return ev.fold("old-heat", events), events
+
+
+def test_heat_vs_opponent_is_unset_for_old_logs_and_inferred_from_refs() -> None:
+    """M33/M35: a log without the flag is own-only (#198) unless ``heat_refs`` show a #238 writer."""
+    old = LedgerRule(heat_window=2)
+    assert old.heat_vs_opponent is None
+    chs, vals = _copies_opponent()
+    assert heat(chs, vals, 2, old) == {}
+    assert "r2a" in heat(chs, vals, 2, old, {"b": [THIRD]})
+    assert "r2a" in heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": True}))
+    assert heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": False}), {"b": [THIRD]}) == {}
+
+
+def test_pre_r5_heat_log_replays_clean() -> None:
+    """A #198 log (own-only heat, no flag, no refs) replays as written, with no note."""
+    snapshot, events = _old_log(opponent=False)
+    report = replay(snapshot, events)
+    assert report.consistent, report.mismatches
+    assert not [w for w in report.warnings if "heat_vs_opponent" in w]
+
+
+def test_r5_heat_log_without_flag_or_refs_replays_with_a_note() -> None:
+    """M35: a #238 log with empty ``heat_refs`` (so none logged) scored opponent heat; replay must not flag it."""
+    snapshot, events = _old_log(opponent=True)
+    assert events[-1].data["heat"]
+    report = replay(snapshot, events)
+    assert report.consistent, report.mismatches
+    assert any("heat_vs_opponent not logged" in w for w in report.warnings)
+
+
+def test_r5_heat_log_with_refs_replays_without_a_note() -> None:
+    snapshot, events = _old_log(opponent=True, refs={"b": [THIRD]})
+    report = replay(snapshot, events)
+    assert report.consistent, report.mismatches
+    assert not [w for w in report.warnings if "heat_vs_opponent" in w]
+
+
+def test_tampered_old_heat_log_is_still_flagged() -> None:
+    snapshot, events = _old_log(opponent=True)
+    last = events[-1]
+    events[-1] = last.model_copy(update={"data": {**last.data, "heat": {"r2a": 1}}})
+    report = replay(snapshot, events)
+    assert not report.consistent
+    assert not [w for w in report.warnings if "heat_vs_opponent" in w]
+
+
+def test_new_heat_logs_pin_an_explicit_opponent_flag() -> None:
+    """S13-5: config writes a bool for every heat-on log; None only appears in logs from before the flag."""
+    led = {"scoring": {"kind": "ledger"}}
+
+    def flag(mode: str, **ledger: object) -> bool | None:
+        rules = Settings.model_validate({"rules": {"mode": mode, **led, "ledger": ledger}}).rules.ledger
+        assert rules is not None
+        return rules.heat_vs_opponent
+
+    assert flag("ledger", heat_window=2) is True  # an overlay inherits the preset's R5
+    assert flag("custom", heat_window=2) is False  # no preset: off, never store-dependent
+    assert flag("ledger", heat_window=2, heat_vs_opponent=False) is False
+    assert flag("custom", heat_window=0) is None  # heat off: nothing to pin
