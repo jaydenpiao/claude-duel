@@ -1,5 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
 from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {
@@ -32,7 +33,15 @@ MODES: dict[str, Rules] = {
         challenges_per_round=3,
         max_attempts=3,
         scoring=ScoringRule(kind="ledger"),
-        ledger=LedgerRule(keystone=True, terrain="seeded", heat_window=2, heat_vs_opponent=True),
+        ledger=LedgerRule(
+            keystone=True,
+            terrain="seeded",
+            heat_window=2,
+            heat_vs_opponent=True,
+            heat_token_cap=TOKEN_CAP,
+            heat_ref_cap=REF_CAP,
+            heat_compare="full",
+        ),
         clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
     ),
