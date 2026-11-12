@@ -30,7 +30,13 @@ from claude_duel.domain.models import (
     Stage,
     Validation,
 )
-from claude_duel.domain.scoring import capture_points, heat_of_state, match_stats, score_round
+from claude_duel.domain.scoring import (
+    capture_points,
+    heat_bound_of_state,
+    heat_of_state,
+    match_stats,
+    score_round,
+)
 from claude_duel.domain.state_machine import TERMINAL, next_stage
 from claude_duel.observability import current_trace_id, log, trace
 from claude_duel.ports import (
@@ -833,7 +839,9 @@ class MatchEngine:
         )
         points = capture_points(state.round, state.challenges.values(), state.validations, state.attacks, state.rules)
         lines = heat_of_state(state, state.round)
-        extra = {"heat": lines} if lines else {}
+        extra: dict[str, object] = {"heat": lines} if lines else {}
+        if bound := heat_bound_of_state(state, state.round):
+            extra["heat_bound"] = bound
         self._checkpoint(state, ev.ROUND_SCORED, round=state.round, delta=delta, points=points, **extra)
 
 

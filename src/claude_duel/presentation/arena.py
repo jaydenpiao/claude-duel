@@ -21,7 +21,7 @@ from rich.text import Text
 from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.events import CallCharged
 from claude_duel.domain.flags import scrub
-from claude_duel.domain.heat import heat
+from claude_duel.domain.heat import Hot, heat_label, heat_scan
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.domain.moments import moment_of
 from claude_duel.domain.stakes import own_challenges
@@ -376,7 +376,7 @@ class ArenaView(MatchFold):
         for cid, line in sorted(lines.items()):  # a 0 line (at the threshold) is not news
             ch = s.challenges.get(cid)
             if ch is not None:
-                pct = f"heat {hot[cid]}% " if cid in hot else "heat "
+                pct = f"heat {heat_label(hot[cid])} " if cid in hot else "heat "
                 self.model.log(
                     f"🔥 {who(s, ch.author)}'s {scrub(ch.spec.title) if ch.spec else 'forfeit'!r} {pct}-{line}"
                 )
@@ -427,12 +427,12 @@ class ArenaView(MatchFold):
         self.model.banner = f"failed: {scrub(s.failure or '')} · duel resume {s.match_id}"
 
 
-def _heat_view(state: MatchState, round_no: int) -> dict[str, int]:
+def _heat_view(state: MatchState, round_no: int) -> dict[str, Hot]:
     """Similarity percents for the ticker. A legacy log past the ceiling is skipped, not a crashed rewatch."""
     led = state.rules.ledger
     if led is None:
         return {}
     try:
-        return heat(state.challenges.values(), state.validations, round_no, led, state.heat_refs)
+        return heat_scan(state.challenges.values(), state.validations, round_no, led, state.heat_refs)
     except HeatBoundError:
         return {}

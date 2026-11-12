@@ -9,7 +9,7 @@ import ast
 from collections import Counter
 
 from claude_duel.domain.flags import redact
-from claude_duel.domain.heat import heat
+from claude_duel.domain.heat import heat_label, heat_scan
 from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
 from claude_duel.domain.scoring import heat_of_state
 from claude_duel.domain.stakes import keystone_targets
@@ -67,7 +67,7 @@ def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attac
     lines = [f"Round {r}:"]
     stones = set(keystone_targets(state, r).values())  # revealed only, so past rounds never leak a sealed pick
     hot = (
-        heat(state.challenges.values(), state.validations, r, state.rules.ledger, state.heat_refs)
+        heat_scan(state.challenges.values(), state.validations, r, state.rules.ledger, state.heat_refs)
         if state.rules.ledger
         else {}
     )
@@ -76,7 +76,7 @@ def _round_block(state: MatchState, r: int, agent: str, attacks: dict[str, Attac
         atk = attacks.get(ch.id)
         mark = " (keystone)" if ch.id in stones else ""
         if ch.author == agent:
-            warm = f" (heat {hot[ch.id]}%, penalty {penalties.get(ch.id, 0)})" if ch.id in hot else ""
+            warm = f" (heat {heat_label(hot[ch.id])}, penalty {penalties.get(ch.id, 0)})" if ch.id in hot else ""
             lines.append(f"- yours{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=True)}{warm}")
         else:
             lines.append(f"- theirs{mark} {_title(ch)}: {_outcome(state, ch, atk, yours=False)}")

@@ -19,11 +19,14 @@ from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.heat import (
     CELL_BUDGET,
     MAX_CHALLENGES,
-    PAIR_CELLS,
     PARSE_BYTES,
     REF_CAP,
     TOKEN_CAP,
+    Hot,
+    bound_ids,
     heat,
+    heat_label,
+    heat_scan,
     history_refs,
     pin_heat_bound,
     pinned_bound,
@@ -422,7 +425,7 @@ def test_a_one_sided_pin_replays_as_unverified() -> None:
 
 
 def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
-    """Same token multiset, different order, too big for one DP: refuse or finish under the pair cap."""
+    """Same token multiset, different order, too big for one DP: no DP, no raise, a labeled upper bound."""
     left = "a = a + 1\n" * 4000
     right = "a = 1 + a\n" * 4000
     rule = preset("ledger").ledger
@@ -430,13 +433,12 @@ def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
     chs = [_ch("r1a", 1, "a", left), _ch("r2a", 2, "a", right)]
     reset_heat_cache()
     started = time.perf_counter()
-    try:
-        got = heat(chs, _valid(chs), 2, rule)
-    except HeatBoundError:
-        got = None
+    got = heat_scan(chs, _valid(chs), 2, rule)
     assert time.perf_counter() - started < 5
-    assert work_cells() <= PAIR_CELLS
-    assert got is None or got == {} or got["r2a"] < rule.heat_threshold_pct
+    assert work_cells() == 0
+    assert got == {"r2a": Hot(100, False)}
+    assert heat_label(got["r2a"]) == "<=100% (bound)"
+    assert bound_ids(chs, _valid(chs), 2, rule) == ["r2a"]
 
 
 def test_tokens_stop_inside_a_wide_compare() -> None:
@@ -478,7 +480,7 @@ def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
     copied = _ch("r1a", 1, "a", RENAMED)
     state.challenges = {copied.id: copied}
     state.validations = _valid([copied])
-    assert _heat_view(state, 1)["r1a"] == similarity(RENAMED, LOOP, token_cap=TOKEN_CAP)
+    assert _heat_view(state, 1)["r1a"] == Hot(similarity(RENAMED, LOOP, token_cap=TOKEN_CAP), True)
     bare = state.model_copy(deep=True)
     bare.heat_refs = {}
     assert _heat_view(bare, 1) == {}
@@ -490,3 +492,40 @@ def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
     legacy.validations = _valid([dense])
     legacy.heat_refs = {"a": [_dense(6144, 8)]}
     assert _heat_view(legacy, 1) == {}
+
+
+def test_a_spent_call_budget_charges_a_labeled_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second pair finds the call budget spent: no DP, no raise, the multiset ceiling labeled as a bound."""
+    rule = preset("ledger").ledger
+    assert rule is not None
+    old = _ch("r1a", 1, "a", "a = a + 1\n" * 5)
+    first, second = (_ch(cid, 2, "a", "a = 1 + a\n" * 5) for cid in ("r2a", "r2b"))
+    chs = [old, first, second]
+    monkeypatch.setattr("claude_duel.domain.heat.CELL_BUDGET", 35 * 35 + 10)
+    reset_heat_cache()
+    got = heat_scan(chs, _valid(chs), 2, rule)
+    assert work_cells() == 35 * 35
+    assert got["r2a"].exact
+    assert got["r2a"].pct < 100
+    assert got["r2b"] == Hot(100, False)
+    assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
+
+
+def test_unparsed_reference_is_a_bound_and_history_skips_it() -> None:
+    rule = preset("ledger").ledger
+    assert rule is not None
+    big = "x = 1\n" * (PARSE_BYTES // 6 + 1)
+    chs = [_ch("r1a", 1, "a", "x = 1\n")]
+    reset_heat_cache()
+    assert heat_scan(chs, _valid(chs), 1, rule, {"a": [big]}) == {"r1a": Hot(100, False)}
+    match = _match("p0", "x", seq=0)
+    match.challenges = {"0": _ch("0", 1, "a", big), "1": _ch("1", 1, "a", "y = 2\n")}
+    match.validations = _valid(list(match.challenges.values()))
+    assert history_refs([match], [AgentSpec(name="me", model="x")]) == {"me": ["y = 2\n"]}
+
+
+def test_whole_source_heat_caps_admission_at_the_parse_ceiling() -> None:
+    full = preset("ledger").model_copy(update={"max_source_bytes_base": 4096})
+    assert full.max_source_bytes(20) == PARSE_BYTES
+    assert full.max_source_bytes(2) == 8192
+    assert _legacy_rules().model_copy(update={"max_source_bytes_base": 4096}).max_source_bytes(20) == 81920

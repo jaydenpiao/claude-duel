@@ -13,6 +13,10 @@ not, so replay reports the round unverified instead of substituting a different 
 ``PARSE_BYTES`` are not parsed. A walk that the parser rejects (including deep nesting) is empty, the same as a
 syntax error. One heat call compares at most ``MAX_CHALLENGES * REF_CAP`` pairs of at most ``TOKEN_CAP`` tokens
 (``CELL_BUDGET`` cell updates). Repeated calls with the real similarity function reuse a bounded memo.
+
+Whole-source heat (``heat_compare=full``) does not raise on work: a pair past ``PAIR_CELLS`` or the call's
+remaining budget is charged on the multiset ceiling, an upper bound on its LCS. ``heat_scan`` marks such a
+percent inexact so callers label it a bound (``heat_label``) and the engine logs it in ``round_scored.heat_bound``.
 """
 
 from __future__ import annotations
@@ -21,11 +25,21 @@ import ast
 import hashlib
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import NamedTuple
 
 from claude_duel.domain.errors import HeatBoundError
-from claude_duel.domain.models import AgentSpec, Attack, Challenge, LedgerRule, MatchState, Rules, Validation
+from claude_duel.domain.models import (
+    HEAT_PARSE_BYTES,
+    AgentSpec,
+    Attack,
+    Challenge,
+    LedgerRule,
+    MatchState,
+    Rules,
+    Validation,
+)
 
-PARSE_BYTES = 65_536
+PARSE_BYTES = HEAT_PARSE_BYTES
 TOKEN_CAP = 256
 REF_CAP = 48
 MAX_CHALLENGES = 20  # two agents times challenges_per_round's maximum
@@ -45,6 +59,15 @@ _SKIP = (
     ast.cmpop,
 )  # contexts; ops are emitted by their parent
 DefenseFn = Callable[[Challenge], int]
+
+
+class Hot(NamedTuple):
+    """A heat percent. ``exact`` False: the multiset ceiling used past the work limit, never shown as exact."""
+
+    pct: int
+    exact: bool
+
+
 _Plan = tuple[tuple[str, str, tuple[str, ...]], ...]  # challenge id, its source, reference sources
 
 
@@ -52,7 +75,7 @@ class _Work:
     cells = 0
 
 
-_MEMO: OrderedDict[tuple[object, ...], dict[str, int]] = OrderedDict()
+_MEMO: OrderedDict[tuple[object, ...], dict[str, Hot]] = OrderedDict()
 _TOKENS: OrderedDict[tuple[bytes, int], tuple[str, ...]] = OrderedDict()
 
 
@@ -359,56 +382,58 @@ def _dp(a: tuple[str, ...], b: tuple[str, ...]) -> int:
     return prev[-1]
 
 
-def _full_similarity(a: str, b: str, threshold: int, room: int) -> int:
+def _full_similarity(a: str, b: str, threshold: int, room: int) -> Hot:
     """Whole-source LCS percent. Exact when one side contains the other or the DP fits.
 
-    When the multiset ceiling is already under ``threshold``, the heat line matches full LCS without the
-    DP. Otherwise a pair that does not fit is refused (``HeatBoundError``), not prefix-scored.
+    Otherwise the multiset ceiling, an upper bound on the LCS: under ``threshold`` it decides the heat line
+    the same way the full LCS would (exact); at or over it, it is a bound. Never raises, so a legal source
+    cannot fail a match, and a padded near-copy cannot dodge heat by outgrowing the budget.
     """
     left, right = _profile(a), _profile(b)
-    if left is None or right is None or left.length == 0 or right.length == 0:
-        if left is None or right is None:
-            raise HeatBoundError()
-        return 0
+    if left is None or right is None:
+        return Hot(100, False)  # admission and history_refs keep these out; the bound is the trivial one
+    if left.length == 0 or right.length == 0:
+        return Hot(0, True)
     denom = max(left.length, right.length)
     if (
         left.tokens is not None
         and right.tokens is not None
         and (_is_subseq(left.tokens, right.tokens) or _is_subseq(right.tokens, left.tokens))
     ):
-        return 100 * min(left.length, right.length) // denom
+        return Hot(100 * min(left.length, right.length) // denom, True)
     cells = left.length * right.length
     if left.tokens is not None and right.tokens is not None and cells <= room and cells <= PAIR_CELLS:
-        return 100 * _dp(left.tokens, right.tokens) // denom
+        return Hot(100 * _dp(left.tokens, right.tokens) // denom, True)
     ceiling = 100 * _overlap(left.counts, right.counts) // denom
-    if ceiling < threshold:
-        return ceiling
-    raise HeatBoundError()
+    return Hot(ceiling, ceiling < threshold)
 
 
-def _percentages(plan: _Plan, mode: str | None, threshold: int) -> dict[str, int]:
-    out: dict[str, int] = {}
+def _percentages(plan: _Plan, mode: str | None, threshold: int) -> dict[str, Hot]:
+    out: dict[str, Hot] = {}
     spent = 0
     for cid, src, past in plan:
         if len(past) > REF_CAP:
             raise HeatBoundError()
-        top = 0
+        top = Hot(0, True)
         for ref in past:
             before = _Work.cells
-            top = max(top, _compare(src, ref, mode, threshold, CELL_BUDGET - spent))
+            got = _compare(src, ref, mode, threshold, CELL_BUDGET - spent)
+            # the larger percent wins; on a tie the exact one (the true maximum is then that value)
+            if (got.pct, got.exact) > (top.pct, top.exact):
+                top = got
             spent += _Work.cells - before
             if spent > CELL_BUDGET:
                 raise HeatBoundError()
-        if top >= threshold:
+        if top.pct >= threshold:
             out[cid] = top
     return out
 
 
-def _compare(a: str, b: str, mode: str | None, threshold: int, room: int) -> int:
-    """Legacy and ``prefix`` keep the capped walk. ``full`` is the whole-source LCS, or a refusal."""
+def _compare(a: str, b: str, mode: str | None, threshold: int, room: int) -> Hot:
+    """Legacy and ``prefix`` keep the capped walk (exact or ``HeatBoundError``). ``full`` is whole-source."""
     if mode == "full":
         return _full_similarity(a, b, threshold, room)
-    return similarity(a, b, token_cap=None if mode is None else TOKEN_CAP)
+    return Hot(similarity(a, b, token_cap=None if mode is None else TOKEN_CAP), True)
 
 
 def heat(
@@ -418,6 +443,17 @@ def heat(
     rule: LedgerRule,
     refs: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
+    """``heat_scan`` percents only. A display must use ``heat_scan`` so a bound is not shown as exact."""
+    return {cid: hot.pct for cid, hot in heat_scan(challenges, validations, round_no, rule, refs).items()}
+
+
+def heat_scan(
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    round_no: int,
+    rule: LedgerRule,
+    refs: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Hot]:
     """challenge id -> best similarity to the valid challenges of the last ``heat_window`` rounds (the author's own
     and, design R5, the opponent's) plus ``refs[author]`` (sources from the same model's last matches, frozen in
     ``match_created``), for this round's valid challenges at or over ``heat_threshold_pct`` only. Invalid ones
@@ -459,6 +495,23 @@ def penalty(defense: int, h: int, rule: LedgerRule) -> int:
     return min(defense * rule.heat_max_pct // 100, ramp)
 
 
+def heat_label(hot: Hot) -> str:
+    """``65%`` exact; ``<=70% (bound)`` when only the upper bound was computed."""
+    return f"{hot.pct}%" if hot.exact else f"<={hot.pct}% (bound)"
+
+
+def bound_ids(
+    challenges: Iterable[Challenge],
+    validations: Mapping[str, Validation],
+    round_no: int,
+    rule: LedgerRule,
+    refs: Mapping[str, Sequence[str]] | None = None,
+) -> list[str]:
+    """Challenge ids whose heat is an upper bound, not an exact similarity (logged as ``round_scored.heat_bound``)."""
+    hot = heat_scan(challenges, validations, round_no, rule, refs)
+    return sorted(cid for cid, h in hot.items() if not h.exact)
+
+
 def heat_lines(
     challenges: Iterable[Challenge],
     validations: Mapping[str, Validation],
@@ -498,7 +551,7 @@ def history_refs(
             c.spec.source
             for m, name in mine[-k:]
             for c in sorted(m.challenges.values(), key=lambda c: c.id)
-            if c.author == name and _valid(c, m.validations) and c.spec is not None
+            if c.author == name and _valid(c, m.validations) and c.spec is not None and _raw(c.spec.source) is not None
         ]
         if source_limit is not None:
             sources = sources[-source_limit:]

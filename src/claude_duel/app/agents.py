@@ -171,7 +171,10 @@ def _heat_cap_sentence(led: LedgerRule) -> str:
         return ""
     refs = f"at most {min(led.heat_ref_cap, REF_CAP)} references, this match's recent challenges first"
     if led.heat_compare == "full":
-        return f" Comparison uses the whole program, not only its beginning, and {refs}."
+        return (
+            f" Comparison uses the whole program, not only its beginning, and {refs}."
+            " A pair too large to compare exactly is charged on an upper bound of its similarity."
+        )
     return f" Comparison uses the first {min(led.heat_token_cap, TOKEN_CAP)} AST tokens and {refs}."
 
 

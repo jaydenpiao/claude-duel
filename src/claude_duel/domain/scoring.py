@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.ghosts import ghost_award
-from claude_duel.domain.heat import heat_lines
+from claude_duel.domain.heat import bound_ids, heat_lines
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -113,6 +113,15 @@ def heat_of_state(state: MatchState, round_no: int) -> dict[str, int]:
     """``round_heat`` for a folded match: what ``round_scored.heat`` records (and replay recomputes)."""
     attacks = {a.challenge_id: a for a in state.attacks.values()}
     return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules, state.heat_refs)
+
+
+def heat_bound_of_state(state: MatchState, round_no: int) -> list[str]:
+    """Heat lines this round charged on the upper bound (``round_scored.heat_bound``); [] when all were exact."""
+    if state.rules.ledger is None:
+        return []
+    lines = heat_of_state(state, round_no)
+    hot = bound_ids(state.challenges.values(), state.validations, round_no, state.rules.ledger, state.heat_refs)
+    return [cid for cid in hot if cid in lines]
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:

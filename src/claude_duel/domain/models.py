@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+HEAT_PARSE_BYTES = 65_536  # heat parses at most this much source; whole-source heat admits no more
+
 
 class Stage(StrEnum):
     PENDING = "pending"
@@ -243,8 +245,11 @@ class Rules(_Frozen):
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
-        """Escalation: authors get more room every round."""
-        return self.max_source_bytes_base * round_no
+        """Escalation: authors get more room every round. Whole-source heat stops at what it parses."""
+        cap = self.max_source_bytes_base * round_no
+        if self.ledger is not None and self.ledger.heat_window and self.ledger.heat_compare == "full":
+            return min(cap, HEAT_PARSE_BYTES)
+        return cap
 
     def output_cap(self, own: int | None = None) -> int:
         """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
