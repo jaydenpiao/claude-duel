@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 
 from claude_duel.app.agents import build_prompt
 from claude_duel.app.replay import _python_warning, replay
+from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain.heat import heat, heat_lines, history_refs, penalty, similarity, tokens
 from claude_duel.domain.models import (
@@ -322,3 +323,18 @@ def test_tampered_old_heat_log_is_still_flagged() -> None:
     report = replay(snapshot, events)
     assert not report.consistent
     assert not [w for w in report.warnings if "heat_vs_opponent" in w]
+
+
+def test_new_heat_logs_pin_an_explicit_opponent_flag() -> None:
+    """S13-5: config writes a bool for every heat-on log; None only appears in logs from before the flag."""
+    led = {"scoring": {"kind": "ledger"}}
+
+    def flag(mode: str, **ledger: object) -> bool | None:
+        rules = Settings.model_validate({"rules": {"mode": mode, **led, "ledger": ledger}}).rules.ledger
+        assert rules is not None
+        return rules.heat_vs_opponent
+
+    assert flag("ledger", heat_window=2) is True  # an overlay inherits the preset's R5
+    assert flag("custom", heat_window=2) is False  # no preset: off, never store-dependent
+    assert flag("ledger", heat_window=2, heat_vs_opponent=False) is False
+    assert flag("custom", heat_window=0) is None  # heat off: nothing to pin
