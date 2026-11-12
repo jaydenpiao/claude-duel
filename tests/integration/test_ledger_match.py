@@ -375,7 +375,7 @@ def test_pre_keystone_ledger_log_replays_with_features_off(make_engine, new_stat
 def test_ledger_preset_turns_the_features_on() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
-    assert (rule.keystone, rule.terrain, rule.heat_window) == (True, "seeded", 2)
+    assert (rule.keystone, rule.terrain, rule.heat_window, rule.heat_vs_opponent) == (True, "seeded", 2, True)
 
 
 def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
