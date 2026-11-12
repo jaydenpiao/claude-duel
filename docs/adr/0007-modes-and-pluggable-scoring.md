@@ -68,3 +68,10 @@ Zero by itself. Every preset must declare an expected cost per match, computed b
 - Golden: one recorded fake match per preset under `tests/snapshots/modes/`; replay must equal the snapshot.
 - Config: preset + env override precedence; legacy top-level `solve_points` alias.
 - Replay with a mutated preset table: it still uses the logged rules.
+
+## Amendment: presets on main (2026-10-31)
+
+- `domain/modes.py` presets: `classic`, `quick`, `gated`, `checked` (ADR 0010), `efficiency`, `capped`, `blitz`
+  and `ledger` (#192). `ledger` sets `scoring.kind = "ledger"` with a `LedgerRule` (attack tokens split as stakes
+  across the opponent's challenges), 3 challenges per round, a 60k token clock and summary memory. A ledger scorer
+  without `[rules.ledger]`, or the reverse, is a config error; use the preset.
