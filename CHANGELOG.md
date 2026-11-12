@@ -6,7 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- Image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 (trivy HIGH).
+- image: apt `--only-upgrade zlib1g` for trivy HIGH CVE-2026-76844 / CVE-2026-85091 (base pin not yet rebuilt).
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
@@ -14,6 +14,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
+- Config refuses API keys from TOML; env-only secrets (#242).
+- Warning when configured agent wallets exceed the match spend cap (#123).
+- Tournament bootstrap skips absent entrants (#124).
+- Results DB inserts are chunked under the 65,535-parameter limit (#252).
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
 - Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).
@@ -29,7 +33,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
-- `scoring = "ledger"` refused until the arena wiring lands (#208).
+- `scoring = "ledger"` is available via the `ledger` / `ledger_deep` presets (#192, #208 refusal lifted).
 - `gpt-4.1-nano` dropped from the allowlist; gpt-5-nano is the low default (#209).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
