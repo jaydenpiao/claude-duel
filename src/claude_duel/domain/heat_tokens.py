@@ -15,8 +15,6 @@ from dataclasses import dataclass
 PARSE_BYTES = 65_536  # heat never parses more; whole-source heat admits no larger source
 TOKEN_CAP = 256  # prefix width ceiling, and the legacy rule's exact-LCS ceiling
 REF_CAP = 48  # references per challenge
-STORE_LIMIT = 32_768  # tokens kept per source; a longer walk keeps its length and counts only
-
 _SKIP = (ast.expr_context, ast.operator, ast.unaryop, ast.boolop, ast.cmpop)  # ops are emitted by their parent
 
 
@@ -36,16 +34,16 @@ def digest(source: str) -> bytes:
 
 @dataclass(frozen=True)
 class Profile:
-    """A source's walk: the first ``STORE_LIMIT`` tokens, the true length and the token counts."""
+    """A source's walk: every token under the parse ceiling, the length, and the counts."""
 
     kept: tuple[str, ...]
     length: int
     counts: dict[str, int]
 
     @property
-    def tokens(self) -> tuple[str, ...] | None:
-        """The whole walk, or None when it is longer than ``STORE_LIMIT``."""
-        return self.kept if self.length == len(self.kept) else None
+    def tokens(self) -> tuple[str, ...]:
+        """The whole walk."""
+        return self.kept
 
 
 EMPTY = Profile((), 0, {})
@@ -80,13 +78,12 @@ def profile(source: str) -> Profile | None:
         for text in (type(node).__name__, *_extra(node)):
             length += 1
             counts[text] = counts.get(text, 0) + 1
-            if length <= STORE_LIMIT:
-                kept.append(text)
+            kept.append(text)
         stack.extend(reversed(list(ast.iter_child_nodes(node))))
     return Profile(tuple(kept), length, counts)
 
 
 def tokens(source: str, limit: int = TOKEN_CAP) -> tuple[str, ...]:
-    """The first ``limit`` tokens (at most ``STORE_LIMIT``); () when the source does not parse or is too big."""
+    """The first ``limit`` tokens; () when the source does not parse or is too big."""
     got = profile(source)
     return () if got is None else got.kept[:limit]

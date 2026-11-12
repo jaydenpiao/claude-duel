@@ -7,9 +7,9 @@
 - ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens.
 - ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
   bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset ceiling is only a cold-skip filter (if it
-  is below the threshold, the exact LCS is too). A pair over the work guard, or whose walk is past
-  ``STORE_LIMIT`` and not cold, is ``heat unchecked``: it never raises, is charged 0, and is never scored on a
-  bound (S13-4).
+  is below the threshold, the exact LCS is too). Every source under ``PARSE_BYTES`` keeps its full walk, so a
+  long exact copy is compared (a copied body in linear time). A pair over the work guard is ``heat unchecked``:
+  it never raises, is charged 0, and is never scored on a bound (S13-4).
 
 All three go through ``compare``. LCS is exact in every regime, so old logs replay unchanged.
 """

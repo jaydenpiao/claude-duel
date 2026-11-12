@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 import claude_duel
+from claude_duel.adapters.providers.fake import TEMPLATES
 from claude_duel.app.agents import build_prompt
 from claude_duel.app.container import build_store
 from claude_duel.app.replay import replay
@@ -129,7 +130,7 @@ def _replay(
 def test_ceiling_is_the_documented_contract() -> None:
     assert (TOKEN_CAP, REF_CAP, PARSE_BYTES, MAX_CHALLENGES) == (256, 48, 65_536, 20)
     assert WORK_BUDGET == 1_000_000_000
-    assert work(32_768, 32_768) == 32_768 * 513  # the largest stored walk pair: under 2% of a call
+    assert work(32_768, 32_768) == 32_768 * 513  # a 32k x 32k pair: under 2% of a call
 
 
 def test_short_sources_keep_full_similarity() -> None:
@@ -603,3 +604,32 @@ def test_multiset_ceiling_skips_a_cold_pair() -> None:
     assert sc.scan(chs, _valid(chs), 2, rule) == {}
     assert sc.heat(chs, _valid(chs), 2, rule) == {}
     assert sc.unchecked_ids(chs, _valid(chs), 2, rule) == []
+
+
+def test_exact_copy_past_32k_tokens_is_charged() -> None:
+    """An exact copy longer than the old 32,768-token drop must be compared and charged 100 (never unchecked).
+
+    The source is the review repro: the shipped sum template plus enough ``1`` lines to walk past 32,768 tokens
+    (~22 KiB). It fits the default byte cap in rounds 11-12 of a 12-round ledger match, not earlier.
+    """
+    template = next(t for t in TEMPLATES if t.key == "sum")
+    unit, prefix = profile("1\n"), profile(template.source)
+    assert unit is not None
+    assert prefix is not None
+    lines = (32_768 - prefix.length) // unit.length + 1
+    source = "1\n" * lines + template.source
+    walked = profile(source)
+    assert walked is not None
+    assert walked.length == len(walked.tokens) > 32_768
+    assert work(walked.length, walked.length) <= WORK_BUDGET
+    rules = Rules()
+    assert len(source.encode()) > rules.max_source_bytes(10)
+    assert len(source.encode()) <= rules.max_source_bytes(11) <= rules.max_source_bytes(12)
+    rule = preset("ledger").ledger
+    assert rule is not None
+    sc = HeatScorer()
+    assert sc.similarity(source, source, rule) == Hot(100, True)
+    assert sc.work == 0  # a copied body is decided in linear time
+    chs = [_ch("r11a", 11, "a", source), _ch("r12a", 12, "a", source)]
+    assert sc.heat(chs, _valid(chs), 12, rule) == {"r12a": 100}
+    assert sc.unchecked_ids(chs, _valid(chs), 12, rule) == []
