@@ -5,11 +5,11 @@
 - ``legacy``: no pins (logs from before the caps). Exact whole-source LCS while both walks fit ``TOKEN_CAP``
   and the references fit ``REF_CAP``; past that ``HeatBoundError``, and replay reports the round unverified.
 - ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens.
-- ``full``: new matches. Whole-source LCS; a copied body is decided in linear time, other pairs run the DP
-  inside ``PAIR_CELLS`` and the call's ``CELL_BUDGET``. Past that the pair is charged on the multiset ceiling,
-  an upper bound marked inexact; it never raises.
+- ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
+  bit-parallel LCS inside the call's ``WORK_BUDGET``. A pair that cannot be compared exactly (budget spent, or a
+  walk past ``STORE_LIMIT``) is unverified: it never raises and never charges (S13-4). No upper bound is used.
 
-All three go through ``compare``.
+All three go through ``compare``. LCS is exact in every regime, so old logs replay unchanged.
 """
 
 from __future__ import annotations
@@ -22,12 +22,14 @@ from claude_duel.domain.models import LedgerRule, Rules
 
 Regime = Literal["legacy", "prefix", "full"]
 MAX_CHALLENGES = 20  # two agents times challenges_per_round's maximum
-CELL_BUDGET = MAX_CHALLENGES * REF_CAP * TOKEN_CAP * TOKEN_CAP  # DP cell updates per heat call
-PAIR_CELLS = 4_000_000  # one DP above this (~0.4s) is not run
+WORD = 64  # bits per machine word: the work unit of the bit-parallel LCS
+WORK_BUDGET = 1_000_000_000  # word operations per heat call (about 6 s); 32k x 32k tokens is 16.8M (~0.1 s)
 
 
 class Hot(NamedTuple):
-    """A heat percent. ``exact`` False: the multiset ceiling used past the work bound, never shown as exact."""
+    """A heat percent. ``exact`` False: some reference could not be compared, so ``pct`` is the best exact
+    similarity found (a lower bound of the true best); it is shown as unverified and charged only when that exact
+    value alone reaches the threshold."""
 
     pct: int
     exact: bool
@@ -59,14 +61,27 @@ def pin_heat_bound(rules: Rules) -> Rules:
 
 
 def lcs(a: tuple[str, ...], b: tuple[str, ...]) -> int:
-    """Exact LCS length; ``len(a) * len(b)`` cell updates. The caller bounds the size."""
-    prev = [0] * (len(b) + 1)
+    """Exact LCS length, bit-parallel (Hyyro 2004) over a ``len(b)``-bit int: ``work(a, b)`` word operations."""
+    if len(a) < len(b):
+        a, b = b, a
+    if not b:
+        return 0
+    masks: dict[str, int] = {}
+    for j, token in enumerate(b):
+        masks[token] = masks.get(token, 0) | (1 << j)
+    full = (1 << len(b)) - 1
+    v = full
     for token in a:
-        cur = [0]
-        for j, other in enumerate(b):
-            cur.append(prev[j] + 1 if token == other else max(prev[j + 1], cur[j]))
-        prev = cur
-    return prev[-1]
+        m = masks.get(token)
+        if m:
+            u = v & m
+            v = ((v + u) | (v - u)) & full
+    return len(b) - v.bit_count()
+
+
+def work(a: int, b: int) -> int:
+    """Word operations ``lcs`` spends on walks of ``a`` and ``b`` tokens."""
+    return max(a, b) * (min(a, b) // WORD + 1)
 
 
 def _is_subseq(small: tuple[str, ...], big: tuple[str, ...]) -> bool:
@@ -82,13 +97,6 @@ def _is_subseq(small: tuple[str, ...], big: tuple[str, ...]) -> bool:
     return False
 
 
-def _overlap(left: dict[str, int], right: dict[str, int]) -> int:
-    """Multiset intersection size: an upper bound on the LCS."""
-    if len(left) > len(right):
-        left, right = right, left
-    return sum(min(count, right.get(name, 0)) for name, count in left.items())
-
-
 def _view(walk: Profile | None, mode: Regime, width: int) -> Profile | None:
     """What ``mode`` compares: the whole walk, or its first ``width`` tokens (an unparsed source is empty)."""
     if mode != "prefix":
@@ -102,15 +110,16 @@ def _view(walk: Profile | None, mode: Regime, width: int) -> Profile | None:
     return Profile(kept, len(kept), counts)
 
 
-def compare(
-    a: Profile | None, b: Profile | None, mode: Regime, width: int, threshold: int, room: int
-) -> tuple[Hot, int]:
-    """``(similarity, DP cells spent)`` for one pair under ``mode``. ``room`` is the call's remaining budget."""
+UNVERIFIED = Hot(0, False)
+
+
+def compare(a: Profile | None, b: Profile | None, mode: Regime, width: int, room: int) -> tuple[Hot, int]:
+    """``(similarity, work spent)`` for one pair under ``mode``. ``room`` is the call's remaining work."""
     left, right = _view(a, mode, width), _view(b, mode, width)
     if left is None or right is None:
         if mode == "legacy":
             raise HeatBoundError()
-        return Hot(100, False), 0  # admission and history keep these out of new matches; the trivial bound
+        return UNVERIFIED, 0  # over PARSE_BYTES: admission and history keep these out of new matches
     if left.length == 0 or right.length == 0:
         return Hot(0, True), 0
     if mode == "legacy" and max(left.length, right.length) > TOKEN_CAP:
@@ -119,10 +128,9 @@ def compare(
     ta, tb = left.tokens, right.tokens
     if ta is not None and tb is not None and (_is_subseq(ta, tb) or _is_subseq(tb, ta)):
         return Hot(100 * min(left.length, right.length) // denom, True), 0
-    cells = left.length * right.length
-    if ta is not None and tb is not None and cells <= min(room, PAIR_CELLS):
-        return Hot(100 * lcs(ta, tb) // denom, True), cells
+    spent = work(left.length, right.length)
+    if ta is not None and tb is not None and spent <= room:
+        return Hot(100 * lcs(ta, tb) // denom, True), spent
     if mode != "full":
-        raise HeatBoundError()  # prefix pairs never get here (width <= TOKEN_CAP); legacy is refused above
-    ceiling = 100 * _overlap(left.counts, right.counts) // denom
-    return Hot(ceiling, ceiling < threshold), 0
+        raise HeatBoundError()  # prefix and legacy pairs are at most TOKEN_CAP square: never here in practice
+    return UNVERIFIED, 0

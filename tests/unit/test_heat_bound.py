@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import ast
+import random
 import time
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import claude_duel
 from claude_duel.app.agents import build_prompt
 from claude_duel.app.container import build_store
 from claude_duel.app.replay import replay
@@ -18,7 +21,8 @@ from claude_duel.domain import events as ev
 from claude_duel.domain import memory
 from claude_duel.domain.errors import EventLogCorruptError, HeatBoundError
 from claude_duel.domain.heat import HeatScorer, heat, heat_label, history_refs
-from claude_duel.domain.heat_bound import CELL_BUDGET, MAX_CHALLENGES, Hot, pin_heat_bound
+from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, pin_heat_bound, work
+from claude_duel.domain.heat_bound import lcs as bit_lcs
 from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP, tokens
 from claude_duel.domain.models import (
     AgentSpec,
@@ -124,7 +128,8 @@ def _replay(
 
 def test_ceiling_is_the_documented_contract() -> None:
     assert (TOKEN_CAP, REF_CAP, PARSE_BYTES, MAX_CHALLENGES) == (256, 48, 65_536, 20)
-    assert CELL_BUDGET == MAX_CHALLENGES * REF_CAP * TOKEN_CAP * TOKEN_CAP
+    assert WORK_BUDGET == 1_000_000_000
+    assert work(32_768, 32_768) == 32_768 * 513  # the largest stored walk pair: under 2% of a call
 
 
 def test_short_sources_keep_full_similarity() -> None:
@@ -140,9 +145,9 @@ def test_dense_prefix_matches_a_copy_and_legacy_does_not_run_lcs() -> None:
     started = time.perf_counter()
     with pytest.raises(HeatBoundError, match="work bound"):
         similarity(src, _dense(6144, 2), scorer=sc)
-    assert sc.cells == 0
+    assert sc.work == 0
     assert similarity(src, _dense(6144, 2), token_cap=TOKEN_CAP, scorer=sc) == 100
-    assert sc.cells == 0  # one prefix holds the other: no DP
+    assert sc.work == 0  # one prefix holds the other: no LCS
     assert time.perf_counter() - started < 2
 
 
@@ -198,7 +203,7 @@ def test_too_many_challenges_or_legacy_refs_raise_before_lcs() -> None:
     one = [_ch("r1a", 1, "a", LOOP)]
     with pytest.raises(HeatBoundError):
         sc.heat(one, _valid(one), 1, LedgerRule(heat_window=1), {"a": [LOOP] * (REF_CAP + 1)})
-    assert sc.cells == 0
+    assert sc.work == 0
 
 
 def test_pin_fills_both_caps_and_full_only_when_heat_is_on() -> None:
@@ -359,7 +364,7 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     started = time.perf_counter()
     got = sc.heat(chs, _valid(chs), 3, rule, refs)
     # Identical token sequences (names and int literals dropped) are a whole-source LCS of 100, no DP.
-    assert sc.cells == 0
+    assert sc.work == 0
     assert set(got) == {c.id for c in chs if c.round == 3}
     assert set(got.values()) == {100}
     assert sc.heat(chs, _valid(chs), 3, rule, refs) == got
@@ -374,7 +379,7 @@ def test_full_history_dense_round_stays_inside_the_budget() -> None:
     state.validations = _valid(chs)
     memory.summarize(state, "a", 3, state.rules.memory, sc)
     memory.summarize(state, "a", 3, state.rules.memory, sc)
-    assert sc.cells == 0
+    assert sc.work == 0
     # Cell counts are the bound. 180s only catches a runaway walker; a slow runner has taken ~56s.
     assert time.perf_counter() - started < 180
 
@@ -399,7 +404,7 @@ def test_a_one_sided_pin_is_a_corrupt_log() -> None:
 
 
 def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
-    """Same token multiset, different order, too big for one DP: no DP, no raise, a labeled upper bound."""
+    """Same token multiset, different order, 20k tokens each: the exact LCS, fast, below the old ceiling."""
     left = "a = a + 1\n" * 4000
     right = "a = 1 + a\n" * 4000
     rule = preset("ledger").ledger
@@ -409,10 +414,11 @@ def test_reordered_long_sources_do_not_run_an_unbounded_lcs() -> None:
     started = time.perf_counter()
     got = sc.scan(chs, _valid(chs), 2, rule)
     assert time.perf_counter() - started < 5
-    assert sc.cells == 0
-    assert got == {"r2a": Hot(100, False)}
-    assert heat_label(got["r2a"]) == "<=100% (bound)"
-    assert sc.bound_ids(chs, _valid(chs), 2, rule) == ["r2a"]
+    assert sc.work > 0
+    assert got["r2a"].exact
+    assert got["r2a"].pct < 100
+    assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
+    assert sc.unverified_ids(chs, _valid(chs), 2, rule) == []
 
 
 def test_tokens_stop_inside_a_wide_compare() -> None:
@@ -422,7 +428,7 @@ def test_tokens_stop_inside_a_wide_compare() -> None:
     sc = HeatScorer()
     other = "x = 1" + "<1" * 3000 + "\n"
     assert similarity(src, other, token_cap=TOKEN_CAP, scorer=sc) < 100
-    assert sc.cells == TOKEN_CAP * TOKEN_CAP
+    assert sc.work == work(TOKEN_CAP, TOKEN_CAP)
 
 
 def test_card_says_unverified_when_heat_was_not_recomputed() -> None:
@@ -469,20 +475,22 @@ def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
     assert _heat_view(legacy, 1) == {}
 
 
-def test_a_spent_call_budget_charges_a_labeled_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The second pair finds the call budget spent: no DP, no raise, the multiset ceiling labeled as a bound."""
+def test_a_spent_call_budget_is_unverified_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second pair finds the call budget spent: no LCS, no raise, no charge, labeled unverified."""
     rule = preset("ledger").ledger
     assert rule is not None
     old = _ch("r1a", 1, "a", "a = a + 1\n" * 5)
     first, second = (_ch(cid, 2, "a", "a = 1 + a\n" * 5) for cid in ("r2a", "r2b"))
     chs = [old, first, second]
-    monkeypatch.setattr("claude_duel.domain.heat.CELL_BUDGET", 35 * 35 + 10)
+    monkeypatch.setattr("claude_duel.domain.heat.WORK_BUDGET", work(35, 35) + 10)
     sc = HeatScorer()
     got = sc.scan(chs, _valid(chs), 2, rule)
-    assert sc.cells == 35 * 35
+    assert sc.work == work(35, 35)
     assert got["r2a"].exact
     assert got["r2a"].pct < 100
-    assert got["r2b"] == Hot(100, False)
+    assert got["r2b"] == Hot(0, False)
+    assert "r2b" not in sc.heat(chs, _valid(chs), 2, rule)
+    assert heat_label(got["r2b"]) == "unverified"
     assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
 
 
@@ -491,7 +499,7 @@ def test_unparsed_reference_is_a_bound_and_history_skips_it() -> None:
     assert rule is not None
     big = "x = 1\n" * (PARSE_BYTES // 6 + 1)
     chs = [_ch("r1a", 1, "a", "x = 1\n")]
-    assert HeatScorer().scan(chs, _valid(chs), 1, rule, {"a": [big]}) == {"r1a": Hot(100, False)}
+    assert HeatScorer().scan(chs, _valid(chs), 1, rule, {"a": [big]}) == {"r1a": Hot(0, False)}
     match = _match("p0", "x", seq=0)
     match.challenges = {"0": _ch("0", 1, "a", big), "1": _ch("1", 1, "a", "y = 2\n")}
     match.validations = _valid(list(match.challenges.values()))
@@ -526,3 +534,49 @@ def test_config_pins_opponent_heat_unless_turned_off() -> None:
     kept = pin_heat_bound(off).ledger
     assert kept is not None
     assert kept.heat_vs_opponent is False
+
+
+def test_large_unrelated_programs_are_compared_exactly_and_not_heated() -> None:
+    """S13-4: two real, unrelated modules (thousands of tokens) share a token mix but not an order. The old
+    multiset ceiling charged them at the threshold; the bit-parallel LCS is exact and below it."""
+    root = Path(claude_duel.__file__).parent
+    cli, arena = (root / "cli.py").read_text(), (root / "presentation" / "arena.py").read_text()
+    left, right = tokens(cli, PARSE_BYTES), tokens(arena, PARSE_BYTES)
+    assert min(len(left), len(right)) > 2000
+    rule = preset("ledger").ledger
+    assert rule is not None
+    sc = HeatScorer()
+    got = sc.similarity(cli, arena, rule)
+    assert got.exact
+    assert got.pct == 100 * bit_lcs(left, right) // max(len(left), len(right)) < rule.heat_threshold_pct
+    chs = [_ch("r1b", 1, "b", arena), _ch("r2a", 2, "a", cli)]
+    assert sc.scan(chs, _valid(chs), 2, rule) == {}
+
+
+def test_bit_parallel_lcs_matches_the_dp() -> None:
+    rng = random.Random(7)
+    for _ in range(500):
+        a = tuple(rng.choice("abcd") for _ in range(rng.randint(0, 40)))
+        b = tuple(rng.choice("abcd") for _ in range(rng.randint(0, 40)))
+        prev = [0] * (len(b) + 1)
+        for x in a:
+            cur = [0]
+            for j, y in enumerate(b):
+                cur.append(prev[j] + 1 if x == y else max(prev[j + 1], cur[j]))
+            prev = cur
+        assert bit_lcs(a, b) == prev[-1]
+
+
+def test_unverified_pair_is_never_charged() -> None:
+    rule = preset("ledger").ledger
+    assert rule is not None
+    chs = [_ch("r1b", 1, "b", "a = a + 1\n" * 5), _ch("r2a", 2, "a", "a = 1 + a\n" * 5)]
+    sc = HeatScorer()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("claude_duel.domain.heat.WORK_BUDGET", 0)
+        got = sc.scan(chs, _valid(chs), 2, rule)
+        assert got == {"r2a": Hot(0, False)}
+        assert sc.heat(chs, _valid(chs), 2, rule) == {}
+        assert sc.unverified_ids(chs, _valid(chs), 2, rule) == ["r2a"]
+    assert heat_label(got["r2a"]) == "unverified"
+    assert heat_label(Hot(80, False)) == ">=80% (unverified)"

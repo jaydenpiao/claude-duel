@@ -41,8 +41,10 @@ and it does not call the round tampered. A parser overflow on deep nesting is an
 same as a source that does not parse.
 
 Whole-source heat (`heat_compare=full`, new matches) never fails a match on work. A pair that is not a
-subsequence and does not fit the pair or call cell budget is charged on the multiset ceiling, which is an
-upper bound on its LCS. Below the threshold it decides the line exactly as the LCS would; at or over it the
-line is recorded in `round_scored.heat_bound` and shown as a bound, never as the exact similarity. Replay
-recomputes the same bound. Padding past the budget therefore cannot lower heat. Admission caps sources at
-the 65536-byte parse ceiling under this rule.
+subsequence gets the exact LCS from a bit-parallel algorithm (Hyyro: one add/and/or per token over a
+`len(b)`-bit integer), inside a per-call work budget that real rounds do not reach. A pair it cannot compare
+exactly (budget spent, or a walk longer than the stored 32768 tokens) is unverified: no penalty is charged
+on it, it is logged in `round_scored.heat_unverified`, and it is shown as unverified. A challenge is charged
+only on an exact similarity at or over the threshold. An upper bound (such as the multiset ceiling, which
+ran 9-33 points above the LCS on unrelated modules, S13-4) is never charged or shown as the similarity.
+Replay recomputes the same result. Admission caps sources at the 65536-byte parse ceiling under this rule.

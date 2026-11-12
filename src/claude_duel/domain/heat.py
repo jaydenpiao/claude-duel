@@ -8,7 +8,7 @@ never changes. The author filter applies before the ``heat_ref_cap`` cut. Which 
 the host work bound, are ``heat_bound.regime`` and ``heat_bound.compare``.
 
 ``HeatScorer`` holds the only state: a bounded cache of walks, a bounded memo of round results and a count of
-DP cells. The engine, replay and the arena each own one; a module-level call uses a fresh one.
+LCS work. The engine, replay and the arena each own one; a module-level call uses a fresh one.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from claude_duel.domain.errors import HeatBoundError
-from claude_duel.domain.heat_bound import CELL_BUDGET, MAX_CHALLENGES, Hot, Regime, compare, regime
+from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, Regime, compare, regime
 from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP, Profile, digest, profile, raw
 from claude_duel.domain.models import AgentSpec, Attack, Challenge, LedgerRule, MatchState, Validation
 
@@ -30,7 +30,7 @@ class HeatScorer:
     """Heat with explicit, bounded state. ``pair`` replaces the comparison (tests); the memo still applies."""
 
     def __init__(self, pair: PairFn | None = None, *, walks: int = 64, rounds: int = 64) -> None:
-        self.cells = 0  # DP cell updates so far (tests and the work bound)
+        self.work = 0  # LCS word operations so far (tests and the work bound)
         self._pair = pair
         self._walks: OrderedDict[bytes, Profile | None] = OrderedDict()
         self._memo: OrderedDict[tuple[object, ...], dict[str, Hot]] = OrderedDict()
@@ -47,13 +47,14 @@ class HeatScorer:
             self._walks.popitem(last=False)
         return got
 
-    def similarity(self, a: str, b: str, rule: LedgerRule, room: int = CELL_BUDGET) -> Hot:
-        """One pair under ``rule``'s regime."""
+    def similarity(self, a: str, b: str, rule: LedgerRule, room: int | None = None) -> Hot:
+        """One pair under ``rule``'s regime; ``room`` defaults to a whole call's ``WORK_BUDGET``."""
         if self._pair is not None:
             return Hot(self._pair(a, b), True)
         width = rule.heat_token_cap or TOKEN_CAP
-        got, cells = compare(self.walk(a), self.walk(b), regime(rule), width, rule.heat_threshold_pct, room)
-        self.cells += cells
+        budget = WORK_BUDGET if room is None else room
+        got, spent = compare(self.walk(a), self.walk(b), regime(rule), width, budget)
+        self.work += spent
         return got
 
     def scan(
@@ -66,8 +67,8 @@ class HeatScorer:
     ) -> dict[str, Hot]:
         """challenge id -> best similarity to the valid challenges of the last ``heat_window`` rounds (the
         author's own and, design R5, the opponent's) plus ``refs[author]`` (sources from the same model's last
-        matches, frozen in ``match_created``), for this round's valid challenges at or over the threshold only.
-        Invalid challenges never take or give heat."""
+        matches, frozen in ``match_created``), for this round's valid challenges at or over the threshold, or unverified
+        (a reference not compared exactly). Invalid challenges never take or give heat."""
         if not rule.heat_window:
             return {}
         plan = _plan(challenges, validations, round_no, rule, refs)
@@ -83,15 +84,14 @@ class HeatScorer:
 
     def _percentages(self, plan: _Plan, rule: LedgerRule) -> dict[str, Hot]:
         out: dict[str, Hot] = {}
-        start = self.cells
+        start = self.work
         for cid, src, past in plan:
-            top = Hot(0, True)
+            best, exact = 0, True
             for ref in past:
-                got = self.similarity(src, ref, rule, CELL_BUDGET - (self.cells - start))
-                if (got.pct, got.exact) > (top.pct, top.exact):  # on a tie the exact one: the true max is that
-                    top = got
-            if top.pct >= rule.heat_threshold_pct:
-                out[cid] = top
+                got = self.similarity(src, ref, rule, WORK_BUDGET - (self.work - start))
+                best, exact = max(best, got.pct), exact and got.exact
+            if best >= rule.heat_threshold_pct or not exact:
+                out[cid] = Hot(best, exact)
         return out
 
     def heat(
@@ -102,8 +102,10 @@ class HeatScorer:
         rule: LedgerRule,
         refs: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, int]:
-        """``scan`` percents only, for scoring. A display uses ``scan`` so a bound is not shown as exact."""
-        return {cid: h.pct for cid, h in self.scan(challenges, validations, round_no, rule, refs).items()}
+        """Charged percents, for scoring: exact similarities at or over the threshold. An unverified challenge is
+        charged only on an exact match that alone reaches it, never on a bound. A display uses ``scan``."""
+        hot = self.scan(challenges, validations, round_no, rule, refs)
+        return {cid: h.pct for cid, h in hot.items() if h.pct >= rule.heat_threshold_pct}
 
     def lines(
         self,
@@ -126,7 +128,7 @@ class HeatScorer:
                 out[ch.id] = penalty(defense(ch), hot[ch.id], rule)
         return out
 
-    def bound_ids(
+    def unverified_ids(
         self,
         challenges: Iterable[Challenge],
         validations: Mapping[str, Validation],
@@ -134,7 +136,7 @@ class HeatScorer:
         rule: LedgerRule,
         refs: Mapping[str, Sequence[str]] | None = None,
     ) -> list[str]:
-        """Ids whose heat is an upper bound, not an exact similarity (``round_scored.heat_bound``)."""
+        """Ids with a reference not compared exactly (``round_scored.heat_unverified``)."""
         hot = self.scan(challenges, validations, round_no, rule, refs)
         return sorted(cid for cid, h in hot.items() if not h.exact)
 
@@ -213,8 +215,11 @@ def penalty(defense: int, h: int, rule: LedgerRule) -> int:
 
 
 def heat_label(hot: Hot) -> str:
-    """``65%`` exact; ``<=70% (bound)`` when only the upper bound was computed."""
-    return f"{hot.pct}%" if hot.exact else f"<={hot.pct}% (bound)"
+    """``65%`` exact; ``>=72% (unverified)`` when charged on an exact match with some reference not compared;
+    ``unverified`` when nothing compared reached the threshold."""
+    if hot.exact:
+        return f"{hot.pct}%"
+    return f">={hot.pct}% (unverified)" if hot.pct else "unverified"
 
 
 def heat(

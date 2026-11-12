@@ -121,14 +121,13 @@ def heat_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = 
     )
 
 
-def heat_bound_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
-    """Heat lines this round charged on the upper bound (``round_scored.heat_bound``); [] when all were exact."""
+def heat_unverified_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
+    """This round's challenges with a heat reference not compared exactly (``round_scored.heat_unverified``)."""
     if state.rules.ledger is None:
         return []
     scorer = scorer or HeatScorer()
-    lines = heat_of_state(state, round_no, scorer)
-    hot = scorer.bound_ids(state.challenges.values(), state.validations, round_no, state.rules.ledger, state.heat_refs)
-    return [cid for cid in hot if cid in lines]
+    rule, refs = state.rules.ledger, state.heat_refs
+    return scorer.unverified_ids(state.challenges.values(), state.validations, round_no, rule, refs)
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
