@@ -64,6 +64,8 @@ TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 REFUSED = "refused: the model declined to answer"  # engine-authored display / build forfeit reason (ADR 0016)
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 VALIDATION_TIME_FACTOR = 6  # empty and junk probes share this many wall_seconds
+TIMEOUTS_TO_VOID = 2  # attack sandbox wall/signal kills before the challenge is voided as too slow
+ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
 # Sandbox stdout is rewritten if it would equal one of these, so control flow never keys off run output.
 _ENGINE_SENTINELS = frozenset({CAPTURED, MALFORMED, TRUNCATED, REFUSED})
 
@@ -586,7 +588,7 @@ class MatchEngine:
     def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
         """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
         budget = time.monotonic() + VALIDATION_TIME_FACTOR * state.limits.wall_seconds
-        for probe in ["", *junk_inputs(spec.reference_payload)]:
+        for probe in ["", *junk_inputs(spec.reference_payload, seed=state.seed)]:
             if time.monotonic() > budget:
                 return "too slow: validation ran over its time budget; check must answer every input quickly"
             out = self._run_challenge(spec.source, probe, flag, state, "validate")
@@ -808,9 +810,10 @@ class MatchEngine:
         while True:
             history = state.attempts.get(key, [])
             tokens = sum(a.tokens for a in history)
+            spent = sum(not a.timeout for a in history)
             if done := self._attack_outcome(ch.id, attacker, history):
                 return done
-            if len(history) >= state.max_attempts(attacker):
+            if spent >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
             if stake is not None and tokens >= stake:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
@@ -825,7 +828,7 @@ class MatchEngine:
                 spec.title,
                 _with_terrain(spec.description, state.terrains.get(ch.id)),
                 spec.source,
-                len(history) + 1,
+                spent + 1,
                 pairs,
                 self._memory(state, attacker),
                 self._scratch(state),
@@ -836,18 +839,31 @@ class MatchEngine:
             left = None if stake is None else stake - tokens
             if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
-            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
+            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=spent + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
             if not completion.refused:
                 self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.logged())
+            if attempt.timeout:
+                count = sum(a.timeout for a in state.attempts.get(key, []))
+                self._checkpoint(
+                    state,
+                    ev.CHALLENGE_TIMEOUT,
+                    challenge_id=ch.id,
+                    attacker=attacker,
+                    key=key,
+                    count=count,
+                    voided=count >= TIMEOUTS_TO_VOID,
+                )
 
     @staticmethod
     def _attack_outcome(challenge_id: str, attacker: str, history: list[AttackAttempt]) -> Attack | None:
-        """A finished attack from already-logged tries: a capture. Refusals are spent tries, not an end."""
+        """A finished attack from already-logged tries: a capture, or two timeouts (challenge voided)."""
         if history and history[-1].captured:
             return Attack.of(challenge_id, attacker, history, solved=True, reason="flag captured")
+        if sum(a.timeout for a in history) >= TIMEOUTS_TO_VOID:
+            return Attack.of(challenge_id, attacker, history, solved=False, reason=ATTACK_TIMEOUT)
         return None
 
     def _attempt(
@@ -881,6 +897,8 @@ class MatchEngine:
         source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
         stdin = terrain.apply(ground, payload) if ground else payload
         run = self._run_challenge(source, stdin, flag, state, "attack")
+        if run.timed_out or run.killed_reason in (KILL_WALL, KILL_SIGNAL):
+            return AttackAttempt(payload=payload, output=ATTACK_TIMEOUT, tokens=tokens, usd_micros=micros, timeout=True)
         output = CAPTURED if flag in run.stdout else _sandbox_output(redact(run.stdout, (flag,))[:500])
         if state.rules.integrity_control:
             self._control(state, agent, payload, flag)

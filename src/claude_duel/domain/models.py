@@ -319,6 +319,7 @@ class AttackAttempt(_Frozen):
     tokens: int
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
     refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
+    timeout: bool = False  # sandbox wall/signal kill; try is refunded; omitted from the log when false
 
     @property
     def captured(self) -> bool:
@@ -326,10 +327,12 @@ class AttackAttempt(_Frozen):
         return self.output == CAPTURED
 
     def logged(self) -> dict[str, object]:
-        """Event payload: ``refused`` is present only when true, so older logs stay byte-identical."""
+        """Event payload: ``refused`` and ``timeout`` are present only when true, so older logs stay byte-identical."""
         data = self.model_dump(mode="json")
         if not data.get("refused"):
             data.pop("refused", None)
+        if not data.get("timeout"):
+            data.pop("timeout", None)
         return data
 
 
@@ -351,7 +354,7 @@ class Attack(_Frozen):
             challenge_id=challenge_id,
             attacker=attacker,
             solved=solved,
-            attempts=len(history),
+            attempts=sum(not a.timeout for a in history),
             tokens_used=sum(a.tokens for a in history),
             usd_micros=sum(a.usd_micros for a in history),
             reason=reason,

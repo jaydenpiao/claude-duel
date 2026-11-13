@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 
 def _same_class(c: str) -> str:
     """A different char of c's class (digit, lower, upper, else printable)."""
@@ -11,11 +13,20 @@ def _same_class(c: str) -> str:
     return "#" if c != "#" else "%"
 
 
-def junk_inputs(payload: str) -> list[str]:
+def _indexes(length: int, seed: str) -> tuple[int, ...]:
+    """First, middle and last, plus one extra index derived from the match seed."""
+    if length <= 0:
+        return ()
+    mid = length // 2
+    extra = int.from_bytes(hashlib.sha256(f"{seed}:{length}".encode()).digest()[:4], "big") % length
+    return tuple(dict.fromkeys((0, mid, length - 1, extra)))
+
+
+def junk_inputs(payload: str, seed: str = "") -> list[str]:
     """Fixed, free inputs that must not reveal the flag (besides empty input): degenerate acceptance fails."""
     p = payload.strip()
     tweak = (("b" if p[0] == "a" else "a") + p[1:]) if p else ""
     mid = len(p) // 2
-    same_shape = [p[:i] + _same_class(p[i]) + p[i + 1 :] for i in dict.fromkeys((len(p) - 1, mid)) if p]
+    same_shape = [p[:i] + _same_class(p[i]) + p[i + 1 :] for i in _indexes(len(p), seed) if p]
     probes = [" ", "a", "0", "\n", "A" * len(p), tweak, *same_shape, p[:mid], p[mid + 1 :]]
     return list(dict.fromkeys(x for x in probes if x.strip() and x.strip() != p))
