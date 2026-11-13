@@ -121,8 +121,8 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "RULES (the arena rejects any challenge that breaks one):",
         "1. FLAG is a global the arena injects before your code runs. Read it, print it. Never assign, define, "
         "hardcode or invent a flag value.",
-        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty input must NOT "
-        "print it.",
+        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty or junk input "
+        "must NOT print it, and every input must be answered in bounded time.",
         f"3. Allowed imports: {', '.join(sorted(PURE_MODULES))}; {restricted}. Nothing else.",
         "4. No name (except a bare _) or attribute may start with _ (so no __name__ / if __name__ == '__main__' "
         "guard, no dunders). "
@@ -275,6 +275,15 @@ _HINTS = (
         "trivial: empty input",
         "Empty input must be rejected: start with a length test such as"
         f" if len(s) < {MIN_PAYLOAD_CHARS}: return False. ",
+    ),
+    (
+        "trivial: junk input",
+        "Junk input must be rejected too: compare the whole input to the answer, "
+        "not only its length or whether it is non-empty. ",
+    ),
+    (
+        "too slow",
+        "Every input must be answered in bounded time: do not loop or hang on a wrong or empty input. ",
     ),
     ("reference_payload must be at least", f"Make the accepting input at least {MIN_PAYLOAD_CHARS} characters. "),
     ("__dict__", "FLAG is already a global: never look it up via __dict__, globals() or sys.modules. "),

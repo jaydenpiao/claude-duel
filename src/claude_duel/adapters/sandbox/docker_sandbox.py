@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from claude_duel.adapters.sandbox.common import execute
 from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
-from claude_duel.ports import RunResult
+from claude_duel.ports import KILL_SIGNAL, KILL_WALL, RunResult
 
 # pinned by digest; with --pull never a mutable tag would run whatever image is local under that name.
 DEFAULT_IMAGE = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
@@ -127,9 +127,9 @@ class DockerSandbox:
         if result.killed_reason:
             return result
         if result.exit_code == TIMEOUT_EXIT:
-            return result.model_copy(update={"timed_out": True, "killed_reason": "wall"})
+            return result.model_copy(update={"timed_out": True, "killed_reason": KILL_WALL})
         if result.exit_code > SIGNAL_EXIT_BASE:
-            return result.model_copy(update={"killed_reason": "signal"})
+            return result.model_copy(update={"killed_reason": KILL_SIGNAL})
         return result
 
     def _remove(self, name: str) -> None:
