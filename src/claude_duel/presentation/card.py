@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from xml.sax.saxutils import escape
 
 from claude_duel.app.replay import ReplayReport
+from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import Event, MatchState
 from claude_duel.presentation.common import agent_cost, result, who
@@ -37,6 +38,7 @@ class CardData:
     spend: str
     verified: bool
     digest: str
+    mismatches: tuple[str, ...] = ()
 
 
 def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> CardData:
@@ -49,11 +51,20 @@ def card_data(state: MatchState, report: ReplayReport, events: list[Event]) -> C
         headline=result(state),
         spend=(
             f"${state.usage.usd:.4f} · {state.usage.calls} model calls · "
-            f"in {state.usage.input_tokens:,} · out {state.usage.output_tokens:,} tokens"
+            f"in {state.usage.input_tokens:,} · out {state.usage.output_tokens:,} tokens" + _refusal_label(events)
         ),
         verified=report.consistent,
         digest=log_digest(events),
+        mismatches=tuple(report.mismatches),
     )
+
+
+def _refusal_label(events: list[Event]) -> str:
+    """A spend-line suffix when the log recorded a refusal; empty for older logs and matches with none."""
+    n = sum(1 for e in events if e.type == ev.CALL_CHARGED and e.data.get("refused"))
+    if not n:
+        return ""
+    return f" · {n} model refusal" + ("s" if n != 1 else "")
 
 
 def _t(x: int, y: int, text: str, size: int = 20, fill: str = "#e5e7eb", weight: str = "normal") -> str:
@@ -76,10 +87,20 @@ def _bars(d: CardData) -> list[str]:
     return out
 
 
+def _verdict(d: CardData) -> str:
+    """Verified, a real mismatch, or heat left unchecked (not labeled as tampering)."""
+    if d.verified:
+        return "replay verified ✓"
+    unchecked = ("heat unverified", "score not checked")
+    if d.mismatches and all(any(part in item for part in unchecked) for item in d.mismatches):
+        return "replay unverified"
+    return "replay MISMATCH ✗"
+
+
 def card_svg(d: CardData) -> str:
     """Pure: the card as an SVG document."""
     names = " vs ".join(f"{n}" for n, _, _ in d.players)
-    verdict = f"replay verified ✓ · log {d.digest}" if d.verified else f"replay MISMATCH ✗ · log {d.digest}"
+    verdict = _verdict(d) + f" · log {d.digest}"
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" '
         'font-family="ui-monospace, Menlo, monospace">',

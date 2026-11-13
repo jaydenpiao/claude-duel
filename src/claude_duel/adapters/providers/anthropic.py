@@ -2,7 +2,8 @@
 
 Prompt caching stays off: no ``cache_control`` is ever sent, so every input token is billed at the base rate
 and both vendors see the same uncached prompts. A request's ``json_schema`` goes out as structured output
-(``output_config.format``); ``stop_reason == "max_tokens"`` marks the reply truncated.
+(``output_config.format``); ``stop_reason`` of ``max_tokens`` is truncated,
+``refusal`` is refused (HTTP 200, not an error).
 Thinking blocks are dropped; only text blocks are the answer.
 Sampling is left at the vendor default (current Claude models reject any temperature other than 1.0).
 """
@@ -80,6 +81,7 @@ def _parse(resp: httpx.Response) -> Completion:
             output_tokens=int(usage.get("output_tokens", 0)),
             reasoning_tokens=int((usage.get("output_tokens_details") or {}).get("thinking_tokens", 0)),
             truncated=data.get("stop_reason") == "max_tokens",
+            refused=data.get("stop_reason") == "refusal",
             reasoning_summary=" ".join(b.get("thinking", "") for b in data["content"] if b.get("type") == "thinking"),
         )
     except (ValueError, KeyError, TypeError) as exc:

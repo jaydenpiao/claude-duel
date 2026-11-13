@@ -30,3 +30,29 @@ Modes may charge the defender *penalty lines* (keystone captured, novelty heat),
    the interpreter version that parsed it is recorded in `match_created.python`.
 
 The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
+
+## Addendum: host work bound for heat similarity
+Heat's LCS runs in the engine process. New matches pin `LedgerRule.heat_token_cap` and `heat_ref_cap`
+(the ceiling is 256 tokens and 48 references; the in-match window is kept first; sources over 65536 bytes
+are not parsed). Replay of a pinned log uses that pin, so the logged heat stays exact. A log that does not
+pin the caps was scored with the full walk: replay recomputes it only when every compared source still fits
+the ceiling, and otherwise reports that round's heat unverified. It does not substitute the prefix score,
+and it does not call the round tampered. A parser overflow on deep nesting is an empty token sequence, the
+same as a source that does not parse.
+
+Whole-source heat (`heat_compare=full`, new matches) never fails a match on work. A pair that is not a
+subsequence gets the exact LCS from a bit-parallel algorithm (Hyyro: one add/and/or per token over a
+`len(b)`-bit integer), inside a per-call work budget that real rounds do not reach. The multiset ceiling is
+only a cold-skip filter: if it is below the threshold, the exact LCS is too and the pair is not compared.
+Every source under the 65536-byte parse ceiling keeps its full token walk. A pair the call cannot compare exactly (budget spent) is
+`heat unchecked`: no penalty is charged on it, it is logged in `round_scored.heat_unchecked` (omit if empty),
+and it is shown as `heat unchecked`. A challenge is charged only on an exact similarity at or over the
+threshold. An upper bound (such as the multiset ceiling, which ran 9-33 points above the LCS on unrelated
+modules, S13-4) is never charged or shown as the similarity. Replay recomputes the same result. Admission caps sources so every pair a legal round can admit fits the work budget (and never past the 65536-byte parse ceiling).
+
+## Addendum: vendor refusal (ADR 0016)
+A refused build pays `invalid_penalty`. A refused attack is one spent try; the
+attack continues with the remaining tries, and a valid challenge that was not
+captured still pays its defense award. A refused difficulty-gate probe is
+inconclusive, not held. See ADR 0016.
+
