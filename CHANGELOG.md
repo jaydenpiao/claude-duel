@@ -17,6 +17,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Combined `RULES_VERSION` 1→2 and `SCHEMA_VERSION` 2→3 (#258). New heat-on logs require `heat_compare=full`, an explicit `heat_vs_opponent`, `heat_ref_cap`, `heat_metric=lcs-v1` and `heat_history_matches`, and omit `heat_token_cap` (prefix-only; v1 logs that carry it still replay). This also records earlier rule-meaning changes that stayed on version 1: the ledger preset, SV-1, H6 ledger defaults (keystone/terrain/heat off unless the preset), the #247 system prompt, the #267 program-form prompt, and the #266 per-agent output cap. Logs written between #238 and #279 may omit `heat_vs_opponent` (I15-1 found likely zero of those); replay of such a log is a reported heat mismatch, not a silent rescoring. Refusal (ADR 0016) needed no bump.
 - Heat display names: a work-budget skip is `heat over budget`; a legacy log past the ceiling is `heat legacy-unreplayable`. The logged field stays `round_scored.heat_unchecked` so old logs replay.
 - `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
 - Config refuses API keys from TOML; env-only secrets (#242).

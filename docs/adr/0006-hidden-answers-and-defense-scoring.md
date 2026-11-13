@@ -32,13 +32,16 @@ Modes may charge the defender *penalty lines* (keystone captured, novelty heat),
 The shared property test (`TestScorerInvariants`) asserts 2-4 for every scorer, heat included.
 
 ## Addendum: host work bound for heat similarity
-Heat's LCS runs in the engine process. New matches pin `LedgerRule.heat_token_cap` and `heat_ref_cap`
-(the ceiling is 256 tokens and 48 references; the in-match window is kept first; sources over 65536 bytes
-are not parsed). Replay of a pinned log uses that pin, so the logged heat stays exact. A log that does not
+Heat's LCS runs in the engine process. New (rules v2) heat-on matches pin `heat_compare=full`, an explicit
+`heat_vs_opponent`, `heat_ref_cap` (ceiling 48; the in-match window is kept first), `heat_metric=lcs-v1` and
+`heat_history_matches` (default 3). They omit `heat_token_cap`, which only the v1 `prefix` regime uses; a v1
+reader of a prefix or full-heat log that carries the token cap still accepts it. Sources over 65536 bytes
+are not parsed. Replay of a pinned log uses that pin, so the logged heat stays exact. A log that does not
 pin the caps was scored with the full walk: replay recomputes it only when every compared source still fits
 the ceiling, and otherwise reports that round as `heat legacy-unreplayable`. It does not substitute the prefix score,
 and it does not call the round tampered. A parser overflow on deep nesting is an empty token sequence, the
-same as a source that does not parse.
+same as a source that does not parse. Logs written between #238 and #279 may omit `heat_vs_opponent`; replay
+of those is a reported heat mismatch when the inferred scope is wrong, not a silent rescoring.
 
 Whole-source heat (`heat_compare=full`, new matches) never fails a match on work. A pair that is not a
 subsequence gets the exact LCS from a bit-parallel algorithm (Hyyro: one add/and/or per token over a
