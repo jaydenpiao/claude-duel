@@ -88,12 +88,12 @@ def _bars(d: CardData) -> list[str]:
 
 
 def _verdict(d: CardData) -> str:
-    """Verified, a real mismatch, or heat left unchecked (not labeled as tampering)."""
+    """Verified, a real mismatch, or heat that a legacy log cannot replay (not labeled as tampering)."""
     if d.verified:
         return "replay verified ✓"
-    unchecked = ("heat unverified", "score not checked")
-    if d.mismatches and all(any(part in item for part in unchecked) for item in d.mismatches):
-        return "replay unverified"
+    legacy = ("heat legacy-unreplayable", "score not checked")
+    if d.mismatches and all(any(part in item for part in legacy) for item in d.mismatches):
+        return "replay heat legacy-unreplayable"
     return "replay MISMATCH ✗"
 
 

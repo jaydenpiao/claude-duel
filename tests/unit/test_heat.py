@@ -11,7 +11,7 @@ from claude_duel.app.agents import build_prompt
 from claude_duel.app.replay import _python_warning, replay
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
-from claude_duel.domain.heat import HeatScorer, heat, history_refs, penalty
+from claude_duel.domain.heat import HeatScorer, history_refs, penalty
 from claude_duel.domain.heat_tokens import tokens
 from claude_duel.domain.models import (
     AgentSpec,
@@ -125,18 +125,18 @@ def test_at_threshold_logs_a_zero_line_and_below_logs_none() -> None:
 
 def test_invalid_challenges_neither_take_nor_give_heat() -> None:
     chs, vals, _ = _round(LOOP, LOOP, valid1=False)
-    assert heat(chs, vals, 2, LED) == {}
+    assert HeatScorer().heat(chs, vals, 2, LED) == {}
     vals = {**{c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}}
     vals["r2a"] = Validation(challenge_id="r2a", valid=False, reason="bad")
-    assert heat(chs, vals, 2, LED) == {}
+    assert HeatScorer().heat(chs, vals, 2, LED) == {}
 
 
 def test_heat_window_and_switch() -> None:
     chs, vals, _ = _round(LOOP, LOOP)
     old = [c.model_copy(update={"round": 5}) if c.id == "r2a" else c for c in chs]
-    assert heat(chs, vals, 2, LedgerRule(heat_window=2)) == {"r2a": 100}
-    assert heat(old, vals, 5, LedgerRule(heat_window=2)) == {}  # round 1 is outside a window of 2
-    assert heat(chs, vals, 2, LedgerRule(heat_window=0)) == {}
+    assert HeatScorer().heat(chs, vals, 2, LedgerRule(heat_window=2)) == {"r2a": 100}
+    assert HeatScorer().heat(old, vals, 5, LedgerRule(heat_window=2)) == {}  # round 1 is outside a window of 2
+    assert HeatScorer().heat(chs, vals, 2, LedgerRule(heat_window=0)) == {}
 
 
 def test_forge_prompt_states_the_heat_rule() -> None:
@@ -183,15 +183,15 @@ def test_the_opponents_earlier_challenges_count_too() -> None:
         Challenge(id="r2a", round=2, author="a", spec=spec(RENAMED, difficulty=2)),
     ]
     vals = {c.id: Validation(challenge_id=c.id, valid=True, reason="ok") for c in chs}
-    assert heat(chs, vals, 2, LED) == {"r2a": similarity(RENAMED, LOOP)}
+    assert HeatScorer().heat(chs, vals, 2, LED) == {"r2a": similarity(RENAMED, LOOP)}
 
 
 def test_cross_match_refs_heat_and_round_trip_through_match_created() -> None:
     chs = [Challenge(id="r1a", round=1, author="a", spec=spec(RENAMED, difficulty=2))]
     vals = {"r1a": Validation(challenge_id="r1a", valid=True, reason="ok")}
-    assert heat(chs, vals, 1, LED) == {}
-    assert heat(chs, vals, 1, LED, {"a": [LOOP]}) == {"r1a": similarity(RENAMED, LOOP)}
-    assert heat(chs, vals, 1, LED, {"b": [LOOP]}) == {}  # only the author's own model history
+    assert HeatScorer().heat(chs, vals, 1, LED) == {}
+    assert HeatScorer().heat(chs, vals, 1, LED, {"a": [LOOP]}) == {"r1a": similarity(RENAMED, LOOP)}
+    assert HeatScorer().heat(chs, vals, 1, LED, {"b": [LOOP]}) == {}  # only the author's own model history
     state = _match("m0", "x", heat_refs={"a": [LOOP]})
     data = ev.created_data(state)
     assert data["heat_refs"] == {"a": [LOOP]}
@@ -289,10 +289,10 @@ def test_heat_vs_opponent_is_unset_for_old_logs_and_inferred_from_refs() -> None
     old = LedgerRule(heat_window=2)
     assert old.heat_vs_opponent is None
     chs, vals = _copies_opponent()
-    assert heat(chs, vals, 2, old) == {}
-    assert "r2a" in heat(chs, vals, 2, old, {"b": [THIRD]})
-    assert "r2a" in heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": True}))
-    assert heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": False}), {"b": [THIRD]}) == {}
+    assert HeatScorer().heat(chs, vals, 2, old) == {}
+    assert "r2a" in HeatScorer().heat(chs, vals, 2, old, {"b": [THIRD]})
+    assert "r2a" in HeatScorer().heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": True}))
+    assert HeatScorer().heat(chs, vals, 2, old.model_copy(update={"heat_vs_opponent": False}), {"b": [THIRD]}) == {}
 
 
 def test_pre_r5_heat_log_replays_clean() -> None:
