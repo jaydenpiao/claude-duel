@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).
+- Security: host-side heat similarity no longer runs an uncapped LCS on model-written source. New matches pin `heat_token_cap` (256) and `heat_ref_cap` (48) together; the in-match window is kept first and sources over 65536 bytes are not parsed. A log without those pins is recomputed exactly when it fits the ceiling. A legacy log past that ceiling is `heat unverified` and the round's score is `score not checked`; it is not rescored with a different similarity. A partial pin, a non-int, or a value outside the ceiling is a validation error (a corrupt log), not a stored placeholder. Config pins the caps once (`Settings`); series, tournament and child matches take the logged rules as-is. Heat's memo and work count live in an explicit `HeatScorer` (engine, replay and arena each own one), not in module globals.
+- New matches pin `heat_compare=full`: heat is the whole-source AST LCS again, exact: a copied body is decided in linear time and other pairs by a bit-parallel LCS (Hyyro; 32k x 32k tokens in about 0.1 s) inside a per-call work budget. The multiset ceiling is only a cold-skip filter. Every source under the 65536-byte parse ceiling keeps its full token walk, so a long exact copy is compared and charged (not dropped at 32768 tokens). A pair the call cannot compare exactly (work budget spent) is `heat unchecked`: it never fails or stalls a match, is charged 0, is logged in `round_scored.heat_unchecked` (omit if empty), and memory and the arena show `heat unchecked` (or `>=N% (heat unchecked)` when another, exact match reached the threshold and was charged). No upper bound is ever charged or shown as the similarity (S13-4). Whole-source heat caps admitted sources so every pair a legal round can admit fits the work budget (and never past 65536 bytes); a source too dense for that walk is refused at admission. New cross-match references skip anything larger, or whose walk would not fit. A log that pinned caps without `full` stays on the prefix rule. Pre-pin logs are not rescored. A short program buried in a long one still dilutes below the threshold, which is what the full LCS already did.
+- Heat-on ledger logs written before `LedgerRule.heat_vs_opponent` replay as scored: own-only (#198) by default, opponent heat (#238) when `heat_refs` are logged, and replay retries the opponent reading (with a note) when neither tells (M35; no such logs were found in the box stores). Config load pins an explicit flag for every new heat-on log: the mode preset's value (on for `ledger`), else off (S13-5).
+- Attack refusal is a typed `AttackAttempt.refused` field (omitted when false); challenge stdout can no longer spoof the engine's refusal or capture sentinels. A refused try is spent and the attack continues; a refused difficulty-gate probe is inconclusive, not held (ADR 0016).
 - Ledger: missing stakes for an attacker skip its attacks (stake 0), not leave them uncapped (#255).
 - Side labels use each agent's configured name when both sides share a model id (no more hard-coded A/B that hid names like `fake-1-s2` / `fake-1-s5`).
 - Ledger resume no longer re-pays allocate after a crash between the charge and STAKES_SET (#254).
@@ -14,6 +19,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - Security (SV-5): with `attacker_solver` off, a reference solver that needs more than the 1x wall time (plus 1s for sandbox start) is rejected as "solver too slow"; solver time is recorded as `solver.seconds`.
 - Security (SV-4): `hash()` is banned, the sandbox fixes str hashing (PYTHONHASHSEED=0; `-s -P -S` instead of `-I` so the fixed env is honoured), and the reference must print the same output on 3 runs.
+- Heat pins (both caps, `full`, opponent heat) are set once when config loads, so series, tournament and pool children use the logged contract and never pin again; resume of a log written without the caps keeps those rules. An invalid or partial pin in a log is a corrupt-log error, not an unverified round. Heat state lives in a `HeatScorer` the engine, replay and arena own (no module caches).
+- With #279 merged here, the author filter runs before the reference cap, and config load pins `heat_vs_opponent` to a bool (the mode preset's value, else off) beside the caps.
+- `engine._allocate` split into row/move/keystone helpers; `ghost_verify` and `require_tls` similarly (H8, M29, M30).
+- Config refuses API keys from TOML; env-only secrets (#242).
+- Warning when configured agent wallets exceed the match spend cap (#123).
+- Tournament bootstrap skips absent entrants (#124).
+- Results DB inserts are chunked under the 65,535-parameter limit (#252).
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
 - Security (SV-3): fixed junk inputs (space, "a", "0", newline, same-length filler, the answer with one char changed, its halves) must not reveal the flag, so degenerate acceptance is rejected for free.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
@@ -30,7 +42,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Security (SV-2): a reference payload that shares 8+ characters in a row with the flag digest is rejected, so flag fragments never reach the logs or backups.
 - Security (SV-1): an author's reference solver now runs with a decoy flag, and the reference payload must reveal the flag under two different flags, so a challenge can no longer key its answer on FLAG.
 - Vendor metadata moved to `domain/vendors.py`; `adapters/providers/registry.py` keeps only the factories, so config and the budget no longer import HTTP adapters (quality M11).
-- `scoring = "ledger"` refused until the arena wiring lands (#208).
+- `scoring = "ledger"` is available via the `ledger` / `ledger_deep` presets (#192, #208 refusal lifted).
 - `gpt-4.1-nano` dropped from the allowlist; gpt-5-nano is the low default (#209).
 - CI: 30-minute job timeouts, and a new push to a PR cancels its older ci and security runs.
 - Default model is gpt-5-nano; the code default lifetime cap is $33.
@@ -45,6 +57,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Model refusals (Anthropic `stop_reason=refusal`, OpenAI content-filter / `message.refusal`) are a typed outcome, logged on `call_charged.refused` and `AttackAttempt.refused` only when true so older logs stay byte-identical (ADR 0016).
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
 - Ledger heat (design R5): the comparison set now includes the opponent's earlier valid challenges in the match and the same model's valid challenges from its last 3 matches (frozen into `match_created.heat_refs`, so replay is exact). Penalty line, cap and ADR 0006 addendum unchanged.

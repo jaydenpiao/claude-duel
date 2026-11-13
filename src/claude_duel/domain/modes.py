@@ -1,5 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
 from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
 
 MODES: dict[str, Rules] = {
@@ -32,7 +33,15 @@ MODES: dict[str, Rules] = {
         challenges_per_round=3,
         max_attempts=3,
         scoring=ScoringRule(kind="ledger"),
-        ledger=LedgerRule(keystone=True, terrain="seeded", heat_window=2),
+        ledger=LedgerRule(
+            keystone=True,
+            terrain="seeded",
+            heat_window=2,
+            heat_vs_opponent=True,
+            heat_token_cap=TOKEN_CAP,
+            heat_ref_cap=REF_CAP,
+            heat_compare="full",
+        ),
         clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
     ),
@@ -46,3 +55,14 @@ def preset(name: str) -> Rules:
     if name not in MODES:
         raise KeyError(f"unknown mode {name!r}; known: {', '.join(sorted(MODES))}")
     return MODES[name]
+
+
+def pin_opponent_heat(rules: Rules) -> Rules:
+    """Config rules -> an explicit ``heat_vs_opponent`` for every new heat-on log (S13-5): the mode preset's value,
+    else False. ``None`` stays only in logs written before the flag, so store history never decides it."""
+    led = rules.ledger
+    if led is None or not led.heat_window or led.heat_vs_opponent is not None:
+        return rules
+    base = MODES.get(rules.mode)
+    default = base is not None and base.ledger is not None and base.ledger.heat_vs_opponent is True
+    return rules.model_copy(update={"ledger": led.model_copy(update={"heat_vs_opponent": default})})

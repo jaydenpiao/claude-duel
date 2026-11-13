@@ -49,6 +49,8 @@ def _play_series(
     caps: tuple[SpendCap, ...],
 ) -> sr.SeriesState:
     event_log = build_series_log(settings)
+    # settings.rules is config (heat pinned in Settings) or a tournament's logged rules; resume and every child
+    # use the series' logged contract (pinned() below).
     events = open_or_create(
         event_log,
         series_id,
