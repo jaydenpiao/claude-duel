@@ -5,6 +5,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `claude-fable-5-2` on the allowlist at $8/$40 per 1M input/output tokens (standard list from Anthropic pricing, 2026-11-13), premium like `claude-fable-5-1`. Defaults and launch prereg are unchanged.
+
 ### Fixed
 - image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).
 - Security: host-side heat similarity no longer runs an uncapped LCS on model-written source. New matches pin `heat_token_cap` (256) and `heat_ref_cap` (48) together; the in-match window is kept first and sources over 65536 bytes are not parsed. A log without those pins is recomputed exactly when it fits the ceiling. A legacy log past that ceiling is `heat unverified` and the round's score is `score not checked`; it is not rescored with a different similarity. A partial pin, a non-int, or a value outside the ceiling is a validation error (a corrupt log), not a stored placeholder. Config pins the caps once (`Settings`); series, tournament and child matches take the logged rules as-is. Heat's memo and work count live in an explicit `HeatScorer` (engine, replay and arena each own one), not in module globals.
