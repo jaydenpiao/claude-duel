@@ -20,7 +20,7 @@ class Vendor:
 VENDORS: dict[str, Vendor] = {
     v.name: v
     for v in (
-        Vendor("openai", "gpt-", "OPENAI_API_KEY", "gpt-5-nano"),
+        Vendor("openai", "gpt-", "OPENAI_API_KEY", "gpt-6-luna"),
         Vendor("anthropic", "claude-", "ANTHROPIC_API_KEY", "claude-haiku-5-5"),
     )
 }
