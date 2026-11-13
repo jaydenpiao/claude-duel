@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
+
+_TokenCap = Annotated[int, Field(strict=True, ge=1, le=TOKEN_CAP)]
+_RefCap = Annotated[int, Field(strict=True, ge=1, le=REF_CAP)]
 
 
 class Stage(StrEnum):
@@ -142,9 +147,27 @@ class LedgerRule(_Frozen):
         default=False, description="each author commits to one challenge: defended x2, captured -base//2"
     )
     terrain: Literal["none", "seeded"] = "none"  # a public stdin transform per challenge (domain/terrain.py)
-    heat_window: int = Field(default=0, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    heat_window: int = Field(default=0, ge=0, le=20)  # past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+    # The ledger preset logs True. None = a log written before this flag: own-only (#198) or opponent (#238)
+    # heat, told apart by heat.vs_opponent (heat_refs) and, when that is silent, by replay (app/replay.py).
+    heat_vs_opponent: bool | None = Field(
+        default=None, description="compare against the opponent's earlier challenges too (design R5 / #238)"
+    )
+    # Heat pins (heat_bound.regime). Both caps absent: legacy (logs from before the caps). Both set: prefix,
+    # or full with heat_compare="full" (new matches). A partial pin, a non-int or an out-of-range cap is invalid.
+    heat_token_cap: _TokenCap | None = Field(default=None, description="paired heat pin; prefix width under prefix")
+    heat_ref_cap: _RefCap | None = Field(default=None, description="pinned max heat references per challenge")
+    heat_compare: Literal["prefix", "full"] | None = Field(default=None, description="full: whole-source heat")
+
+    @model_validator(mode="after")
+    def _heat_pin_is_whole(self) -> LedgerRule:
+        if (self.heat_token_cap is None) != (self.heat_ref_cap is None):
+            raise ValueError("heat_token_cap and heat_ref_cap are pinned together")
+        if self.heat_compare is not None and self.heat_token_cap is None:
+            raise ValueError("heat_compare needs both heat caps")
+        return self
 
 
 class DeepRule(_Frozen):
@@ -241,8 +264,13 @@ class Rules(_Frozen):
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
-        """Escalation: authors get more room every round."""
-        return self.max_source_bytes_base * round_no
+        """Escalation: authors get more room every round. Whole-source heat stops at what one call can compare."""
+        cap = self.max_source_bytes_base * round_no
+        if self.ledger is not None and self.ledger.heat_window and self.ledger.heat_compare == "full":
+            from claude_duel.domain.heat_bound import admit_bytes  # noqa: PLC0415
+
+            return min(cap, PARSE_BYTES, admit_bytes(self))
+        return cap
 
     def output_cap(self, own: int | None = None) -> int:
         """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
@@ -313,10 +341,19 @@ class AttackAttempt(_Frozen):
     output: str
     tokens: int
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
+    refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
 
     @property
     def captured(self) -> bool:
+        """True only when the engine stored ``CAPTURED`` after seeing the flag in stdout."""
         return self.output == CAPTURED
+
+    def logged(self) -> dict[str, object]:
+        """Event payload: ``refused`` is present only when true, so older logs stay byte-identical."""
+        data = self.model_dump(mode="json")
+        if not data.get("refused"):
+            data.pop("refused", None)
+        return data
 
 
 class Attack(_Frozen):
