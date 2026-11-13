@@ -1,2 +1,3 @@
 # fake api_key test value in the redaction tests (PR #68); not a real secret
 509fdb3125b7c0624925135b9df8610515a44652:tests/unit/test_redaction.py:generic-api-key:57
+bec204d183637e7d356419f87682492405c78272:src/claude_duel/domain/modes.py:generic-api-key:37

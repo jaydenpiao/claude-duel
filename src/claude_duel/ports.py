@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +41,10 @@ class Completion(BaseModel):
     reasoning_tokens: int = 0  # thinking/reasoning tokens, already inside output_tokens and billed as output
     truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
     reasoning_effort: str | None = None  # the effort the adapter actually sent (None = vendor default)
+    refused: bool = False  # the vendor declined to answer (safety classifier); omitted from the log when false
+    reasoning_summary: str = (
+        ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
+    )
 
     @property
     def total_tokens(self) -> int:
@@ -75,6 +80,12 @@ class MatchStore(Protocol):
 
     def snapshot(self, match_id: str) -> MatchState:
         """The saved state without its secret; the secret file is never opened (``duel sync``)."""
+        ...
+
+
+class ReplaySource(MatchStore, Protocol):
+    def replays(self) -> list[tuple[str, list[Path]]]:
+        """``(match_id, files)`` per stored match: absolute replay files only, never a secret or a symlinked match."""
         ...
 
 
@@ -156,3 +167,9 @@ class PublicSource(Protocol):
     """The read-only public views, read by a role that cannot write (ADR 0012)."""
 
     def export(self) -> dict[str, list[Row]]: ...
+
+
+class Uploader(Protocol):
+    """Copies local files to a private object-store prefix (``duel backup``); raises ``ConfigError`` on failure."""
+
+    def upload(self, files: Sequence[Path], dest: str) -> None: ...

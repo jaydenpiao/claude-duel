@@ -43,6 +43,7 @@ BUILD_REJECTED = "build_rejected"
 CHALLENGE_BUILT = "challenge_built"
 CHALLENGE_VALIDATED = "challenge_validated"
 ATTACK_STARTED = "attack_started"
+ALLOCATE_STARTED = "allocate_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
 ROUND_SCORED = "round_scored"
@@ -53,6 +54,7 @@ STAKES_SET = "stakes_set"
 KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
 TERRAIN_DRAWN = "terrain_drawn"
+GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
@@ -89,6 +91,7 @@ class MatchCreated(_Payload):
     agents: tuple[AgentSpec, AgentSpec]
     rules: Rules
     limits: SandboxLimits
+    heat_refs: dict[str, list[str]] = {}  # design R5: frozen cross-match heat references; absent when empty
 
 
 class StageChanged(_Payload):
@@ -118,6 +121,9 @@ class CallCharged(_Payload):
     reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
     truncated: bool = False
     reasoning_effort: str | None = None  # the effort actually sent, defaults included (#191)
+    refused: bool = False  # vendor declined to answer; omitted from the log when false (older logs stay identical)
+    purpose: str = ""  # build / attack / ... (absent in older logs)
+    summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
 
 
 class BuildRejected(_Payload):
@@ -138,6 +144,13 @@ class AttackStarted(_Payload):
 
     key: str
     try_no: int
+
+
+class AllocateStarted(_Payload):
+    """Ledger allocate is about to be paid; resume settles even-split if stakes never landed (#254)."""
+
+    agent: str
+    round: int
 
 
 class AttackAttempted(_Payload):
@@ -199,11 +212,22 @@ class KeystoneRevealed(_Payload):
     salt: str
 
 
+class GhostRun(_Payload):
+    """One $0 sandbox replay of a past capture's payload; ``stdout_sha`` is of the redacted output."""
+
+    round: int
+    ghost_id: str
+    target: str
+    hit: bool
+    stdout_sha: str
+
+
 class RoundScored(_Payload):
     round: int
     delta: dict[str, int]
     points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
     heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
+    heat_unchecked: list[str] = Field(default_factory=list)  # heat not compared exactly, charged 0, never a bound
 
 
 class FindingFlagged(_Payload):
@@ -271,6 +295,12 @@ def _started(state: MatchState, p: AttackStarted) -> None:
     return None  # no state change: replay of logs with or without it is identical
 
 
+def _allocate_started(state: MatchState, p: AllocateStarted) -> None:
+    key = f"{p.round}:{p.agent}"
+    if key not in state.allocate_started:
+        state.allocate_started.append(key)
+
+
 def _attempted(state: MatchState, p: AttackAttempted) -> None:
     state.attempts.setdefault(p.key, []).append(p.attempt)
 
@@ -307,6 +337,10 @@ def _revealed(state: MatchState, p: KeystoneRevealed) -> None:
     state.keystones[key] = sealed.model_copy(update={"index": p.index, "salt": p.salt, "revealed": True})
 
 
+def _ghost_ran(state: MatchState, p: GhostRun) -> None:
+    state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -323,6 +357,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),
     ATTACK_STARTED: (AttackStarted, _started),
+    ALLOCATE_STARTED: (AllocateStarted, _allocate_started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
     ROUND_SCORED: (RoundScored, _scored),
@@ -333,6 +368,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     KEYSTONE_SEALED: (KeystoneSealed, _sealed),
     KEYSTONE_REVEALED: (KeystoneRevealed, _revealed),
     TERRAIN_DRAWN: (TerrainDrawn, _terrain),
+    GHOST_RUN: (GhostRun, _ghost_ran),
 }
 
 
@@ -352,7 +388,7 @@ def payload(event: Event) -> _Payload:
 
 def created_data(state: MatchState) -> dict[str, object]:
     """Data for the first event. Never includes the match secret."""
-    return {
+    data: dict[str, object] = {
         "seed": state.seed,
         "python": platform.python_version(),
         "framing_text": state.framing_text,
@@ -360,6 +396,9 @@ def created_data(state: MatchState) -> dict[str, object]:
         "rules": state.rules.model_dump(mode="json"),
         "limits": state.limits.model_dump(mode="json"),
     }
+    if state.heat_refs:  # omitted when empty, so older logs stay byte-identical
+        data["heat_refs"] = state.heat_refs
+    return data
 
 
 def apply(state: MatchState, event: Event) -> None:
@@ -383,6 +422,7 @@ def initial_state(match_id: str, created: Event) -> MatchState:
         agents=p.agents,
         rules=p.rules,
         limits=p.limits,
+        heat_refs=p.heat_refs,
     )
 
 

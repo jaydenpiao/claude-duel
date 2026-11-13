@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
-from claude_duel.domain.models import ChallengeSpec, Rules
+from claude_duel.domain.heat_bound import regime
+from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
 SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
@@ -155,11 +156,27 @@ def heat_rule(rules: Rules) -> list[str]:
     led = rules.ledger
     if led is None or not led.heat_window:
         return []
+    caps = _heat_cap_sentence(led)
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
-        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
-        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+        f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
+        "(yours or your opponent's) or to one your model built in its last 3 matches "
+        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new.{caps}"
     ]
+
+
+def _heat_cap_sentence(led: LedgerRule) -> str:
+    """Disclose how heat is compared; empty when this match did not pin the caps (legacy)."""
+    mode = regime(led)
+    if mode == "legacy":
+        return ""
+    refs = f"at most {led.heat_ref_cap} references, this match's recent challenges first"
+    if mode == "full":
+        return (
+            f" Comparison uses the whole program, not only its beginning, and {refs}."
+            " A pair too large to compare exactly is heat over budget and never charged."
+        )
+    return f" Comparison uses the first {led.heat_token_cap} AST tokens and {refs}."
 
 
 def build_prompt(
@@ -202,7 +219,9 @@ def _program_rules(rules: Rules, round_no: int) -> list[str]:
         f"Minimal valid example (make yours harder; later rounds score more): {json.dumps(EXAMPLE_CHALLENGE)}",
         'SOLVER (recommended): you cannot run code, so do not work the answer out in your head. Give "solver": '
         "a short program under the same rules that prints the accepting input (it gets no stdin and is never shown "
-        "to the attacker); the arena runs it and uses its output as reference_payload (then leave reference_payload "
+        "to the attacker). It runs ALONE, without your source: it cannot call your check or helper functions, so "
+        "copy any it needs into the solver; the arena runs it and uses its output as reference_payload "
+        "(then leave reference_payload "
         '""). Example: if the challenge derives a 6-letter key from a seed with a loop and compares the input to '
         "it, the solver is that same loop ending in print(key).",
         _RETURN_KEYS,
@@ -245,7 +264,7 @@ _HINTS = (
     (
         "NameError",
         "Your solver used a name it never defined; it gets no stdin and only its own code"
-        " (in the check form it may call check() and your helpers). ",
+        " (in the check form it may call check() and your helpers; otherwise copy every helper it uses). ",
     ),
     (
         "reference payload does not reveal flag",
@@ -322,6 +341,7 @@ def allocate_prompt(
     targets: list[tuple[str, str, str, bool]],
     memory: str = "",
     own: list[tuple[str, str, bool]] | None = None,
+    ghosted: dict[int, str] | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -334,6 +354,8 @@ def allocate_prompt(
     ]
     for i, (cid, title, source, valid) in enumerate(targets, 1):
         state = "valid" if valid else "INVALID (cannot be attacked; stake it 0)"
+        if ghosted and i - 1 in ghosted:
+            state = f"CAPTURED BY GHOST {ghosted[i - 1]} (already scored for you at no cost; stake it 0)"
         lines.append(f"#{i} {cid} [{state}] title={fence(title)}\nSource:\n{fence(source)}")
     lines += memory_lines(memory)
     lines.append(

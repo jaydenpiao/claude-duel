@@ -9,7 +9,8 @@ queryable index, and a future public page needs data that provably holds no flag
 ## Decision
 - Cloud SQL for PostgreSQL is a **derived, rebuildable index**; the event logs stay the source of truth.
   `duel sync --rebuild` truncates and reloads it.
-- `duel sync` (owner URL from env `DATABASE_URL` only) verifies each log's chain, loads the snapshot
+- `duel sync` (a `duel_ingest` login from env `DATABASE_URL`; the owner's `MIGRATE_DATABASE_URL` only for
+  `--rebuild`) verifies each log's chain, loads the snapshot
   without opening `*.secret`, replays it up to `last_seq` and rejects (recorded in `duel.sync_rejects`,
   exit 1) anything inconsistent. Inserts are idempotent, keyed on event hash. If the DB holds a hash
   the log no longer has, sync halts (`HistoryRewrittenError`, exit 2): history was rewritten.
@@ -65,3 +66,17 @@ queryable index, and a future public page needs data that provably holds no flag
   handled by the proxy; socket hosts are exempt from `require_tls`). `DATABASE_URL` uses the ingest IAM user and no
   password, e.g. `postgresql://duel-ingest@<project>.iam@/duel?host=<dir>/<connection-name>`; `iam_url` escapes the
   inner `@` for libpq.
+
+## Amendment: replay backup (2026-10-31)
+
+- `duel backup` (#213) copies finished, unlocked matches' `<id>.events.jsonl` and `<id>.json` to
+  `DUEL_REPLAY_BUCKET`, a private GCS bucket with public access prevention enforced. `*.secret` never leaves the box,
+  symlinked matches are skipped, file names reach `gcloud storage cp -I` on stdin only, and each file is scanned for
+  every flag variant of its match and for the match secret before upload (any hit refuses the whole run). It is a raw
+  replay archive, not part of the public export; the database and `public_v` rules above are unchanged.
+- Key scan (#264): a file with API-key-shaped text (`flags.KEY_PATTERNS`) holds back only its own match, which is
+  reported as skipped and never sent; ordinary model text can trip it, so it does not abort the run.
+- Ports (#264): the file list comes from the store (`ReplaySource.replays`) and the copy goes through the `Uploader`
+  port (`adapters/store/gcs.py`); `app/backup.py` never globs the store directory or calls `gcloud` itself.
+- Private bucket (#224): the `Uploader` checks that the bucket enforces public access prevention before every copy
+  and refuses otherwise; the check stays behind the port.

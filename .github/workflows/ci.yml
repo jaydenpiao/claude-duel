@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: runtime install smoke (no dev extras)
         run: uv venv --python ${{ matrix.python }} ${{ runner.temp }}/runtime && uv pip install --python ${{ runner.temp }}/runtime/bin/python . && ${{ runner.temp }}/runtime/bin/duel --help
       - run: uv venv --python ${{ matrix.python }} && uv pip install -e '.[dev]'
@@ -36,7 +36,7 @@ jobs:
       - run: .venv/bin/python scripts/check_docs.py
       - run: .venv/bin/vulture
       - run: .venv/bin/pylint src tests
-      - run: docker pull -q python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
+      - run: docker pull -q "$(.venv/bin/python -c 'from claude_duel.sandbox_image import DEFAULT_IMAGE; print(DEFAULT_IMAGE)')"
       - name: throwaway postgres for results-db tests (ADR 0012)
         run: |
           # pinned by digest (postgres:17-alpine); a fresh random password per job, masked in logs

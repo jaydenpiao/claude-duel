@@ -8,14 +8,16 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator, model_validator
 
 from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed, vendor_of
 from claude_duel.domain.errors import ConfigError
+from claude_duel.domain.heat_bound import pin_heat_bound
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
-from claude_duel.domain.modes import preset
+from claude_duel.domain.modes import pin_opponent_heat, preset
 from claude_duel.domain.tournament import TournamentRule
 from claude_duel.domain.vendors import VENDORS
+from claude_duel.sandbox_image import DEFAULT_IMAGE
 
 
 class Settings(BaseModel):
@@ -28,7 +30,7 @@ class Settings(BaseModel):
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
-    gate_model: str = "gpt-5-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
+    gate_model: str = "gpt-6-luna"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
     tournament: TournamentRule | None = None  # [tournament] entrants for `duel tournament` (#39)
     provider_timeout: float = 60.0
@@ -41,10 +43,18 @@ class Settings(BaseModel):
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
-    docker_image: str = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
+    docker_image: str = DEFAULT_IMAGE
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
     replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)
+
+    @field_validator("rules", mode="after")
+    @classmethod
+    def _pin_heat(cls, rules: Rules) -> Rules:
+        """Config rules are what a new log stores, so heat is pinned here, once (opponent flag, then caps). A
+        driver's children and every resume take the logged rules via ``model_copy`` (no validation), so a logged
+        contract is never re-pinned."""
+        return pin_heat_bound(pin_opponent_heat(rules))
 
     @model_validator(mode="before")
     @classmethod
@@ -71,9 +81,6 @@ class Settings(BaseModel):
             return FAKE_MODEL
         return agent.model or self.default_model(agent.provider)
 
-
-# Scoring kinds the engine cannot run end to end yet; refused at load time (ledger was, until #192).
-UNAVAILABLE_SCORING: frozenset[str] = frozenset()
 
 _ENV_SCALARS = {
     "DUEL_SANDBOX": "sandbox",
@@ -137,16 +144,18 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
         raise ConfigError(f"cannot read config {path}: {exc}") from exc
 
 
-def _check_scoring_available(rules: Rules) -> None:
-    if rules.scoring.kind in UNAVAILABLE_SCORING:
-        raise ConfigError(
-            f"scoring kind {rules.scoring.kind!r} is not available yet; use classic, efficiency, timed or ledger"
-        )
+def _refuse_file_keys(data: dict[str, Any]) -> None:
+    """API keys come from env only; a key in a config file is refused."""
+    for key in data:
+        if key == "api_keys" or key.endswith("_api_key"):
+            envs = ", ".join(v.key_env for v in VENDORS.values())
+            raise ConfigError(f"config key {key!r} is not allowed; set the API key in env ({envs})")
 
 
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
     data = _read_toml(path)
+    _refuse_file_keys(data)
     _overlay(data, _ENV_SCALARS, env)
     for section, mapping in _ENV_SECTIONS.items():
         nested = dict(data.get(section, {}))
@@ -167,7 +176,6 @@ def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-    _check_scoring_available(settings.rules)
     _check_models(settings)
     return settings
 

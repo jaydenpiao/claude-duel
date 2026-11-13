@@ -16,9 +16,11 @@ from claude_duel.domain.models import (
     Usage,
     Validation,
 )
+from claude_duel.domain.ratings import raw_winner
 from claude_duel.domain.scoring import SCORERS, RoundFacts, classic, solve_award, stake_award
 from claude_duel.domain.series import game_winner
 from claude_duel.domain.stakes import LedgerRule, even_split, settle_stakes
+from claude_duel.presentation.common import leader, result
 from tests.unit.test_domain import spec
 
 RULE = LedgerRule()
@@ -84,7 +86,7 @@ def test_fallback_when_even_share_is_below_min_alloc() -> None:
 def _tied(alice: Usage, bob: Usage) -> MatchState:
     state = MatchState(
         match_id="t", agents=(AgentSpec(name="alice"), AgentSpec(name="bob")),
-        rules=Rules(scoring=ScoringRule(kind="ledger")), limits=SandboxLimits(),
+        rules=Rules(scoring=ScoringRule(kind="ledger"), ledger=RULE), limits=SandboxLimits(),
         scores={"alice": 10, "bob": 10}, usage_by_agent={"alice": alice, "bob": bob},
     )  # fmt: skip
     return state
@@ -123,3 +125,9 @@ def test_ledger_defense_at_least_capture(difficulty: int, stake: int, used: int)
     held = SCORERS["ledger"](RoundFacts(1, ("a", "b"), (ch,), v, atk(False)), ScoringRule())["a"]
     cap = SCORERS["ledger"](RoundFacts(1, ("a", "b"), (ch,), v, atk(True)), ScoringRule())["b"]
     assert held >= cap
+
+
+def test_one_tiebreak_for_series_ratings_and_live_result() -> None:
+    s = _tied(Usage(usd=0.002, tokens=900), Usage(usd=0.001, tokens=5000))
+    assert game_winner(s) == raw_winner(s) == leader(s) == "bob"
+    assert result(s).startswith("winner: bob")

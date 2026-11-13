@@ -19,7 +19,8 @@ from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
-from claude_duel.domain.models import LedgerRule, MatchState, Rules, Stage, Usage
+from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
+from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import capture_points
 from claude_duel.domain.series import game_winner
@@ -115,10 +116,23 @@ def test_estimate_ledger_bounded_by_stakes() -> None:
     assert row.tokens < plain.tokens
 
 
+LEDGER = ScoringRule(kind="ledger")
+
+
 def test_ledger_rules_reject_unfundable_k() -> None:
     with pytest.raises(ValidationError, match="min_alloc"):
-        Rules(challenges_per_round=4, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
-    assert Rules(challenges_per_round=3, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+        Rules(challenges_per_round=4, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000))
+    assert Rules(challenges_per_round=3, scoring=LEDGER, ledger=LedgerRule(attack_tokens=3000, min_alloc=1000)).ledger
+
+
+def test_ledger_scoring_needs_ledger_rules() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(scoring=LEDGER)
+
+
+def test_ledger_rules_need_ledger_scoring() -> None:
+    with pytest.raises(ValidationError, match='mode = "ledger"'):
+        Rules(ledger=LedgerRule())
 
 
 def _log_hash(event_log, match_id: str) -> str:  # type: ignore[no-untyped-def]
@@ -344,6 +358,35 @@ def test_stake_overshoot_records_the_estimate_gap(make_engine, new_state, event_
     assert replay(state, event_log.read("l1")).consistent
 
 
+def test_pre_keystone_ledger_log_replays_with_features_off(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """An old ledger log pins `rules.ledger` without keystone, terrain or heat; it folds to off and replays."""
+    st0 = _ledger(new_state)
+    old = LedgerRule(attack_tokens=st0.rules.ledger.attack_tokens, min_alloc=st0.rules.ledger.min_alloc)
+    state = make_engine().run(st0.model_copy(update={"rules": st0.rules.model_copy(update={"ledger": old})}))
+    log = event_log.read("l1")
+    pinned = log[0].data["rules"]["ledger"]
+    for gone in ("keystone", "terrain", "heat_window"):
+        del pinned[gone]
+    folded = ev.initial_state("l1", log[0]).rules.ledger
+    assert folded is not None
+    assert (folded.keystone, folded.terrain, folded.heat_window) == (False, "none", 0)
+    assert replay(state, log).consistent
+
+
+def test_ledger_preset_turns_the_features_on() -> None:
+    rule = preset("ledger").ledger
+    assert rule is not None
+    assert (
+        rule.keystone,
+        rule.terrain,
+        rule.heat_window,
+        rule.heat_vs_opponent,
+        rule.heat_token_cap,
+        rule.heat_ref_cap,
+        rule.heat_compare,
+    ) == (True, "seeded", 2, True, TOKEN_CAP, REF_CAP, "full")
+
+
 def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
     """A ledger log from before #199 has no round_scored points: replay skips that check, not flags it."""
     state = make_engine().run(_ledger(new_state))
@@ -356,3 +399,65 @@ def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) 
     assert any(a.solved and a.stake for a in state.attacks.values())
     result = replay(state, old)
     assert result.consistent, result.mismatches
+
+
+def test_missing_stakes_skip_attack_not_unlimited(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Ledger with no stakes for an attacker must skip attacks (stake 0), not leave them uncapped (#255)."""
+    eng = make_engine()
+    eng._allocate = lambda state, attacker: None  # type: ignore[method-assign]
+    state = eng.run(_ledger(new_state, "no-stakes"))
+    assert state.stage is Stage.COMPLETE
+    assert state.stakes == {}
+    assert state.attacks
+    assert all(a.stake == 0 and a.attempts == 0 and a.reason == "skipped: stake 0" for a in state.attacks.values())
+    # no attack calls: every challenge was skipped at stake 0
+    assert not any(e.type == ev.ATTACK_STARTED for e in event_log.read("no-stakes"))
+
+
+def test_resume_does_not_repay_allocate(make_engine, new_state, store, event_log) -> None:  # type: ignore[no-untyped-def]
+    """Crash after allocate is charged but before stakes land: resume settles even-split, no second pay (#254)."""
+    counts: dict[str, int] = {"alice": 0, "bob": 0}
+
+    class Counting(Allocating):
+        def __init__(self, name: str, text: str) -> None:
+            super().__init__(text)
+            self.who = name
+
+        def complete(self, request: CompletionRequest) -> Completion:
+            if request.purpose == "allocate":
+                counts[self.who] += 1
+            return super().complete(request)
+
+    text = '{"stakes": [4000, 4000, 4000]}'
+    eng = make_engine(providers={"alice": Counting("alice", text), "bob": Counting("bob", text)})
+    orig = eng._checkpoint
+    stakes_seen = {"n": 0}
+
+    def boom(state: MatchState, kind: str, **data: object) -> None:
+        if kind == ev.STAKES_SET:
+            stakes_seen["n"] += 1
+            if stakes_seen["n"] == 1:
+                raise RuntimeError("crash after allocate paid")
+        orig(state, kind, **data)
+
+    eng._checkpoint = boom  # type: ignore[method-assign]
+    state0 = _ledger(new_state, "resume-alloc")
+    state0.rules = state0.rules.model_copy(update={"rounds": 1})
+    with pytest.raises(RuntimeError, match="crash after allocate paid"):
+        eng.run(state0)
+    saved = store.load("resume-alloc")
+    assert "1:alice" in saved.allocate_started
+    assert "1:alice" not in saved.stakes
+    assert counts["alice"] == 1
+    done = make_engine(providers={"alice": Counting("alice", text), "bob": Counting("bob", text)}).run(saved)
+    assert done.stage is Stage.COMPLETE
+    assert counts["alice"] == 1  # no second allocate pay for alice
+    assert "1:alice" in done.stakes
+    alice_r1 = next(
+        e
+        for e in event_log.read("resume-alloc")
+        if e.type == ev.STAKES_SET and e.data["agent"] == "alice" and e.data["round"] == 1
+    )
+    assert alice_r1.data["fallback"] is True
+    assert alice_r1.data["stakes"] == [4000, 4000, 4000]
+    assert replay(done, event_log.read("resume-alloc")).consistent
