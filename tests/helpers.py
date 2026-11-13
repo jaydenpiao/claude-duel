@@ -4,7 +4,9 @@ import json
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.heat import HeatScorer
+from claude_duel.domain.heat_tokens import REF_CAP
+from claude_duel.domain.models import AgentSpec, Event, LedgerRule, MatchState, Rules, SandboxLimits
 from claude_duel.ports import Completion, CompletionRequest
 
 
@@ -65,3 +67,9 @@ def run_bob(make_engine, new_state, metrics=None, **spec):  # type: ignore[no-un
     engine = make_engine({"alice": FakeProvider(), "bob": Builds(**spec)}, metrics=metrics)
     state = engine.run(new_state(**ONE))
     return state, next(c for c in state.challenges.values() if c.author == "bob")
+
+
+def similarity(a: str, b: str, *, token_cap: int | None = None, scorer: HeatScorer | None = None) -> int:
+    """One heat pair: legacy (exact while both walks fit, else ``HeatBoundError``) or the prefix of ``token_cap``."""
+    caps = {} if token_cap is None else {"heat_token_cap": token_cap, "heat_ref_cap": REF_CAP}
+    return (scorer or HeatScorer()).similarity(a, b, LedgerRule(heat_window=1, **caps)).pct
