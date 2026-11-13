@@ -8,12 +8,13 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator, model_validator
 
 from claude_duel.app.budget import FAKE_MODEL, BudgetLimits, check_model_allowed, vendor_of
 from claude_duel.domain.errors import ConfigError
+from claude_duel.domain.heat_bound import pin_heat_bound
 from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
-from claude_duel.domain.modes import preset
+from claude_duel.domain.modes import pin_opponent_heat, preset
 from claude_duel.domain.tournament import TournamentRule
 from claude_duel.domain.vendors import VENDORS
 
@@ -45,6 +46,14 @@ class Settings(BaseModel):
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
     replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)
+
+    @field_validator("rules", mode="after")
+    @classmethod
+    def _pin_heat(cls, rules: Rules) -> Rules:
+        """Config rules are what a new log stores, so heat is pinned here, once (opponent flag, then caps). A
+        driver's children and every resume take the logged rules via ``model_copy`` (no validation), so a logged
+        contract is never re-pinned."""
+        return pin_heat_bound(pin_opponent_heat(rules))
 
     @model_validator(mode="before")
     @classmethod
