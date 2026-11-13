@@ -20,6 +20,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Default OpenAI model and difficulty-gate probe are `gpt-6-luna` (cheaper active alternative to the named `gpt-5-nano` replacement `gpt-5.6-luna`; nano shutdown 2026-12-11). Unset effort is `low` on luna; pinned nano and mini stay `minimal`. Standard price stays $0.10/$0.50.
 - Image pin lives in `DEFAULT_IMAGE` (`sandbox_image.py`); the Dockerfile `ARG PYTHON_IMAGE` default must match, CI pulls that constant, and Dependabot ignores `python` digest and version bumps so a one-file bump cannot fail CI. Keeps the existing `e695ab1` digest (`5e2bdb1` is the same linux/amd64 image and does not fix zlib 1+b1, so the upgrade step stays).
 - Heat pins (both caps, `full`, opponent heat) are set once when config loads, so series, tournament and pool children use the logged contract and never pin again; resume of a log written without the caps keeps those rules. An invalid or partial pin in a log is a corrupt-log error, not an unverified round. Heat state lives in a `HeatScorer` the engine, replay and arena own (no module caches).
 - With #279 merged here, the author filter runs before the reference cap, and config load pins `heat_vs_opponent` to a bool (the mode preset's value, else off) beside the caps.
