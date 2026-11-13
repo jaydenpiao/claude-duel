@@ -3,13 +3,14 @@
 ``regime(rule)`` names the one rule a log is scored by:
 
 - ``legacy``: no pins (logs from before the caps). Exact whole-source LCS while both walks fit ``TOKEN_CAP``
-  and the references fit ``REF_CAP``; past that ``HeatBoundError``, and replay reports the round unverified.
+  and the references fit ``REF_CAP``; past that ``HeatBoundError``, and replay reports
+  the round as ``heat legacy-unreplayable``.
 - ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens.
 - ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
   bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset ceiling is only a cold-skip filter (if it
   is below the threshold, the exact LCS is too). Every source under ``PARSE_BYTES`` keeps its full walk, so a
   long exact copy is compared (a copied body in linear time). Admission caps a source so every pair a legal
-  round can admit fits in ``WORK_BUDGET`` (``admit``); a pair over the work guard is ``heat unchecked``:
+  round can admit fits in ``WORK_BUDGET`` (``admit``); a pair over the work guard is ``heat over budget``:
   it never raises, is charged 0, and is never scored on a bound (S13-4).
 
 All three go through ``compare``. LCS is exact in every regime, so old logs replay unchanged.
@@ -32,7 +33,7 @@ DENSE = 2  # advertised byte cap is admit//DENSE; a denser walk is still refused
 
 class Hot(NamedTuple):
     """A heat percent. ``exact`` False: some reference could not be compared, so ``pct`` is the best exact
-    similarity found (a lower bound of the true best); it is shown as ``heat unchecked`` and charged only when
+    similarity found (a lower bound of the true best); it is shown as ``heat over budget`` and charged only when
     that exact value alone reaches the threshold, never on a bound."""
 
     pct: int
@@ -161,6 +162,19 @@ def _view(walk: Profile | None, mode: Regime, width: int) -> Profile | None:
 UNCHECKED = Hot(0, False)
 
 
+def _exact(left: Profile, right: Profile, mode: Regime, room: int, denom: int) -> tuple[Hot, int]:
+    """Exact subsequence or LCS, or unchecked / ``HeatBoundError`` when the work does not fit."""
+    ta, tb = left.tokens, right.tokens
+    if ta is not None and tb is not None and (_is_subseq(ta, tb) or _is_subseq(tb, ta)):
+        return Hot(100 * min(left.length, right.length) // denom, True), 0
+    spent = work(left.length, right.length)
+    if ta is not None and tb is not None and spent <= room:
+        return Hot(100 * lcs(ta, tb) // denom, True), spent
+    if mode != "full":
+        raise HeatBoundError()  # prefix and legacy pairs are at most TOKEN_CAP square: never here in practice
+    return UNCHECKED, 0
+
+
 def compare(
     a: Profile | None, b: Profile | None, mode: Regime, width: int, room: int, threshold: int
 ) -> tuple[Hot, int]:
@@ -178,12 +192,4 @@ def compare(
     denom = max(left.length, right.length)
     if 100 * overlap(left.counts, right.counts) // denom < threshold:
         return Hot(0, True), 0  # cold: the exact LCS cannot reach the threshold; never charge the ceiling
-    ta, tb = left.tokens, right.tokens
-    if ta is not None and tb is not None and (_is_subseq(ta, tb) or _is_subseq(tb, ta)):
-        return Hot(100 * min(left.length, right.length) // denom, True), 0
-    spent = work(left.length, right.length)
-    if ta is not None and tb is not None and spent <= room:
-        return Hot(100 * lcs(ta, tb) // denom, True), spent
-    if mode != "full":
-        raise HeatBoundError()  # prefix and legacy pairs are at most TOKEN_CAP square: never here in practice
-    return UNCHECKED, 0
+    return _exact(left, right, mode, room, denom)

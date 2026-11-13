@@ -60,6 +60,7 @@ MALFORMED = "<malformed>"
 TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 REFUSED = "refused: the model declined to answer"  # engine-authored display / build forfeit reason (ADR 0016)
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
+VALIDATION_TIME_FACTOR = 6  # S10-1: all validation runs of one challenge share this many wall_seconds
 # Sandbox stdout is rewritten if it would equal one of these, so control flow never keys off run output.
 _ENGINE_SENTINELS = frozenset({CAPTURED, MALFORMED, TRUNCATED, REFUSED})
 
@@ -82,6 +83,24 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
 
 
 STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
+
+
+def _same_class(c: str) -> str:
+    """S11-1: a different char of c's class (digit, lower, upper, else printable)."""
+    for pool in ("0123456789", "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+        if c in pool:
+            return pool[(pool.index(c) + 1) % len(pool)]
+    return "#" if c != "#" else "%"
+
+
+def junk_inputs(payload: str) -> list[str]:
+    """SV-3: fixed, free inputs that must not reveal the flag (besides empty input): degenerate acceptance fails."""
+    p = payload.strip()
+    tweak = (("b" if p[0] == "a" else "a") + p[1:]) if p else ""
+    mid = len(p) // 2
+    same_shape = [p[:i] + _same_class(p[i]) + p[i + 1 :] for i in dict.fromkeys((len(p) - 1, mid)) if p]
+    probes = [" ", "a", "0", "\n", "A" * len(p), tweak, *same_shape, p[:mid], p[mid + 1 :]]
+    return list(dict.fromkeys(x for x in probes if x.strip() and x.strip() != p))
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
@@ -577,9 +596,20 @@ class MatchEngine:
         second = _decoy(state, cid, "second")
         if second not in self._run_challenge(spec.source, spec.reference_payload, second, state, "validate").stdout:
             return "flag-dependent: the reference payload only works for one flag (it must not depend on FLAG)"
-        empty = self._run_challenge(spec.source, "", flag, state, "validate")
-        if flag in empty.stdout:
-            return "trivial: empty input reveals flag"
+        return self._probes(state, spec, flag)
+
+    def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
+        """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
+        budget = time.monotonic() + VALIDATION_TIME_FACTOR * state.limits.wall_seconds
+        for probe in ["", *junk_inputs(spec.reference_payload)]:
+            if time.monotonic() > budget:
+                return "too slow: validation ran over its time budget; check must answer every input quickly"
+            out = self._run_challenge(spec.source, probe, flag, state, "validate")
+            shown = "empty input" if not probe else f"junk input {probe[:20]!r}"
+            if flag in out.stdout:
+                return f"trivial: {shown} reveals flag"
+            if out.timed_out or out.killed_reason in ("wall", "signal"):
+                return f"too slow: {shown} timed out or was killed; check must answer every input quickly"
         return None
 
     # -- stage 3: attack --------------------------------------------------

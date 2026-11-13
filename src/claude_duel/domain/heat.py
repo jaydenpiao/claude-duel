@@ -8,7 +8,7 @@ never changes. The author filter applies before the ``heat_ref_cap`` cut. Which 
 the host work bound, are ``heat_bound.regime`` and ``heat_bound.compare``.
 
 ``HeatScorer`` holds the only state: a bounded cache of walks, a bounded memo of round results and a count of
-LCS work. The engine, replay and the arena each own one; a module-level call uses a fresh one.
+LCS work. The engine, replay and the arena each own one.
 """
 
 from __future__ import annotations
@@ -215,22 +215,30 @@ def penalty(defense: int, h: int, rule: LedgerRule) -> int:
 
 
 def heat_label(hot: Hot) -> str:
-    """``65%`` exact; ``>=72% (heat unchecked)`` when charged on an exact match with some reference not compared;
-    ``heat unchecked`` when nothing compared reached the threshold."""
+    """``65%`` exact; ``>=72% (heat over budget)`` when charged on an exact match with some reference not compared;
+    ``heat over budget`` when nothing compared reached the threshold."""
     if hot.exact:
         return f"{hot.pct}%"
-    return f">={hot.pct}% (heat unchecked)" if hot.pct else "heat unchecked"
+    return f">={hot.pct}% (heat over budget)" if hot.pct else "heat over budget"
 
 
-def heat(
-    challenges: Iterable[Challenge],
+def _history_source(
+    challenge: Challenge,
+    author: str,
     validations: Mapping[str, Validation],
-    round_no: int,
-    rule: LedgerRule,
-    refs: Mapping[str, Sequence[str]] | None = None,
-) -> dict[str, int]:
-    """``HeatScorer().heat``: a one-off call with no shared state."""
-    return HeatScorer().heat(challenges, validations, round_no, rule, refs)
+    token_limit: int | None,
+) -> str | None:
+    """A valid source by ``author`` that heat can parse, or None if over ``token_limit``."""
+    if challenge.author != author or not _valid(challenge, validations):
+        return None
+    src = _source(challenge)
+    if raw(src) is None:
+        return None
+    if token_limit is not None:
+        got = profile(src)
+        if got is None or got.length > token_limit:
+            return None
+    return src
 
 
 def history_refs(
@@ -252,16 +260,8 @@ def history_refs(
         sources: list[str] = []
         for m, name in mine[-k:]:
             for c in sorted(m.challenges.values(), key=lambda c: c.id):
-                if c.author != name or not _valid(c, m.validations):
-                    continue
-                src = _source(c)
-                if raw(src) is None:
-                    continue
-                if token_limit is not None:
-                    got = profile(src)
-                    if got is None or got.length > token_limit:
-                        continue
-                sources.append(src)
+                if (src := _history_source(c, name, m.validations, token_limit)) is not None:
+                    sources.append(src)
         if source_limit is not None:
             sources = sources[-source_limit:]
         if sources:
@@ -269,4 +269,4 @@ def history_refs(
     return out
 
 
-__all__ = ["HeatScorer", "Hot", "Regime", "heat", "heat_label", "history_refs", "penalty"]
+__all__ = ["HeatScorer", "Hot", "Regime", "heat_label", "history_refs", "penalty"]

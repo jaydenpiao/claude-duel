@@ -141,6 +141,13 @@ def _chat_text(message: object) -> str:
     return ""
 
 
+def _has_refusal_part(content: object) -> bool:
+    """True when ``content`` is a list that includes a ``refusal`` part."""
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "refusal" for part in content
+    )
+
+
 def _chat_refused(message: object, finish_reason: object) -> bool:
     """True on a content-filter stop, a non-empty ``refusal`` field, or a refusal content part."""
     if finish_reason == "content_filter":
@@ -149,10 +156,7 @@ def _chat_refused(message: object, finish_reason: object) -> bool:
         return False
     if message.get("refusal"):
         return True
-    content = message.get("content")
-    return isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("type") == "refusal" for part in content
-    )
+    return _has_refusal_part(message.get("content"))
 
 
 def _responses_refused(items: object, reason: object) -> bool:
@@ -162,10 +166,9 @@ def _responses_refused(items: object, reason: object) -> bool:
     if not isinstance(items, list):
         return False
     return any(
-        isinstance(part, dict) and part.get("type") == "refusal"
+        _has_refusal_part(item.get("content"))
         for item in items
         if isinstance(item, dict) and item.get("type") == "message"
-        for part in item.get("content") or []
     )
 
 

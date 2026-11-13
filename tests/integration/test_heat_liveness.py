@@ -1,4 +1,4 @@
-"""S13-4 and liveness: a large unrelated pair is compared exactly, and a pair past the work budget is heat unchecked
+"""S13-4 and liveness: a large unrelated pair is compared exactly, and a pair past the work budget is heat over budget
 (never charged, never a failure); the match completes, resumes and replays."""
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def test_large_unrelated_pair_is_exact_where_the_old_ceiling_charged() -> None:
 
 
 def test_over_budget_round_completes_resumes_and_replays(make_engine, new_state, store, event_log, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # Only round 3's non-copy pair needs the LCS; a budget below it leaves that pair heat unchecked.
+    # Only round 3's non-copy pair needs the LCS; a budget below it leaves that pair heat over budget.
     monkeypatch.setattr("claude_duel.domain.heat.WORK_BUDGET", 1000)
     rules = preset("ledger").model_copy(update={"rounds": 3})
     for r, src in SOURCES.items():  # every round's source fits that round's cap
@@ -113,7 +113,7 @@ def test_over_budget_round_completes_resumes_and_replays(make_engine, new_state,
     assert sorted(cid for cid, h in hot.items() if not h.exact) == unchecked
     # a charged line is an exact similarity at the threshold or over (bob repeats templates), never a bound
     assert all(hot[cid].pct >= led.heat_threshold_pct for cid in scored[3].get("heat", {}))
-    assert "heat unchecked" in summarize(done, "alice", 4, done.rules.memory)
+    assert "heat over budget" in summarize(done, "alice", 4, done.rules.memory)
     report = replay(done, events)
     assert report.consistent, report.mismatches
     forged = [
