@@ -18,6 +18,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
+- Image pin lives in `DEFAULT_IMAGE` (`sandbox_image.py`); the Dockerfile `ARG PYTHON_IMAGE` default must match, CI pulls that constant, and Dependabot ignores `python` digest and version bumps so a one-file bump cannot fail CI. Keeps the existing `e695ab1` digest (`5e2bdb1` is the same linux/amd64 image and does not fix zlib 1+b1, so the upgrade step stays).
 - Heat pins (both caps, `full`, opponent heat) are set once when config loads, so series, tournament and pool children use the logged contract and never pin again; resume of a log written without the caps keeps those rules. An invalid or partial pin in a log is a corrupt-log error, not an unverified round. Heat state lives in a `HeatScorer` the engine, replay and arena own (no module caches).
 - With #279 merged here, the author filter runs before the reference cap, and config load pins `heat_vs_opponent` to a bool (the mode preset's value, else off) beside the caps.
 - Heat display names: a work-budget skip is `heat over budget`; a legacy log past the ceiling is `heat legacy-unreplayable`. The logged field stays `round_scored.heat_unchecked` so old logs replay.

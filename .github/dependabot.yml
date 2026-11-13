@@ -23,7 +23,4 @@ updates:
     commit-message:
       prefix: bump
     ignore:
-      - dependency-name: python
-        update-types:
-          - "version-update:semver-major"
-          - "version-update:semver-minor"
+      - dependency-name: python  # pin is DEFAULT_IMAGE + Dockerfile ARG; bump both by hand
