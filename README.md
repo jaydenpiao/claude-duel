@@ -35,7 +35,7 @@ duel backup [--bucket gs://…]       # copy finished matches' logs + state (fla
 OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below)
 ```
 
-To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-5-nano`).
+To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-6-luna`).
 
 ## Architecture
 ```mermaid
@@ -94,9 +94,9 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | `DUEL_STORE_DIR` | `store_dir` | `.duel` |
 | `DUEL_REPLAY_BUCKET` | `replay_bucket`: private `gs://` bucket for `duel backup` (public access prevention on) | unset |
 | `DUEL_LOG_LEVEL` | `log_level` | `INFO` |
-| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-5-nano` |
+| `DUEL_OPENAI_MODEL` | `openai_model` | `gpt-6-luna` |
 | `DUEL_ANTHROPIC_MODEL` | `anthropic_model` | `claude-haiku-5-5` |
-| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-5-nano` |
+| `DUEL_GATE_MODEL` | `gate_model` (difficulty-gate probe) | `gpt-6-luna` |
 | `DUEL_PROVIDER_TIMEOUT` | `provider_timeout` seconds | 60 |
 | `DUEL_PROVIDER_MAX_RETRIES` | `provider_max_retries` | 4 |
 | `DUEL_ROUNDS` | `[rules] rounds` | preset |
@@ -121,7 +121,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 `gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
 Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `claude-fable-5-2` (8/40), `gpt-6-astra` (10/50). Older prices pinned 2026-10-22; `claude-fable-5-2` from https://docs.anthropic.com/en/docs/about-claude/pricing on 2026-11-13. OpenAI prices from https://platform.openai.com/docs/pricing.
 
-**Output cap and thinking** (#145): `[rules] max_output_tokens` (default 1500, reasoning included) and `[rules] reasoning_effort` (`low`/`medium`/`high`, default vendor default) go to every agent identically; `[[agents]] max_output_tokens` overrides the cap for one agent (thinking models need far more than 1500). Both vendors get the same strict answer schema as structured output. A reply cut off at the cap gets exactly one call asking for brevity; a second cut-off is the failure reason `truncated`. Thinking/reasoning tokens are logged per call (`reasoning_tokens`) and billed as output.
+**Output cap and thinking** (#145): `[rules] max_output_tokens` (default 1500, reasoning included) and `[rules] reasoning_effort` (`low`/`medium`/`high`; when unset, `gpt-6-luna` sends `low` and pinned `gpt-5-nano`/`gpt-5-mini` send `minimal`) go to every agent identically; `[[agents]] max_output_tokens` overrides the cap for one agent (thinking models need far more than 1500). Both vendors get the same strict answer schema as structured output. A reply cut off at the cap gets exactly one call asking for brevity; a second cut-off is the failure reason `truncated`. Thinking/reasoning tokens are logged per call (`reasoning_tokens`) and billed as output.
 
 **What each side is doing** (arena view): one lane per side, labelled by model, shows its phase (designing, testing, attacking, defending), a short preview of the challenge it built, a live tail of its last three actions (each call's tokens, $ and seconds; build rejections; each attack try's input and result; the arena's solvability verdict) and, when the vendor returns one, a one-line reasoning summary (OpenAI reasoning summary, Anthropic thinking). Summaries are stored in `call_charged` as one capped line with every flag of the match redacted; raw chain of thought is never stored. Older logs replay without summaries.
 
