@@ -279,8 +279,7 @@ class MatchEngine:
             "purpose": request.purpose,
             "summary": self._summary(state, completion.reasoning_summary),
         }
-        if completion.reasoning_effort is not None:  # omitted when unset so older logs stay byte-identical
-            charged["reasoning_effort"] = completion.reasoning_effort
+        charged["reasoning_effort"] = completion.reasoning_effort
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
