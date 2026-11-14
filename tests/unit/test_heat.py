@@ -241,7 +241,7 @@ def _copies_opponent() -> tuple[list[Challenge], dict[str, Validation]]:
 
 def _old_log(opponent: bool, refs: dict[str, list[str]] | None = None) -> tuple[MatchState, list[Event]]:
     """A heat-on ledger log written before ``heat_vs_opponent`` was logged, scored own-only (#198) or with R5 (#238)."""
-    rules = RULES.model_copy(update={"ledger": LedgerRule(heat_window=2)})
+    rules = RULES.model_copy(update={"rules_version": 1, "ledger": LedgerRule(heat_window=2)})
     dumped = rules.model_dump(mode="json")
     dumped["ledger"].pop("heat_vs_opponent")
     data: dict[str, object] = {
