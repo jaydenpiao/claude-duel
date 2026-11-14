@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.heat_bound import regime
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES
 from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
@@ -160,7 +161,8 @@ def heat_rule(rules: Rules) -> list[str]:
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
         f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
-        "(yours or your opponent's) or to one your model built in its last 3 matches "
+        "(yours or your opponent's) or to one your model built in its last "
+        f"{led.heat_history_matches if led.heat_history_matches is not None else HISTORY_MATCHES} matches "
         f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new.{caps}"
     ]
 
