@@ -18,9 +18,10 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.events import CallCharged
 from claude_duel.domain.flags import scrub
-from claude_duel.domain.heat import heat
+from claude_duel.domain.heat import HeatScorer, Hot, heat_label
 from claude_duel.domain.models import Challenge, Event, MatchState, Stage
 from claude_duel.domain.moments import moment_of
 from claude_duel.domain.stakes import own_challenges
@@ -234,6 +235,7 @@ class ArenaView(MatchFold):
         self._pace = pace
         self._spinner = Spinner("dots")
         self._last_caller = ""
+        self._heat = HeatScorer()  # this view's heat memo
         self._live = Live(console=console, refresh_per_second=REFRESH_PER_SECOND, get_renderable=self._draw)
 
     def _draw(self) -> RenderableType:
@@ -283,9 +285,10 @@ class ArenaView(MatchFold):
         if purpose in PHASE and s.stage is not Stage.ATTACK:
             p.phase = PHASE[purpose]
         cut = " · cut off at max tokens" if d.truncated else ""
+        declined = " · refused" if d.refused else ""
         p.act(
             f"{purpose}: {d.input_tokens:,} in / {d.output_tokens:,} out · "
-            f"${d.usd:.4f} · {d.elapsed_ms / 1000:.1f}s{cut}"
+            f"${d.usd:.4f} · {d.elapsed_ms / 1000:.1f}s{cut}{declined}"
         )
         if d.summary:
             p.thought = _short(d.summary, 120)
@@ -371,11 +374,11 @@ class ArenaView(MatchFold):
             self.model.log(f"{who(s, atk.attacker)} +{pts} for {who(s, ch.author)}'s {title!r}")
         lines = {cid: line for cid, line in cast("dict[str, int]", e.data.get("heat", {})).items() if line}
         rnd = int(str(e.data["round"]))
-        hot = heat(s.challenges.values(), s.validations, rnd, s.rules.ledger) if lines and s.rules.ledger else {}
+        hot = _heat_view(s, rnd, self._heat) if lines and s.rules.ledger else {}
         for cid, line in sorted(lines.items()):  # a 0 line (at the threshold) is not news
             ch = s.challenges.get(cid)
             if ch is not None:
-                pct = f"heat {hot[cid]}% " if cid in hot else "heat "
+                pct = f"heat {heat_label(hot[cid])} " if cid in hot else "heat "
                 self.model.log(
                     f"🔥 {who(s, ch.author)}'s {scrub(ch.spec.title) if ch.spec else 'forfeit'!r} {pct}-{line}"
                 )
@@ -424,3 +427,16 @@ class ArenaView(MatchFold):
         self.model.busy = False
         self.model.now = f"match failed during {s.failed_stage}"
         self.model.banner = f"failed: {scrub(s.failure or '')} · duel resume {s.match_id}"
+
+
+def _heat_view(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> dict[str, Hot]:
+    """Similarity percents for the ticker. A legacy log past the ceiling is skipped, not a crashed rewatch."""
+    led = state.rules.ledger
+    if led is None:
+        return {}
+    try:
+        return (scorer or HeatScorer()).scan(
+            state.challenges.values(), state.validations, round_no, led, state.heat_refs
+        )
+    except HeatBoundError:
+        return {}

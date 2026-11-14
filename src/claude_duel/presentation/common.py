@@ -118,7 +118,7 @@ def verdict_text(s: MatchState, e: Event) -> str:
 def labels(agents: Sequence[AgentSpec]) -> dict[str, str]:
     """Display label per agent: its model when models differ; its configured name when they match.
 
-    Same provider model id (both ``fake-1``, both ``gpt-5-nano``, …) used to append ``(A)``/``(B)`` and
+    Same provider model id (both ``fake-1``, both ``gpt-6-luna``, …) used to append ``(A)``/``(B)`` and
     hide config names like ``fake-1-s2`` / ``fake-1-s5``. Prefer the agent name in that case so skill tags
     and other explicit display names stay on screen (CLI arena, commentary, card).
     """

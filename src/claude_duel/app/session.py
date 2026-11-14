@@ -14,6 +14,7 @@ from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import heat
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
+from claude_duel.domain.heat_bound import admit
 from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
 from claude_duel.ports import EventObserver, MatchStore, Metrics
@@ -30,21 +31,28 @@ def open_match(
     seed: str | None = None,
     warn_drift: bool = True,
 ) -> MatchState:
-    """Load or create a match. New matches pin ``framing_text`` from the current framing rule."""
+    """Load or create a match. New matches pin ``framing_text`` from the current framing rule and store
+    ``settings.rules`` as given (heat is pinned in config; a driver child gets the driver's logged rules)."""
     try:
         state = store.load(match_id)
     except MatchNotFoundError:
+        rules = settings.rules
         state = MatchState(
             match_id=match_id,
             secret=secrets.token_hex(32),
             framing_text=framing_text(settings.rules.framing),
             seed=seed if seed is not None else (settings.seed or hashlib.sha256(match_id.encode()).hexdigest()[:16]),
             agents=agents if agents is not None else pin_agents(settings),
-            rules=settings.rules,
+            rules=rules,
             limits=settings.limits,
         )
-        if settings.rules.ledger is not None and settings.rules.ledger.heat_window:
-            state.heat_refs = heat.history_refs(_history(settings, match_id), state.agents)
+        if rules.ledger is not None and rules.ledger.heat_window:
+            state.heat_refs = heat.history_refs(
+                _history(settings, match_id),
+                state.agents,
+                source_limit=rules.ledger.heat_ref_cap,
+                token_limit=admit(rules) if rules.ledger.heat_compare == "full" else None,
+            )
         store.save(state)
         if (why := allowance.wallets_exceed(state.rules, len(state.agents), settings.budget.match_max_usd)) is not None:
             log(_LOG, logging.WARNING, why, match_id=match_id)
