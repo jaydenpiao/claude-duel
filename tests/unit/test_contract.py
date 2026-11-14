@@ -100,6 +100,8 @@ def test_check_prompt_states_the_contract() -> None:
         ("solver failed (exit 1); it printed 'error: NameError at line 9'", "never defined"),
         ("reference payload does not reveal flag; it printed nothing", "add a solver"),
         ("trivial: empty input reveals flag", "length test"),
+        ("trivial: junk input 'a' reveals flag", "whole input"),
+        ("too slow: junk input 'a' timed out or was killed; check must answer every input quickly", "bounded time"),
         ("reference_payload must be at least 4 characters", "at least 4"),
         ("banned attribute: __dict__", "FLAG is already a global"),
         ("solver: import not allowed: random", "recurrence"),
