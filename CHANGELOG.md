@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Repair hints cover junk-input and too-slow validation rejections; the forge prompt, README and app engine docs now say empty and junk input must fail in bounded time.
+- `junk_inputs` lives in `domain/probes.py`. Sandbox `killed_reason` is a `Literal` with named constants, so a renamed reason cannot silently skip the too-slow check.
 - image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).
 - Security: new matches pin `heat_token_cap` (256) and `heat_ref_cap` (48) once in config; a legacy log past that ceiling is `heat legacy-unreplayable` and `score not checked`, not rescored with a different similarity.
 - New matches pin `heat_compare=full` and charge only an exact whole-source LCS; a pair past the work budget is `heat over budget`, logged in `round_scored.heat_unchecked` and charged 0.
@@ -28,7 +30,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Tournament bootstrap skips absent entrants (#124).
 - Results DB inserts are chunked under the 65,535-parameter limit (#252).
 - OpenAI: request reasoning summaries (`reasoning.summary="auto"`); if the org is not verified, retry once without them and stop asking.
-- Security (SV-3): fixed junk inputs (space, "a", "0", newline, same-length filler, the answer with one char changed, its halves) must not reveal the flag, so degenerate acceptance is rejected for free.
+- Security (SV-3): fixed junk inputs (space, "a", "0", newline, same-length filler, the answer with one char changed, both sides of the middle char) must not reveal the flag, so degenerate acceptance is rejected for free. Empty and junk probes share a time budget (`VALIDATION_TIME_FACTOR` wall seconds); a hang or kill is rejected as too slow.
 - The system prompt names the arena "LLM Duels", not a vendor (prereg control 1); prereg states model names are display-only (#247).
 - Upgrade note: matches saved before this change with a ledger but non-ledger scoring now fail validation on resume, snapshot and backup; finish or export them first (no migration is provided).
 - Ledger keystone, terrain and heat default off in `LedgerRule` and are on in the `ledger` preset, so older ledger logs replay as written.
