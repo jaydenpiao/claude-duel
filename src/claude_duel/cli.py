@@ -239,7 +239,7 @@ def _rewatch(settings: Settings, mid: str, events: list[Event], pace: float) -> 
             try:
                 view(e)
             except HeatBoundError:
-                continue  # the text report below still prints heat unverified
+                continue  # the text report below still prints heat legacy-unreplayable
     finally:
         view.close()
 

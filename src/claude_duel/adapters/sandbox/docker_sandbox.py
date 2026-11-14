@@ -10,9 +10,9 @@ from claude_duel.adapters.sandbox.common import execute
 from claude_duel.adapters.sandbox.runner import HASH_ENV, PYTHON_FLAGS, frame
 from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import RunResult
+from claude_duel.sandbox_image import DEFAULT_IMAGE
 
-# pinned by digest; with --pull never a mutable tag would run whatever image is local under that name.
-DEFAULT_IMAGE = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
+# DEFAULT_IMAGE is pinned by digest in image.py; with --pull never a mutable tag would run a local name.
 # Host-side deadline on top of the in-container wall limit, to absorb container start-up.
 STARTUP_GRACE_SECONDS = 5.0
 TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires

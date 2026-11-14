@@ -17,6 +17,7 @@ from claude_duel.domain.models import AgentSpec, Rules, SandboxLimits
 from claude_duel.domain.modes import pin_opponent_heat, preset
 from claude_duel.domain.tournament import TournamentRule
 from claude_duel.domain.vendors import VENDORS
+from claude_duel.sandbox_image import DEFAULT_IMAGE
 
 
 class Settings(BaseModel):
@@ -29,7 +30,7 @@ class Settings(BaseModel):
     store_dir: Path = Path(".duel")
     log_level: str = "INFO"
     seed: str | None = None  # match seed; default sha256(match_id)[:16]
-    gate_model: str = "gpt-5-nano"  # the cheapest low-tier model; used only when rules.difficulty_gate
+    gate_model: str = "gpt-6-luna"  # the cheapest low-tier model; used only when rules.difficulty_gate
     budget: BudgetLimits = BudgetLimits()
     tournament: TournamentRule | None = None  # [tournament] entrants for `duel tournament` (#39)
     provider_timeout: float = 60.0
@@ -42,7 +43,7 @@ class Settings(BaseModel):
     export_database_url: SecretStr | None = None  # EXPORT_DATABASE_URL: a duel_exporter login, for `duel export`
     allow_premium: bool = False  # top-tier models (budget.PREMIUM) are refused unless this is set (#10)
     docker_command: tuple[str, ...] = ("docker",)
-    docker_image: str = "python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e"
+    docker_image: str = DEFAULT_IMAGE
     metrics: str = Field(default="log", pattern="^(log|jsonl)$")  # jsonl: also append to <store>/metrics.jsonl
     docker_runtime: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")  # e.g. "runsc" (ADR 0011)
     replay_bucket: str | None = None  # gs://... for `duel backup` (ADR 0012)

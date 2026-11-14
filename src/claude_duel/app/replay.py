@@ -86,7 +86,8 @@ def _python_warning(events: list[Event]) -> list[str]:
 def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> tuple[dict[str, int], bool]:
     """Rescore every scored round from folded facts, noting rounds whose recorded delta differs.
 
-    Returns whether any round's heat was left unverified because the legacy comparison exceeds the work ceiling.
+    Returns whether any round's heat was `heat legacy-unreplayable` because the
+    legacy comparison exceeds the work ceiling.
     That round is not rescored and is not reported as tampered.
     """
     names = [a.name for a in folded.agents]
@@ -113,7 +114,7 @@ def _rescore(folded: MatchState, events: list[Event], mismatches: list[str]) -> 
                 scorer=scorer,
             )
         except HeatBoundError as exc:
-            mismatches.append(f"round {r} heat unverified: {exc}")
+            mismatches.append(f"round {r} heat legacy-unreplayable: {exc}")
             mismatches.append(f"round {r} score not checked")
             unverified = True
             continue

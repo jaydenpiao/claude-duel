@@ -36,7 +36,7 @@ jobs:
       - run: .venv/bin/python scripts/check_docs.py
       - run: .venv/bin/vulture
       - run: .venv/bin/pylint src tests
-      - run: docker pull -q python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
+      - run: docker pull -q "$(.venv/bin/python -c 'from claude_duel.sandbox_image import DEFAULT_IMAGE; print(DEFAULT_IMAGE)')"
       - name: throwaway postgres for results-db tests (ADR 0012)
         run: |
           # pinned by digest (postgres:17-alpine); a fresh random password per job, masked in logs
