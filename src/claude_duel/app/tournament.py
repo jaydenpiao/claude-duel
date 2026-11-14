@@ -58,7 +58,7 @@ def _play_tournament(
         data={
             "seed": settings.seed or sr.game_seed(tournament_id, 0),
             "rule": rule.model_copy(update={"entrants": pin_entrants(settings, rule.entrants)}).model_dump(mode="json"),
-            "rules": settings.rules.model_dump(mode="json"),
+            "rules": settings.rules.dump(),
             "limits": settings.limits.model_dump(mode="json"),
         },
     )
