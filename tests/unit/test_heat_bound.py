@@ -21,7 +21,7 @@ from claude_duel.config import Settings
 from claude_duel.domain import events as ev
 from claude_duel.domain import memory, policy
 from claude_duel.domain.errors import EventLogCorruptError, HeatBoundError
-from claude_duel.domain.heat import HeatScorer, heat, heat_label, history_refs
+from claude_duel.domain.heat import HeatScorer, heat_label, history_refs
 from claude_duel.domain.heat_bound import (
     MAX_CHALLENGES,
     WORK_BUDGET,
@@ -201,7 +201,7 @@ def test_pinned_window_wins_and_dropped_history_is_not_parsed(monkeypatch: pytes
         return real(source, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr("claude_duel.domain.heat_tokens.ast.parse", counting)
-    got = heat([window, current], _valid([window, current]), 2, rule, {"a": [*old, "v = 1\n"]})
+    got = HeatScorer().heat([window, current], _valid([window, current]), 2, rule, {"a": [*old, "v = 1\n"]})
     assert got["r2a"] == similarity(RENAMED, LOOP, token_cap=TOKEN_CAP)
     assert all(not item.startswith("z = ") for item in seen)
 
@@ -263,10 +263,10 @@ def test_an_overflowing_window_keeps_the_newest_rounds() -> None:
     older = [_ch("r1a", 1, "a", LOOP), _ch("r2a", 2, "a", "v = 1\n"), _ch("r3a", 3, "a", RENAMED)]
     rule = LedgerRule(heat_window=3, heat_token_cap=TOKEN_CAP, heat_ref_cap=1)
     # Cap 1 keeps round 2 only, so the copied LOOP in round 1 and in history does not heat.
-    cold = heat(older, _valid(older), 3, rule, {"a": [LOOP]})
+    cold = HeatScorer().heat(older, _valid(older), 3, rule, {"a": [LOOP]})
     assert "r3a" not in cold
     newer = [_ch("r1a", 1, "a", "v = 1\n"), _ch("r2a", 2, "a", LOOP), _ch("r3a", 3, "a", RENAMED)]
-    assert heat(newer, _valid(newer), 3, rule, {"a": ["v = 2\n"]})["r3a"] == 100
+    assert HeatScorer().heat(newer, _valid(newer), 3, rule, {"a": ["v = 2\n"]})["r3a"] == 100
 
 
 def test_unpinned_prompt_does_not_claim_the_cap() -> None:
@@ -346,7 +346,7 @@ def test_pinned_dense_heat_replays_and_a_forged_line_is_tampered() -> None:
     assert any(item.endswith("heat tampered") for item in mismatches)
 
 
-def test_legacy_dense_log_is_unverified_not_rescored() -> None:
+def test_legacy_dense_log_is_legacy_unreplayable_not_rescored() -> None:
     rules = _legacy_rules()
     src = _dense(6144, 3)
     chs = [_ch("r1a", 1, "a", src), _ch("r1b", 1, "b", src)]
@@ -355,7 +355,7 @@ def test_legacy_dense_log_is_unverified_not_rescored() -> None:
     report = replay(folded, events)
     assert time.perf_counter() - started < 2
     assert report.consistent is False
-    assert any("heat unverified" in item for item in report.mismatches)
+    assert any("heat legacy-unreplayable" in item for item in report.mismatches)
     assert any("score not checked" in item for item in report.mismatches)
     assert not any("tampered" in item for item in report.mismatches)
     assert not any(item == "total score" for item in report.mismatches)
@@ -445,7 +445,7 @@ def test_tokens_stop_inside_a_wide_compare() -> None:
     assert sc.work == work(TOKEN_CAP, TOKEN_CAP)
 
 
-def test_card_says_unverified_when_heat_was_not_recomputed() -> None:
+def test_card_says_legacy_unreplayable_when_heat_was_not_recomputed() -> None:
     svg = card_svg(
         CardData(
             match_id="m",
@@ -456,10 +456,10 @@ def test_card_says_unverified_when_heat_was_not_recomputed() -> None:
             spend="$0",
             verified=False,
             digest="0123456789abcdef",
-            mismatches=("round 1 heat unverified: heat exceeds the work bound", "round 1 score not checked"),
+            mismatches=("round 1 heat legacy-unreplayable: heat exceeds the work bound", "round 1 score not checked"),
         )
     )
-    assert "replay unverified" in svg
+    assert "replay heat legacy-unreplayable" in svg
     assert "MISMATCH" not in svg
 
 
@@ -490,7 +490,7 @@ def test_arena_heat_uses_refs_and_does_not_raise_past_the_ceiling() -> None:
 
 
 def test_a_spent_call_budget_is_unchecked_not_charged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The second pair finds the call budget spent: no LCS, no raise, no charge, labeled heat unchecked."""
+    """The second pair finds the call budget spent: no LCS, no raise, no charge, labeled heat over budget."""
     rule = preset("ledger").ledger
     assert rule is not None
     old = _ch("r1a", 1, "a", "a = a + 1\n" * 5)
@@ -504,7 +504,7 @@ def test_a_spent_call_budget_is_unchecked_not_charged(monkeypatch: pytest.Monkey
     assert got["r2a"].pct < 100
     assert got["r2b"] == Hot(0, False)
     assert "r2b" not in sc.heat(chs, _valid(chs), 2, rule)
-    assert heat_label(got["r2b"]) == "heat unchecked"
+    assert heat_label(got["r2b"]) == "heat over budget"
     assert heat_label(got["r2a"]) == f"{got['r2a'].pct}%"
 
 
@@ -536,9 +536,9 @@ def test_author_filter_applies_before_the_ref_cut() -> None:
     own = LedgerRule(heat_window=2, heat_token_cap=TOKEN_CAP, heat_ref_cap=1, heat_compare="full")
     own = own.model_copy(update={"heat_vs_opponent": False})
     chs = [_ch("r1a", 1, "a", LOOP), _ch("r2b", 2, "b", OTHER), _ch("r3a", 3, "a", RENAMED)]
-    assert heat(chs, _valid(chs), 3, own) == {"r3a": 100}
+    assert HeatScorer().heat(chs, _valid(chs), 3, own) == {"r3a": 100}
     wide = own.model_copy(update={"heat_vs_opponent": True})
-    assert heat(chs, _valid(chs), 3, wide) == {}  # the newest reference is b's unrelated source
+    assert HeatScorer().heat(chs, _valid(chs), 3, wide) == {}  # the newest reference is b's unrelated source
 
 
 def test_config_pins_opponent_heat_and_the_caps_together() -> None:
@@ -598,8 +598,8 @@ def test_unchecked_pair_is_never_charged() -> None:
         assert got == {"r2a": Hot(0, False)}
         assert sc.heat(chs, _valid(chs), 2, rule) == {}
         assert sc.unchecked_ids(chs, _valid(chs), 2, rule) == ["r2a"]
-    assert heat_label(got["r2a"]) == "heat unchecked"
-    assert heat_label(Hot(80, False)) == ">=80% (heat unchecked)"
+    assert heat_label(got["r2a"]) == "heat over budget"
+    assert heat_label(Hot(80, False)) == ">=80% (heat over budget)"
 
 
 def test_multiset_ceiling_skips_a_cold_pair() -> None:
@@ -671,7 +671,7 @@ def _near_copy(target: int) -> tuple[str, str]:
 
 def test_packed_round20_near_copy_is_compared_exactly() -> None:
     """A 40,960-byte 76% near-copy in a packed ledger 6-vs-6 window used to exhaust the 1e9 word budget;
-    later challenges came back heat unchecked and were charged 0. Admission now sizes the cap so every
+    later challenges came back heat over budget and were charged 0. Admission now sizes the cap so every
     pair the rules can admit fits, and a packed window at that cap is charged on the exact LCS.
     """
     rules = preset("ledger").model_copy(update={"rounds": 20})

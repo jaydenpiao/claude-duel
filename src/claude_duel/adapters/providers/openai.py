@@ -21,15 +21,20 @@ from claude_duel.ports import Completion, CompletionRequest
 
 HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
-# Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
+# nano/mini still accept "minimal". gpt-6-luna does not; the documented migration from minimal is "low".
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
+LOW_EFFORT_MODELS = ("gpt-6-luna",)
 
 
 def default_effort(model: str, effort: str | None) -> str | None:
-    """The effort sent: the request's own, else ``minimal`` for the small gpt-5 models, else vendor default."""
+    """The effort sent: the request's own, else the small-model default, else the vendor default."""
     if effort is not None:
         return effort
-    return "minimal" if model.startswith(MINIMAL_EFFORT_MODELS) else None
+    if model.startswith(MINIMAL_EFFORT_MODELS):
+        return "minimal"
+    if model.startswith(LOW_EFFORT_MODELS):
+        return "low"
+    return None
 
 
 class OpenAIProvider:
@@ -136,6 +141,13 @@ def _chat_text(message: object) -> str:
     return ""
 
 
+def _has_refusal_part(content: object) -> bool:
+    """True when ``content`` is a list that includes a ``refusal`` part."""
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "refusal" for part in content
+    )
+
+
 def _chat_refused(message: object, finish_reason: object) -> bool:
     """True on a content-filter stop, a non-empty ``refusal`` field, or a refusal content part."""
     if finish_reason == "content_filter":
@@ -144,10 +156,7 @@ def _chat_refused(message: object, finish_reason: object) -> bool:
         return False
     if message.get("refusal"):
         return True
-    content = message.get("content")
-    return isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("type") == "refusal" for part in content
-    )
+    return _has_refusal_part(message.get("content"))
 
 
 def _responses_refused(items: object, reason: object) -> bool:
@@ -157,10 +166,9 @@ def _responses_refused(items: object, reason: object) -> bool:
     if not isinstance(items, list):
         return False
     return any(
-        isinstance(part, dict) and part.get("type") == "refusal"
+        _has_refusal_part(item.get("content"))
         for item in items
         if isinstance(item, dict) and item.get("type") == "message"
-        for part in item.get("content") or []
     )
 
 
