@@ -57,9 +57,11 @@ TERRAIN_DRAWN = "terrain_drawn"
 GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
-# 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
+# 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and later
 # Rules/Usage/AttackAttempt fields (a v1 build would reject them under extra="forbid").
-SCHEMA_VERSION = 2
+# 3 = rules v2 heat contract (heat_metric and heat_history_matches; a v2 reader would reject those
+# fields under extra="forbid"). Old v0-v2 events still fold.
+SCHEMA_VERSION = 3
 
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -393,7 +395,7 @@ def created_data(state: MatchState) -> dict[str, object]:
         "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
-        "rules": state.rules.model_dump(mode="json"),
+        "rules": state.rules.dump(),
         "limits": state.limits.model_dump(mode="json"),
     }
     if state.heat_refs:  # omitted when empty, so older logs stay byte-identical

@@ -15,6 +15,7 @@ from claude_duel.domain import events as ev
 from claude_duel.domain import heat
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.heat_bound import admit
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES
 from claude_duel.domain.models import AgentSpec, MatchState
 from claude_duel.observability import log
 from claude_duel.ports import EventObserver, MatchStore, Metrics
@@ -47,9 +48,11 @@ def open_match(
             limits=settings.limits,
         )
         if rules.ledger is not None and rules.ledger.heat_window:
+            history = rules.ledger.heat_history_matches
             state.heat_refs = heat.history_refs(
                 _history(settings, match_id),
                 state.agents,
+                HISTORY_MATCHES if history is None else history,
                 source_limit=rules.ledger.heat_ref_cap,
                 token_limit=admit(rules) if rules.ledger.heat_compare == "full" else None,
             )
