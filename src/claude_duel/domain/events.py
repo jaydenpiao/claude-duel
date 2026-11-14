@@ -61,7 +61,7 @@ GHOST_RUN = "ghost_run"
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and later
 # Rules/Usage/AttackAttempt fields (a v1 build would reject them under extra="forbid").
 # 3 = rules v2 heat contract (heat_metric and heat_history_matches; a v2 reader would reject those
-# fields under extra="forbid"). Old v0-v2 events still fold.
+# fields under extra="forbid") and the challenge_timeout event. Old v0-v2 events still fold.
 SCHEMA_VERSION = 3
 
 
