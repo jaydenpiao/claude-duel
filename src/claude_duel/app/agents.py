@@ -110,14 +110,13 @@ def check_rules(rules: Rules, round_no: int) -> list[str]:
         f"7. The accepting input must be at least {MIN_PAYLOAD_CHARS} characters and must NOT appear in the "
         "source in any obvious form (literal, reversed, hex, base64, split strings, shifted char-code lists).",
         'SOLVER (strongly recommended): give "solver", a short program that prints the accepting input. It runs '
-        "AFTER your source, so it can call check() and your helpers, e.g. search a small space: for n in "
-        'range(100000): ... if check(s): print(s); break. Then leave reference_payload "". It is never shown '
-        "to the attacker.",
+        "AFTER your source, so it can call check() and your helpers. Compute the answer constructively; search "
+        "only as a last resort (the arena counts check() calls and rejects heavy brute force). Then leave "
+        'reference_payload "". It is never shown to the attacker.',
         "DESIGN BACKWARDS: pick the accepting input first, then write check so that it (and only inputs like it) "
         "passes; trace check on it once before answering.",
         "SCORING: a defense (the attacker fails every try) is worth at least as much as a capture. Make the "
-        "attacker reason through several steps (constraints, a recurrence, a tiny VM, a grid walk); keep it "
-        "solvable by careful reading.",
+        "attacker reason through several steps; keep it solvable by careful reading.",
     ]
 
 
@@ -146,9 +145,8 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "list of (shifted or XORed) char codes. The arena checks this.",
         "SCORING: a defense (the attacker fails every try) is worth at least as much as a capture. A challenge "
         "the attacker reads off the source on the first try earns you nothing.",
-        "DESIGN: make the attacker simulate several steps to find the input: derive it with a seeded loop, a "
-        "state machine or grid walk, a tiny stack VM, or a checksum with several constraints (length, sum, order, "
-        "modulo). It must stay solvable by careful reading within a few tries; no hash brute force.",
+        "DESIGN: make the attacker work through several steps to find the input. It must stay solvable by "
+        "careful reading within a few tries; no hash brute force.",
     ]
 
 
@@ -239,10 +237,10 @@ def _program_rules(rules: Rules, round_no: int) -> list[str]:
 
 
 def _check_rules(rules: Rules, round_no: int) -> list[str]:
-    examples = " ".join(json.dumps(e) for e in CHECK_EXAMPLES)
+    example = json.dumps(CHECK_EXAMPLES[(round_no - 1) % len(CHECK_EXAMPLES)])  # R2: one example, not a menu
     return [
         *check_rules(rules, round_no),
-        f"Valid examples (make yours different and harder): {examples}",
+        f"One valid example of the format only (build your assigned family, not this): {example}",
         _RETURN_KEYS,
     ]
 

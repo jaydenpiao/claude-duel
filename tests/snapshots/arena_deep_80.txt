@@ -5,18 +5,18 @@ alice ████████████████████████�
 bob   █████████████████████████████████░░░░░░░░░░░░░░░░░    37 █▁
 alice ━━━━━━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-alice · done · in 13,775 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0…
+alice · done · in 13,571 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0…
   ▣ Maze: Find the input that reveals the flag (password).
   ▸ try 2 on 'Mirror' → missed
   ▸ attack: 576 in / 8 out · $0.0000 · 0.0s
   ▸ try 3 on 'Mirror' → missed
-bob · done · in 12,430 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.000…
+bob · done · in 12,226 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.000…
   ▣ Mirror: Find the input that reveals the flag (reverse).
   ▸ try 2 on 'Knock' → missed
   ▸ attack: 610 in / 7 out · $0.0000 · 0.0s
   ▸ try 3 on 'Knock' → missed
-alice: in 13,775 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0004/defe…
-bob: in 12,430 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
+alice: in 13,571 · out 815 (think 0) · $0.0010 · $0.0001/capture · $0.0004/defe…
+bob: in 12,226 · out 751 (think 0) · $0.0009 · $0.0001/capture · $0.0002/defense
 alice: r2 stakes 0·6k·6k (fallback) · keystone #1
 bob: r2 stakes 0·12k·0 (fallback) · keystone #1
 GHOSTS r2: 8/24 runs · 3 strikes · 3 in match
