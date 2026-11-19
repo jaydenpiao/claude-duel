@@ -1,4 +1,4 @@
-"""Offline control variate for duplicate matches (design-no-fluke M7, AIVAT-style), $0 and reported only.
+"""Offline control variate for duplicate matches (design-no-fluke control variates, AIVAT-style), $0 and reported only.
 
 Each board is replayed on its own seed and pinned rules by two equal scripted bots. Their board difference is the
 luck the seed alone deals (who builds what, which draws land); subtracting it from the real difference leaves a

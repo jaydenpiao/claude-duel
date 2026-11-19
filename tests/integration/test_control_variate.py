@@ -1,4 +1,4 @@
-"""M7 control variate: equal scripted bots replay each board's seed at $0; reported only, deterministic."""
+"""Control variate: equal scripted bots replay each board's seed at $0; reported only, deterministic."""
 
 from __future__ import annotations
 
