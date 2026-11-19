@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from claude_duel.domain.errors import HeatBoundError
 from claude_duel.domain.heat_bound import MAX_CHALLENGES, WORK_BUDGET, Hot, Regime, compare, regime
-from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP, Profile, digest, profile, raw
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES, REF_CAP, TOKEN_CAP, Profile, digest, profile, raw
 from claude_duel.domain.models import AgentSpec, Attack, Challenge, LedgerRule, MatchState, Validation
 
 DefenseFn = Callable[[Challenge], int]
@@ -244,7 +244,7 @@ def _history_source(
 def history_refs(
     past: Iterable[MatchState],
     agents: Iterable[AgentSpec],
-    k: int = 3,
+    k: int = HISTORY_MATCHES,
     *,
     source_limit: int | None = None,
     token_limit: int | None = None,

@@ -39,7 +39,7 @@ Status: accepted 2026-10-22; built in steps. Step 1 (done): `ScoringRule`, `Roun
    - zero-sum is **not** required (classic is not zero-sum);
    - output keys == the two agent names.
 4. **Clocks and budgets are enforced in the app layer, recorded as events, scored from the record.** The engine's single choke point `_call` checks `CostBudget.check` and (new) `MatchClock.check`. Elapsed times are measured once and written into `call_charged` (`elapsed_ms`) **as a metric and for the 900 s safety deadline only**. Game clocks and scoring use recorded tokens and $ (lead decision). Wall-clock never enters scoring.
-5. **`match_created` carries the full resolved `Rules`** (it already dumps rules via `created_data`), so replay uses the exact mode, even if presets change later. Add `rules_version: int = 1` so old logs fold with old defaults.
+5. **`match_created` carries the full resolved `Rules`** (it already dumps rules via `created_data`), so replay uses the exact mode, even if presets change later. Add `rules_version` (now 2; #258) so old logs fold with old defaults.
 6. Seeds: `match_created` records `seed` (default derived `sha256(match_id)`), used for the fake provider, challenge ordering ties and tournament pairing. Real-model calls send `temperature` from config and `seed` where the provider supports it, but **replay never re-calls a model**: recorded completions are the inputs (ADR 0004).
 
 ## Consequences
