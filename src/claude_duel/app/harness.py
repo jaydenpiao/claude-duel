@@ -62,7 +62,12 @@ def measure(
     seat_wins = decided = 0
     for m in range(matches):
         state = dp.DuplicateState(
-            duplicate_id=f"h{m}", seed=f"{seed}{m}", rule=rule, agents=SIDES, rules=rules, limits=settings.limits
+            duplicate_id=f"{seed}-{pct_a}v{pct_b}-{m}",
+            seed=f"{seed}{m}",
+            rule=rule,
+            agents=SIDES,
+            rules=rules,
+            limits=settings.limits,
         )
         while not state.done():
             k = state.next_board()
