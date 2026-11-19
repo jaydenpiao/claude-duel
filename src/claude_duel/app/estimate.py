@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits
-from claude_duel.domain.models import AgentSpec, Rules
+from claude_duel.domain.models import AgentSpec, Purpose, Rules
 
 IN_TOKENS, OUT_TOKENS = 2000, 400  # assumed tokens per call (docs/design/design-rules-abstraction.md)
 
@@ -31,7 +31,7 @@ def estimate(rules: Rules, model: str, limits: BudgetLimits, agents: Sequence[Ag
     out = max(own) if own else min(OUT_TOKENS, rules.output_cap())
     per_call_usd = (IN_TOKENS * pin + out * pout) / 1_000_000
     per_call_tokens = IN_TOKENS + out
-    builds = 1 + rules.max_format_retries + (1 if rules.difficulty_gate else 0)
+    builds = _builds(rules)
     bonus = rules.early_bonus_attempts
     allocs = rules.rounds * 2 if rules.ledger is not None else 0
     calls = min(
@@ -49,6 +49,31 @@ def estimate(rules: Rules, model: str, limits: BudgetLimits, agents: Sequence[Ag
     if rules.wallet.per_agent_usd is not None and 2 * rules.wallet.per_agent_usd < usd:
         usd, bound = 2 * rules.wallet.per_agent_usd, "wallet"
     return Estimate(rules.mode, model, min(calls, -(-tokens // per_call_tokens)), tokens, usd, bound)
+
+
+def _builds(rules: Rules) -> int:
+    """Worst-case build calls per challenge: the first try, every format retry and the gate probe."""
+    return 1 + rules.max_format_retries + (1 if rules.difficulty_gate else 0)
+
+
+def agent_usd(rules: Rules, model: str, *, worst: bool = True) -> float:
+    """One agent's cost for one match at ``DEFAULT_PRICES[model]``, per purpose. ``worst``: every retry and every
+    reply at its full output cap (``Rules.output_cap`` per purpose), attacks bounded by the ledger stakes; else a
+    typical match (no retries, ``OUT_TOKENS`` per reply). No API calls."""
+    pin, pout = DEFAULT_PRICES[model]
+    challenges = rules.rounds * rules.challenges_per_round
+
+    def usd(calls: int, purpose: Purpose) -> float:
+        out = rules.output_cap(purpose=purpose) if worst else OUT_TOKENS
+        return calls * (IN_TOKENS * pin + out * pout) / 1_000_000
+
+    tries = rules.max_attempts + rules.early_bonus_attempts
+    attacks = usd(challenges * tries, "attack")
+    if rules.ledger is not None:  # attack replies are bounded by the stakes, priced at the dearer rate
+        attacks = min(attacks, rules.rounds * rules.ledger.attack_tokens * max(pin, pout) / 1_000_000)
+    builds = usd(challenges * (_builds(rules) if worst else 1), "build")
+    allocs = usd(rules.rounds, "allocate") if rules.ledger is not None else 0.0
+    return builds + attacks + allocs
 
 
 def render(rows: list[Estimate]) -> str:

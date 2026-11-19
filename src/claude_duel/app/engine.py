@@ -30,6 +30,7 @@ from claude_duel.domain.models import (
     Finding,
     LedgerRule,
     MatchState,
+    Purpose,
     SandboxLimits,
     Stage,
     Validation,
@@ -54,7 +55,6 @@ from claude_duel.ports import (
     LLMProvider,
     MatchStore,
     Metrics,
-    Purpose,
     RunResult,
     Sandbox,
 )
@@ -476,15 +476,15 @@ class MatchEngine:
         return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
 
     @staticmethod
-    def _output_cap(state: MatchState, agent: str) -> int:
+    def _output_cap(state: MatchState, agent: str, purpose: Purpose) -> int:
         """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
         own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
-        return state.rules.output_cap(own)
+        return state.rules.output_cap(own, purpose)
 
     def _request(
         self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
     ) -> CompletionRequest:
-        tokens = self._output_cap(state, agent)
+        tokens = self._output_cap(state, agent, purpose)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(

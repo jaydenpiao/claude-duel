@@ -177,6 +177,17 @@ class DeepRule(_Frozen):
 RULES_VERSION = 2  # bump when a Rules default changes meaning; logged with every match
 
 
+Purpose = Literal["build", "attack", "allocate"]
+
+
+class CallCaps(_Frozen):
+    """Per-purpose output caps (the no-fluke ladder's ``[caps]``); same for both sides by construction."""
+
+    build: int = Field(ge=64, le=64_000)
+    allocate: int = Field(ge=64, le=64_000)
+    attack: int = Field(ge=64, le=64_000)
+
+
 class Rules(_Frozen):
     mode: str = Field(default="classic", description="preset name (domain/modes.py) this match started from")
     rules_version: int = RULES_VERSION
@@ -197,6 +208,7 @@ class Rules(_Frozen):
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
+    call_caps: CallCaps | None = Field(default=None, description="per-purpose output caps; None: max_output_tokens")
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
@@ -268,9 +280,13 @@ class Rules(_Frozen):
             return min(cap, PARSE_BYTES, admit_bytes(self))
         return cap
 
-    def output_cap(self, own: int | None = None) -> int:
-        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
-        tokens = self.max_output_tokens if own is None else own
+    def output_cap(self, own: int | None = None, purpose: Purpose | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules' (per purpose when ``call_caps`` is set);
+        the wallet cap only lowers it."""
+        rule = self.max_output_tokens
+        if self.call_caps is not None and purpose is not None:
+            rule = getattr(self.call_caps, purpose)
+        tokens = rule if own is None else own
         cap = self.wallet.max_output_tokens
         return tokens if cap is None else min(tokens, cap)
 
@@ -301,6 +317,8 @@ class Rules(_Frozen):
         ledger = data.get("ledger")
         if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
             ledger.pop("heat_token_cap", None)
+        if data.get("call_caps") is None:
+            data.pop("call_caps", None)  # absent unless set, so logs without it stay byte-identical
         return data
 
 

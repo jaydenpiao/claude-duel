@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from claude_duel.app import ladder_config
 from claude_duel.app.backup import backup
 from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
@@ -37,6 +38,7 @@ from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
 from claude_duel.app.ghost_verify import verify_ghosts
+from claude_duel.app.ladder import play_ladder, project, verify_ladder
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -56,6 +58,7 @@ from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
 from claude_duel.presentation.duplicate import duplicate_lines, duplicate_view
+from claude_duel.presentation.ladder import ladder_lines, ladder_view, projection_lines, projection_view
 
 _LOG = logging.getLogger(__name__)
 
@@ -72,6 +75,37 @@ def _driver_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     dup.add_argument("--boards-max", type=int, default=8)
     dup.add_argument("--match-max-usd", type=float, default=2.0, help="no board starts that could pass this")
     dup.add_argument("--format", choices=("text", "json"), default="text")
+
+
+_LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on the command line (flags win)
+    ("--side-a", "sides.a", "models"),
+    ("--side-b", "sides.b", "models"),
+    ("--start-tier-a", "start_tier.a", int),
+    ("--start-tier-b", "start_tier.b", int),
+    ("--boards-min", "match.boards_min", int),
+    ("--boards-max", "match.boards_max", int),
+    ("--match-max-usd", "budget.match_max_usd", float),
+    ("--ladder-max-usd", "budget.ladder_max_usd", float),
+    ("--cap-build", "caps.build", int),
+    ("--cap-allocate", "caps.allocate", int),
+    ("--cap-attack", "caps.attack", int),
+    ("--max-attempts", "caps.max_attempts", int),
+    ("--run-date", "run_date", str),
+)
+
+
+def _models(value: str) -> list[str]:
+    return [m.strip() for m in value.split(",") if m.strip()]
+
+
+def _ladder_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    lad = sub.add_parser("ladder", help="play or resume a no-fluke ladder of duplicate matches (--dry-run: $0 plan)")
+    lad.add_argument("plan", type=Path, help="ladder TOML (examples/ladder-*.toml)")
+    lad.add_argument("--dry-run", action="store_true", help="price the worst-case ladder and exit; no model calls")
+    lad.add_argument("--ladder-id", help="explicit id (re-running an existing id resumes it)")
+    lad.add_argument("--format", choices=("text", "json"), default="text")
+    for flag, key, kind in _LADDER_FLAGS:
+        lad.add_argument(flag, dest=key, type=_models if kind == "models" else kind, help=f"overrides {key}")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -104,6 +138,7 @@ def _parser() -> argparse.ArgumentParser:
     est.add_argument("--mode", help="one preset (default: all)")
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
     _driver_parsers(sub)
+    _ladder_parser(sub)
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
@@ -215,6 +250,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "estimate": lambda: _estimate(settings, args.mode, args.model),
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
         "duplicate": lambda: _duplicate(settings, args),
+        "ladder": lambda: _ladder(settings, args),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
@@ -349,6 +385,26 @@ def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> li
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
+
+
+def _ladder(settings: Settings, args: argparse.Namespace) -> int:
+    overrides = {key: getattr(args, key) for _, key, _ in _LADDER_FLAGS if getattr(args, key) is not None}
+    cfg = ladder_config.load(args.plan, overrides)
+    proj = project(cfg)
+    if args.dry_run or proj.refusals:
+        if args.format == "json":
+            print(json.dumps(projection_view(proj, cfg.budget.ladder_max_usd)))
+        else:
+            print("\n".join(projection_lines(proj, cfg.budget.ladder_max_usd)))
+        return 1 if proj.refusals else 0
+    ladder_id = args.ladder_id or uuid.uuid4().hex[:12]
+    state = play_ladder(settings, ladder_id, cfg, build_metrics(settings, ladder_id, InMemoryMetrics()))
+    report = verify_ladder(settings, ladder_id)
+    if args.format == "json":
+        print(json.dumps(ladder_view(state, report.consistent, report.mismatches)))
+    else:
+        print("\n".join(ladder_lines(state, report.consistent, report.mismatches)))
+    return 0 if report.consistent and state.done() else 1
 
 
 def _duplicate(settings: Settings, args: argparse.Namespace) -> int:

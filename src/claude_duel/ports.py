@@ -9,10 +9,9 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from claude_duel.domain.models import Event, MatchState, SandboxLimits
+from claude_duel.domain.models import Event, MatchState, Purpose, SandboxLimits
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
-Purpose = Literal["build", "attack", "allocate"]
 KilledReason = Literal["wall", "signal", "output"]
 KILL_WALL: KilledReason = "wall"
 KILL_SIGNAL: KilledReason = "signal"

@@ -139,7 +139,7 @@ def _with_preset(rules: dict[str, Any]) -> dict[str, Any]:
     return base.model_dump() | rules
 
 
-def _read_toml(path: Path | None) -> dict[str, Any]:
+def read_toml(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
     try:
@@ -158,7 +158,7 @@ def _refuse_file_keys(data: dict[str, Any]) -> None:
 
 def load_settings(path: Path | None = None, env: dict[str, str] | None = None) -> Settings:
     env = dict(os.environ) if env is None else env
-    data = _read_toml(path)
+    data = read_toml(path)
     _refuse_file_keys(data)
     _overlay(data, _ENV_SCALARS, env)
     for section, mapping in _ENV_SECTIONS.items():

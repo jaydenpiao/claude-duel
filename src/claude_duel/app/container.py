@@ -112,6 +112,11 @@ def build_duplicate_log(settings: Settings) -> FileEventLog:
     return FileEventLog(settings.store_dir, suffix=".duplicate.jsonl")
 
 
+def build_ladder_log(settings: Settings) -> FileEventLog:
+    """No-fluke ladder logs, ``<ladder_id>.ladder.jsonl``, same hash chain."""
+    return FileEventLog(settings.store_dir, suffix=".ladder.jsonl")
+
+
 def build_metrics(settings: Settings, match_id: str, summary: Metrics) -> Metrics:
     """The in-memory summary, plus the JSON-lines sink when ``metrics = "jsonl"`` (#11)."""
     if settings.metrics == "log":

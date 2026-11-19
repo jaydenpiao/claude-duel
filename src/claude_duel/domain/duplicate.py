@@ -23,13 +23,14 @@ from claude_duel.domain.models import TRUNCATED, AgentSpec, Event, MatchState, R
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
+MAX_BOARDS = 16
 Result = Literal["first", "second", "inconclusive", "void"]
 
 
 class DuplicateRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    boards_min: int = Field(default=4, ge=1, le=16)
-    boards_max: int = Field(default=8, ge=1, le=16)
+    boards_min: int = Field(default=4, ge=1, le=MAX_BOARDS)
+    boards_max: int = Field(default=8, ge=1, le=MAX_BOARDS)
     board_cap_mult: int = Field(default=2, ge=1, le=10, description="board clip = mult x max defense award")
     fault_replays: int = Field(default=2, ge=0, le=2)
     void_share_max_pct: int = Field(default=25, ge=0, le=100, description="more void boards => inconclusive")
