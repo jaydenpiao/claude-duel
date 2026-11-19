@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections import Counter
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
+from claude_duel.domain import events as ev
 from claude_duel.domain.ladder import LadderState
+from claude_duel.domain.models import Event
 
 if TYPE_CHECKING:
     from claude_duel.app.ladder import Comparison, Projection
@@ -78,3 +81,44 @@ def comparison_view(cmp: Comparison) -> dict[str, object]:
         "matchups": [{"a": m.a, "b": m.b, "results": list(m.results), "verdict": m.verdict} for m in cmp.matchups],
         "ordering": cmp.ordering,
     }
+
+
+class LadderTicker:
+    """EventObserver for `duel ladder --watch`: one line per half, build, attack and problem, plus a running spend.
+    It prints ids, names, outcomes and dollars only (never payloads, prompts, framing text or flags)."""
+
+    def __init__(self, out: TextIO) -> None:
+        self._out = out
+        self.halves = 0
+        self.usd = 0.0
+        self.counts: Counter[str] = Counter()
+
+    def _say(self, line: str) -> None:
+        self._out.write(line + "\n")
+        self._out.flush()
+
+    def __call__(self, e: Event) -> None:
+        d = cast(dict[str, Any], e.data)
+        if e.type == ev.MATCH_CREATED:
+            self.halves += 1
+            names = " vs ".join(str(a["name"]) for a in d["agents"])
+            self._say(f"half {self.halves}: {names}")
+        elif e.type == ev.CHALLENGE_BUILT:
+            ch = cast(dict[str, Any], d["challenge"])
+            what = "built" if ch.get("spec") else f"forfeit ({ch.get('forfeit_reason')})"
+            self._say(f"  {ch['author']} {what} {ch['id']}")
+        elif e.type == ev.CHALLENGE_ATTACKED:
+            a = cast(dict[str, Any], d["attack"])
+            outcome = "captured" if a["solved"] else "held"
+            self._say(f"  {a['attacker']} vs {a['challenge_id']}: {outcome} in {a['attempts']} tries")
+        elif e.type == ev.CALL_CHARGED:
+            self.usd += float(d["usd"])
+            for flag in ("truncated", "refused"):
+                if d.get(flag):
+                    self.counts[flag] += 1
+                    self._say(f"  {d['agent']} {d['purpose']} reply {flag}")
+        elif e.type in (ev.BUILD_REJECTED, ev.CHALLENGE_TIMEOUT, ev.MATCH_FAILED, ev.MATCH_CAPPED):
+            self.counts[e.type] += 1
+            self._say(f"  {e.type.replace('_', ' ')}")
+        elif e.type == ev.STAGE_CHANGED and d.get("to") == "complete":
+            self._say(f"  half done · ${self.usd:.4f} so far")
