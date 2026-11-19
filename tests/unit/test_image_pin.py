@@ -16,13 +16,21 @@ ROOT = Path(__file__).resolve().parents[2]
 PIN = re.compile(r"python:3\.12-slim@sha256:[0-9a-f]{64}")
 
 
+def _dockerfile_image() -> str:
+    for line in (ROOT / "Dockerfile").read_text().splitlines():
+        if line.startswith("ARG PYTHON_IMAGE="):
+            return line.split("=", 1)[1]
+    raise AssertionError("Dockerfile is missing ARG PYTHON_IMAGE")
+
+
 def test_every_image_reference_is_the_same_digest() -> None:
     assert unpinned(DEFAULT_IMAGE) is None
     assert Settings().docker_image == DEFAULT_IMAGE
-    for name in ("Dockerfile", ".github/workflows/ci.yml"):
-        text = (ROOT / name).read_text()
-        assert DEFAULT_IMAGE in text
-        assert "python:3.12-slim\n" not in text
+    assert _dockerfile_image() == DEFAULT_IMAGE
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "DEFAULT_IMAGE" in ci
+    assert "python:3.12-slim@" not in ci
+    assert "python:3.12-slim\n" not in (ROOT / "Dockerfile").read_text()
 
 
 @pytest.mark.parametrize("image", ["python:3.12-slim", "python@sha256:abc", "x@sha256:" + "G" * 64])
