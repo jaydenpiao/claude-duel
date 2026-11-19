@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.heat_bound import regime
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES
 from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import (
     BANNED_NAMES,
@@ -129,8 +130,8 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "RULES (the arena rejects any challenge that breaks one):",
         "1. FLAG is a global the arena injects before your code runs. Read it, print it. Never assign, define, "
         "hardcode or invent a flag value.",
-        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty input must NOT "
-        "print it.",
+        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty or junk input "
+        "must NOT print it, and every input must be answered in bounded time.",
         f"3. Allowed imports: {', '.join(sorted(PURE_MODULES))}; {restricted}. Nothing else.",
         "4. No name (except a bare _) or attribute may start with _ (so no __name__ / if __name__ == '__main__' "
         "guard, no dunders). "
@@ -168,7 +169,8 @@ def heat_rule(rules: Rules) -> list[str]:
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
         f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
-        "(yours or your opponent's) or to one your model built in its last 3 matches "
+        "(yours or your opponent's) or to one your model built in its last "
+        f"{led.heat_history_matches if led.heat_history_matches is not None else HISTORY_MATCHES} matches "
         f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new.{caps}"
     ]
 
@@ -283,6 +285,15 @@ _HINTS = (
         "trivial: empty input",
         "Empty input must be rejected: start with a length test such as"
         f" if len(s) < {MIN_PAYLOAD_CHARS}: return False. ",
+    ),
+    (
+        "trivial: junk input",
+        "Junk input must be rejected too: compare the whole input to the answer, "
+        "not only its length or whether it is non-empty. ",
+    ),
+    (
+        "too slow",
+        "Every input must be answered in bounded time: do not loop or hang on a wrong or empty input. ",
     ),
     ("reference_payload must be at least", f"Make the accepting input at least {MIN_PAYLOAD_CHARS} characters. "),
     ("__dict__", "FLAG is already a global: never look it up via __dict__, globals() or sys.modules. "),

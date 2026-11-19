@@ -15,6 +15,7 @@ from dataclasses import dataclass
 PARSE_BYTES = 65_536  # heat never parses more; whole-source heat admits no larger source
 TOKEN_CAP = 256  # prefix width ceiling, and the legacy rule's exact-LCS ceiling
 REF_CAP = 48  # references per challenge
+HISTORY_MATCHES = 3  # same provider+model matches frozen into heat_refs
 _SKIP = (ast.expr_context, ast.operator, ast.unaryop, ast.boolop, ast.cmpop)  # ops are emitted by their parent
 
 

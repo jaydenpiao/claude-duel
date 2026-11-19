@@ -77,7 +77,7 @@ def _held(cid: str) -> Attack:
 def _legacy_rules() -> Rules:
     base = preset("ledger")
     led = LedgerRule(keystone=True, terrain="seeded", heat_window=2)
-    return base.model_copy(update={"ledger": led})
+    return base.model_copy(update={"rules_version": 1, "ledger": led})
 
 
 def _replay(
@@ -89,7 +89,7 @@ def _replay(
     *,
     drop_caps: bool,
 ) -> tuple[MatchState, list[Event]]:
-    dumped = rules.model_dump(mode="json")
+    dumped = rules.dump()
     if drop_caps:
         dumped["ledger"].pop("heat_token_cap", None)
         dumped["ledger"].pop("heat_ref_cap", None)
@@ -218,21 +218,28 @@ def test_too_many_challenges_or_legacy_refs_raise_before_lcs() -> None:
     assert sc.work == 0
 
 
-def test_pin_fills_both_caps_and_full_only_when_heat_is_on() -> None:
+def test_pin_fills_full_pins_and_drops_the_token_cap() -> None:
     assert pin_heat_bound(preset("classic")) is preset("classic")
     assert pin_heat_bound(preset("ledger")) is preset("ledger")
-    bare = preset("ledger").model_copy(update={"ledger": LedgerRule(heat_window=2)})
+    bare = preset("ledger").model_copy(update={"rules_version": 1, "ledger": LedgerRule(heat_window=2)})
     pinned = pin_heat_bound(bare)
     assert pinned.ledger is not None
-    assert (pinned.ledger.heat_token_cap, pinned.ledger.heat_ref_cap, pinned.ledger.heat_compare) == (
-        TOKEN_CAP,
-        REF_CAP,
-        "full",
-    )
+    assert (
+        pinned.ledger.heat_token_cap,
+        pinned.ledger.heat_ref_cap,
+        pinned.ledger.heat_compare,
+        pinned.ledger.heat_metric,
+        pinned.ledger.heat_history_matches,
+    ) == (None, REF_CAP, "full", "lcs-v1", 3)
     prefix = LedgerRule(heat_window=2, heat_token_cap=32, heat_ref_cap=3)
     written = pin_heat_bound(bare.model_copy(update={"ledger": prefix})).ledger
     assert written is not None
-    assert (written.heat_token_cap, written.heat_ref_cap, written.heat_compare) == (32, 3, "full")
+    assert (written.heat_token_cap, written.heat_ref_cap, written.heat_compare, written.heat_metric) == (
+        None,
+        3,
+        "full",
+        "lcs-v1",
+    )
 
 
 @pytest.mark.parametrize(
@@ -296,7 +303,17 @@ def test_open_match_pins_caps_and_resume_keeps_a_legacy_rule(tmp_path) -> None: 
     store = build_store(settings)
     created = open_match(store, settings, "new")
     assert created.rules.ledger is not None
-    assert (created.rules.ledger.heat_token_cap, created.rules.ledger.heat_ref_cap) == (TOKEN_CAP, REF_CAP)
+    assert created.rules.rules_version == 2
+    assert (
+        created.rules.ledger.heat_token_cap,
+        created.rules.ledger.heat_ref_cap,
+        created.rules.ledger.heat_compare,
+    ) == (
+        None,
+        REF_CAP,
+        "full",
+    )
+    assert (created.rules.ledger.heat_metric, created.rules.ledger.heat_history_matches) == ("lcs-v1", 3)
     assert open_match(store, settings, "new").rules == created.rules
     old = MatchState(
         match_id="old",
@@ -551,7 +568,13 @@ def test_config_pins_opponent_heat_and_the_caps_together() -> None:
 
     on, off = pinned("ledger", heat_window=2), pinned("custom", heat_window=2)
     assert (on.heat_vs_opponent, off.heat_vs_opponent) == (True, False)
-    assert (on.heat_token_cap, on.heat_ref_cap, on.heat_compare) == (TOKEN_CAP, REF_CAP, "full")
+    assert (on.heat_token_cap, on.heat_ref_cap, on.heat_compare, on.heat_metric, on.heat_history_matches) == (
+        None,
+        REF_CAP,
+        "full",
+        "lcs-v1",
+        3,
+    )
 
 
 def test_large_unrelated_programs_are_compared_exactly_and_not_heated() -> None:

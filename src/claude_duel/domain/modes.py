@@ -1,6 +1,6 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
-from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES, REF_CAP
 from claude_duel.domain.models import (
     ClockRule,
     DeepRule,
@@ -49,9 +49,10 @@ MODES: dict[str, Rules] = {
             terrain="seeded",
             heat_window=2,
             heat_vs_opponent=True,
-            heat_token_cap=TOKEN_CAP,
             heat_ref_cap=REF_CAP,
             heat_compare="full",
+            heat_metric="lcs-v1",
+            heat_history_matches=HISTORY_MATCHES,
         ),
         clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
