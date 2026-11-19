@@ -55,3 +55,28 @@ def test_timeout_past_the_probed_length_is_spent_not_refunded(make_engine, new_s
     attack = state.attacks[f"{ch.id}:alice"]
     assert attack.attempts == state.max_attempts("alice")  # every try spent
     assert all(a.output == LONG_TIMEOUT and not a.timeout for a in state.attempts[f"{ch.id}:alice"])
+
+
+SHAPE = (  # linear on digits (the long probe), quadratic on anything else
+    "import sys\n"
+    "s = sys.stdin.read().strip()\n"
+    "acc = 0\n"
+    "if not s.isdigit():\n"
+    "    for i in range(len(s)):\n"
+    "        for j in range(len(s)):\n"
+    "            acc = (acc * 31 + (ord(s[i]) ^ ord(s[j]))) % 1000003\n"
+    "if s.isdigit() and int(s) * 7 == 21 and len(s) == 7:\n    print(FLAG)\n"
+    "else:\n    print('no')\n"
+)
+
+
+def test_shape_grief_void_is_neutral(make_engine, new_state, store) -> None:  # type: ignore[no-untyped-def]
+    attacker = AttackPayload("z" * MAX_PAYLOAD_CHARS)
+    engine = make_engine({"alice": attacker, "bob": Builds(source=SHAPE, reference_payload="0000003")})
+    state = engine.run(new_state(**ONE))
+    ch = next(c for c in state.challenges.values() if c.author == "bob")
+    assert state.validations[ch.id].reason == ATTACK_TIMEOUT  # passed validation, voided at attack time
+    assert state.scores["bob"] == 0  # no invalid_penalty: the attacker gains nothing by griefing
+    assert state.scores["alice"] <= 0  # and no capture
+    again = engine.run(store.load(state.match_id))
+    assert again.scores == state.scores

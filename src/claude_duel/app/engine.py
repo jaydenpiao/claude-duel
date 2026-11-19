@@ -22,6 +22,7 @@ from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
     LONG_TIMEOUT,
+    TIMEOUTS_TO_VOID,
     Attack,
     AttackAttempt,
     CapHit,
@@ -68,7 +69,6 @@ TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 REFUSED = "refused: the model declined to answer"  # engine-authored display / build forfeit reason (ADR 0016)
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 VALIDATION_TIME_FACTOR = 6  # empty and junk probes share this many wall_seconds
-TIMEOUTS_TO_VOID = 2  # attack sandbox wall/signal kills before the challenge is voided as too slow
 # Sandbox stdout is rewritten if it would equal one of these, so control flow never keys off run output.
 _ENGINE_SENTINELS = frozenset({CAPTURED, MALFORMED, TRUNCATED, REFUSED})
 

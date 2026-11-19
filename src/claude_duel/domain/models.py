@@ -355,6 +355,7 @@ class Validation(_Frozen):
 
 CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)
 ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
+TIMEOUTS_TO_VOID = 2  # refunded attack wall/signal kills before the challenge is voided (scores 0 both sides)
 LONG_TIMEOUT = "timed out: input longer than validation probed; the try is spent"
 
 

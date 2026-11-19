@@ -81,7 +81,7 @@ def test_attack_timeouts_are_refunded_void_the_challenge_and_replay(make_engine,
     assert timeouts[0].data["voided"] is False
     assert timeouts[-1].data["voided"] is True
     assert attacker.attacks == TIMEOUTS_TO_VOID  # stopped after the void
-    assert state.scores["bob"] == -state.rules.scoring.invalid_penalty * ch.round
+    assert state.scores["bob"] == 0  # an attack-time void is neutral for the author: no penalty
     report = replay(state, event_log.read(state.match_id))
     assert report.consistent
     again = engine.run(store.load(state.match_id))
