@@ -29,6 +29,7 @@ class HarnessResult:
     second: int
     undecided: int  # inconclusive or void
     first_seat_share: float  # decided boards won by whoever sat first in the half pair (side bias)
+    margin_first: int = 0  # matches where the first bot's summed board margin was positive (not a decision rule)
 
     def first_rate(self) -> float:
         return self.first / max(1, self.matches)
@@ -62,6 +63,7 @@ def measure(
     settings = Settings(store_dir=root, sandbox="subprocess", rules=rules, seed=seed)
     pcts = {SIDES[0].name: pct_a, SIDES[1].name: pct_b}
     tally = {"first": 0, "second": 0}
+    ahead = 0
     seat_wins = decided = 0
     for m in range(matches):
         state = dp.DuplicateState(
@@ -91,8 +93,9 @@ def measure(
                 net = dp.net(h, lead) - dp.net(h, other)
                 decided += net != 0
                 seat_wins += net > 0
+        ahead += sum(state.diffs()) > 0
         res = state.result()
         if res in tally:
             tally[res] += 1
     undecided = matches - tally["first"] - tally["second"]
-    return HarnessResult(matches, tally["first"], tally["second"], undecided, seat_wins / max(1, decided))
+    return HarnessResult(matches, tally["first"], tally["second"], undecided, seat_wins / max(1, decided), ahead)

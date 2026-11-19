@@ -433,7 +433,7 @@ def _harness(settings: Settings, args: argparse.Namespace) -> int:
     print(
         f"{args.pct_a}% vs {args.pct_b}% over {res.matches} matches: first {res.first} · second {res.second}"
         f" · undecided {res.undecided} · first wins {res.first_rate():.1%}"
-        f" · first-seat share {res.first_seat_share:.1%}"
+        f" · first-seat share {res.first_seat_share:.1%} · first ahead on margin {res.margin_first}"
     )
     return 0
 
