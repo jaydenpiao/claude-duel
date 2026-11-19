@@ -22,13 +22,15 @@ def _attack(prompt: str) -> CompletionRequest:
 
 def test_scripted_bot_hits_at_its_rate_and_repeats() -> None:
     prompt = f"source:\n{TEMPLATES[2].source}"
-    first = ScriptedProvider(30, "x").complete(_attack(prompt)).text
-    bot = ScriptedProvider(30, "x")
+    first = ScriptedProvider(30, "x", "b").complete(_attack(prompt)).text
+    bot = ScriptedProvider(30, "x", "b")
     texts = [bot.complete(_attack(prompt)).text for _ in range(400)]
     hits = sum(TEMPLATES[2].payload in t for t in texts)
     assert 90 <= hits <= 150
     assert texts[0] == first  # same seed, same draws
-    assert all(TEMPLATES[2].payload not in ScriptedProvider(0, "y").complete(_attack(prompt)).text for _ in range(20))
+    assert all(
+        TEMPLATES[2].payload not in ScriptedProvider(0, "y", "b").complete(_attack(prompt)).text for _ in range(20)
+    )
 
 
 def test_strong_bot_wins_and_equal_bots_split_seats(tmp_path: Path) -> None:
@@ -46,3 +48,12 @@ def test_cli_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: py
     )
     assert "90% vs 10% over 1 matches" in capsys.readouterr().out
     assert main(["harness", "--boards-min", "5", "--boards-max", "2"]) == 2
+
+
+def test_both_bots_build_the_board_template() -> None:
+    def build(name: str) -> str:
+        prompt = f"TASK: BUILD\nAGENT: {name}\nROUND: 1\nINDEX: 0\n"
+        req = CompletionRequest(system="s", prompt=prompt, purpose="build", max_tokens=100)
+        return ScriptedProvider(50, name, "board-7").complete(req).text
+
+    assert build("strong") == build("weak")

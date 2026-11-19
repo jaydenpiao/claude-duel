@@ -1,13 +1,15 @@
-"""Scripted bot for the $0 no-fluke harness: builds like the fake provider, captures with a fixed chance per try.
+"""Scripted bot for the $0 no-fluke harness: captures with a fixed chance per try.
 
-Each attack try draws once from its own seeded ``random.Random``, so a run is reproducible: the engine's call
-order is deterministic. Never used for a scored match; only ``app/harness.py`` wires it.
+Both bots on a board build the same fake template (chosen by the board's ``build_seed``, never the agent name), so
+the only skill gap is the capture chance. Each attack try draws once from the bot's own seeded ``random.Random``;
+a run is reproducible because the engine's call order is deterministic. Only ``app/harness.py`` wires it.
 """
 
 from __future__ import annotations
 
 import json
 import random
+import re
 
 from claude_duel.adapters.providers.fake import TEMPLATES, FakeProvider
 from claude_duel.ports import Completion, CompletionRequest
@@ -16,12 +18,16 @@ from claude_duel.ports import Completion, CompletionRequest
 class ScriptedProvider(FakeProvider):
     name = "scripted"
 
-    def __init__(self, capture_pct: int, seed: str) -> None:
+    def __init__(self, capture_pct: int, seed: str, build_seed: str) -> None:
         super().__init__()
         self._pct = capture_pct
         self._rng = random.Random(seed)  # noqa: S311 - a reproducible simulation draw, not a secret
+        self._build_seed = build_seed
 
     def complete(self, request: CompletionRequest) -> Completion:
+        if request.purpose == "build":
+            prompt = re.sub(r"^AGENT: \S+$", f"AGENT: {self._build_seed}", request.prompt, flags=re.M)
+            return super().complete(request.model_copy(update={"prompt": prompt}))
         if request.purpose != "attack":
             return super().complete(request)
         hit = self._rng.random() * 100 < self._pct

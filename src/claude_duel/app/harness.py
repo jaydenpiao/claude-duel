@@ -38,7 +38,7 @@ def _half(settings: Settings, match_id: str, agents: tuple[AgentSpec, AgentSpec]
     s = settings.model_copy(update={"agents": agents})
     store = build_store(s)
     state = open_match(store, s, match_id)
-    providers = {a.name: ScriptedProvider(pcts[a.name], f"{s.seed}:{match_id}:{a.name}") for a in agents}
+    providers = {a.name: ScriptedProvider(pcts[a.name], f"{s.seed}:{match_id}:{a.name}", str(s.seed)) for a in agents}
     engine = MatchEngine(
         dict(providers),
         make_sandbox(s, agents),
