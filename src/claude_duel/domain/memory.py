@@ -12,6 +12,7 @@ from claude_duel.domain.flags import redact
 from claude_duel.domain.heat import HeatScorer, heat_label
 from claude_duel.domain.models import Attack, Challenge, MatchState, MemoryRule
 from claude_duel.domain.scoring import heat_of_state
+from claude_duel.domain.signature import fingerprint, signatures
 from claude_duel.domain.stakes import keystone_targets
 
 OMITTED = "[older rounds omitted]"
@@ -28,13 +29,19 @@ TECHNIQUES = tuple(tag for tag, _ in _TAGS)  # every technique tag memory can em
 
 
 def technique(source: str) -> str:
-    """Static, deterministic tag of a challenge's technique."""
+    """Static, deterministic structural tag (R5): the lock-family signature(s) if any, else the old name tag,
+    plus ``#`` and the AST fingerprint, so a renamed copy shows the same tag."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return "other"
-    names = {_name(n) for n in ast.walk(tree)}
-    return next((tag for tag, keys in _TAGS if names & keys), "other")
+    sigs = signatures(source)
+    if sigs:
+        tag = "+".join(sigs)
+    else:
+        names = {_name(n) for n in ast.walk(tree)}
+        tag = next((t for t, keys in _TAGS if names & keys), "other")
+    return f"{tag}#{fingerprint(source)}"
 
 
 def _name(node: ast.AST) -> str:

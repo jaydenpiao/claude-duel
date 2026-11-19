@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from claude_duel.domain.contract import definitions
 from claude_duel.domain.memory import technique
 from claude_duel.domain.models import AgentSpec, ChallengeSpec, MatchState
+from claude_duel.domain.signature import SIGNATURES, signatures, tokens
 
 LOCK_AXIS = "lock puzzle"
 # Design rec R2: families differ in what the answer *is*, not just in the checker. The old 8 themes are one axis.
@@ -165,9 +166,16 @@ def history_bans(past: Iterable[MatchState], agents: Iterable[AgentSpec], k: int
 
 def family_reason(state: MatchState, agent: str, index: int, spec: ChallengeSpec) -> str | None:
     """R2 binding: a declared family must be the assigned one ("" is tolerated for old replies)."""
+    axis, fam = state_family(state, agent, index)
+    sigs = signatures(spec.source) if axis != LOCK_AXIS else []
+    if sigs:
+        shapes = ", ".join(f"{s} ({SIGNATURES[s]})" for s in sigs)
+        return (
+            f"wrong family: this check has a lock-puzzle structure [{shapes}] but the assigned family is "
+            f"{family_id(fam)!r} ({fam}); build that family, not a lock"
+        )
     if not spec.family.strip():
         return None
-    _, fam = state_family(state, agent, index)
     want = family_id(fam)
     if spec.family.strip().casefold() != want:
         return f"wrong family: you declared {spec.family.strip()!r}; build the assigned family {want!r} ({fam})"
@@ -208,11 +216,11 @@ def prompt_lines(state: MatchState, agent: str, index: int) -> list[str]:
 
 def repeat_reason(state: MatchState, agent: str, spec: ChallengeSpec) -> str | None:
     """Why ``spec`` repeats one of the agent's earlier designs, or None."""
-    own = _normal(spec.source)
+    own, shape = _normal(spec.source), tokens(spec.source)
     for old in past_designs(state, agent):
         if old.title.strip().casefold() == spec.title.strip().casefold():
             return f"repeat design: you already used the title {old.title!r}; build a new puzzle in the assigned family"
-        if _normal(old.source) == own:
+        if _normal(old.source) == own or (shape and tokens(old.source) == shape):
             return "repeat design: this check is the same as an earlier one; build a new puzzle in the assigned family"
     return None
 
