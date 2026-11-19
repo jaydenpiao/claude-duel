@@ -21,6 +21,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Security (SV-5): with `attacker_solver` off, a reference solver that needs more than the 1x wall time (plus 1s for sandbox start) is rejected as "solver too slow"; solver time is recorded as `solver.seconds`.
 - Security (SV-4): `hash()` is banned, the sandbox fixes str hashing (PYTHONHASHSEED=0; `-s -P -S` instead of `-I` so the fixed env is honoured), and the reference must print the same output on 3 runs.
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
 - Combined `RULES_VERSION` 1→2 and `SCHEMA_VERSION` 2→3 (#258). New heat-on logs require `heat_compare=full`, an explicit `heat_vs_opponent`, `heat_ref_cap`, `heat_metric=lcs-v1` and `heat_history_matches`, and omit `heat_token_cap` (prefix-only; v1 logs that carry it still replay). This also records earlier rule-meaning changes that stayed on version 1: the ledger preset, SV-1, H6 ledger defaults (keystone/terrain/heat off unless the preset), the #247 system prompt, the #267 program-form prompt, and the #266 per-agent output cap. Logs written between #238 and #279 may omit `heat_vs_opponent` (I15-1 found likely zero of those); replay of such a log is a reported heat mismatch, not a silent rescoring. Refusal (ADR 0016) needed no bump.
