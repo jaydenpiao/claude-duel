@@ -4,6 +4,8 @@ Models in ``RESPONSES_MODELS`` (the gpt-6 and gpt-5 reasoning families) go throu
 temperature (reasoning models reject it), ``max_output_tokens`` (reasoning included) and the request's strict
 ``json_schema`` as structured output. Older models keep Chat Completions with JSON mode at temperature 0.
 Either way a reply stopped by the token cap is marked ``truncated``.
+A content-filter finish, ``message.refusal``, a refusal part, or a Responses
+content-filter reason is marked ``refused``.
 """
 
 from __future__ import annotations
@@ -19,15 +21,20 @@ from claude_duel.ports import Completion, CompletionRequest
 
 HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
-# Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
+# nano/mini still accept "minimal". gpt-6-luna does not; the documented migration from minimal is "low".
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
+LOW_EFFORT_MODELS = ("gpt-6-luna",)
 
 
 def default_effort(model: str, effort: str | None) -> str | None:
-    """The effort sent: the request's own, else ``minimal`` for the small gpt-5 models, else vendor default."""
+    """The effort sent: the request's own, else the small-model default, else the vendor default."""
     if effort is not None:
         return effort
-    return "minimal" if model.startswith(MINIMAL_EFFORT_MODELS) else None
+    if model.startswith(MINIMAL_EFFORT_MODELS):
+        return "minimal"
+    if model.startswith(LOW_EFFORT_MODELS):
+        return "low"
+    return None
 
 
 class OpenAIProvider:
@@ -120,15 +127,62 @@ def _summary_refused(resp: httpx.Response, body: dict[str, object]) -> bool:
     return "summary" in text or "verif" in text
 
 
+def _chat_text(message: object) -> str:
+    """Plain text of a chat message; list content keeps only ``text`` parts (refusals are the flag, not the answer)."""
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def _has_refusal_part(content: object) -> bool:
+    """True when ``content`` is a list that includes a ``refusal`` part."""
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "refusal" for part in content
+    )
+
+
+def _chat_refused(message: object, finish_reason: object) -> bool:
+    """True on a content-filter stop, a non-empty ``refusal`` field, or a refusal content part."""
+    if finish_reason == "content_filter":
+        return True
+    if not isinstance(message, dict):
+        return False
+    if message.get("refusal"):
+        return True
+    return _has_refusal_part(message.get("content"))
+
+
+def _responses_refused(items: object, reason: object) -> bool:
+    """True on a content-filter incomplete reason or a refusal output part."""
+    if reason == "content_filter":
+        return True
+    if not isinstance(items, list):
+        return False
+    return any(
+        _has_refusal_part(item.get("content"))
+        for item in items
+        if isinstance(item, dict) and item.get("type") == "message"
+    )
+
+
 def _parse_chat(data: Any) -> Completion:
     choice = data["choices"][0]
+    message = choice.get("message") or {}
     usage = data.get("usage") or {}
     return Completion(
-        text=choice["message"]["content"] or "",
+        text=_chat_text(message),
         input_tokens=int(usage.get("prompt_tokens", 0)),
         output_tokens=int(usage.get("completion_tokens", 0)),
         reasoning_tokens=int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)),
         truncated=choice.get("finish_reason") == "length",
+        refused=_chat_refused(message, choice.get("finish_reason")),
     )
 
 
@@ -149,6 +203,7 @@ def _parse_responses(data: Any) -> Completion:
         output_tokens=int(usage.get("output_tokens", 0)),
         reasoning_tokens=int((usage.get("output_tokens_details") or {}).get("reasoning_tokens", 0)),
         truncated=data.get("status") == "incomplete" and reason == "max_output_tokens",
+        refused=_responses_refused(items, reason),
         reasoning_summary=" ".join(
             part.get("text", "")
             for item in items

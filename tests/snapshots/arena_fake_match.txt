@@ -5,18 +5,18 @@ alice ████████████████████████�
 bob   ████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░    58 ▁█
 alice ━━━━━━━━━━━━━━━━━━━━━━◆━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ bob
 
-alice · done · in 5,300 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.00…
+alice · done · in 5,356 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.00…
   ▣ Knock: Find the input that reveals the flag (b64).
   ▸ try 3 on 'Maze' → missed
   ▸ attack: 247 in / 8 out · $0.0000 · 0.0s
   ▸ try 4 on 'Maze' → missed
-bob · done · in 5,604 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000…
+bob · done · in 5,664 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000…
   ▣ Maze: Find the input that reveals the flag (password).
   ▸ try 3 on 'Knock' → missed
   ▸ attack: 237 in / 8 out · $0.0000 · 0.0s
   ▸ try 4 on 'Knock' → missed
-alice: in 5,300 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
-bob: in 5,604 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
+alice: in 5,356 · out 510 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defen…
+bob: in 5,664 · out 536 (think 0) · $0.0000 · $0.0000/capture · $0.0000/defense
 now: match over
 🛡 bob defended 'Maze' +20
 · ⚔ bob captured alice's flag ✓ +19
