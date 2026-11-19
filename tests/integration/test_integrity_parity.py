@@ -6,10 +6,12 @@ import json
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import agents
-from claude_duel.app.engine import CONTROL_SOURCE, MALFORMED
-from claude_duel.domain.models import SandboxLimits
+from claude_duel.app.engine import CONTROL_SOURCE, MALFORMED, MatchEngine
+from claude_duel.domain.models import SandboxLimits, SolvabilityRule
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest, RunResult, Sandbox
+from tests.helpers import Builds
+from tests.unit.test_solvability import SPARSE
 
 MARK = "# attacker-solver"
 
@@ -120,3 +122,18 @@ def test_control_is_off_by_default(make_engine, new_state) -> None:  # type: ign
     spy = _spy(engine)
     engine.run(new_state(rounds=1, challenges_per_round=1))
     assert all(s != CONTROL_SOURCE for s, _ in spy.runs)
+
+
+def test_checked_attack_solver_never_gets_the_real_flag(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    alice = ViaSolver(f"{MARK}\nprint('28783')")
+    engine = make_engine({"alice": alice, "bob": Builds(source=SPARSE, reference_payload="", solver="print('28783')")})
+    spy = _spy(engine)
+    rules = {"rounds": 1, "challenges_per_round": 1, "challenge_form": "check", "attacker_solver": True}
+    state = engine.run(new_state(**rules, solvability=SolvabilityRule(enabled=True)))
+    ch = next(c for c in state.challenges.values() if c.author == "bob")
+    real = MatchEngine._flag_for(state, ch.id)
+    solver_flags = {f for s, f in spy.runs if MARK in s}
+    assert solver_flags
+    assert real not in solver_flags
+    assert any(real == f for s, f in spy.runs if MARK not in s)  # the real flag is used, just never for the solver
+    assert any(a.solved for a in state.attacks.values() if a.attacker == "alice")
