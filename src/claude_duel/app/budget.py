@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -125,6 +126,15 @@ def make_override(limits: BudgetLimits, field: str, value: float, reason: str, s
     return RunOverride(field=field, default=limits.run_max_usd, value=value, reason=reason.strip())
 
 
+@dataclass(frozen=True)
+class SpendCap:
+    """A spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
+
+    label: str
+    prefix: str
+    max_usd: float
+
+
 class CostBudget:
     def __init__(
         self,
@@ -139,6 +149,9 @@ class CostBudget:
         self._prices = prices
         self.run_calls = 0
         self.run_usd = 0.0
+        # Hard stops: a call whose worst case (its reservation) could take a prefix's spend past its cap is never
+        # made. The caller sets these per ladder step; empty means none.
+        self.hard_caps: tuple[SpendCap, ...] = ()
 
     def cost(self, model: str, completion: Completion) -> float:
         pin, pout = self._prices[model]
@@ -174,6 +187,13 @@ class CostBudget:
         """ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
         pin, pout = self._prices[model]
         usd = (len(request.system) + len(request.prompt)) * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
+        for cap in self.hard_caps:
+            spent = self._ledger.spent_usd(cap.prefix)
+            if spent + usd > cap.max_usd:
+                raise BudgetExceededError(
+                    f"hard stop: {cap.label} spent ${spent:.4f} + this call's worst case ${usd:.4f}"
+                    f" > ${cap.max_usd:.2f}; nothing was called, resume after raising the cap"
+                )
         return self._ledger.reserve(match_id, model, usd)
 
     def release(self, match_id: str, model: str, reservation: str) -> None:

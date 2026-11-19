@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from claude_duel.domain.ladder import LadderState
 
 if TYPE_CHECKING:
-    from claude_duel.app.ladder import Projection
+    from claude_duel.app.ladder import Comparison, Projection
 
 _WINNER = {"first": "a", "second": "b"}
 
@@ -19,8 +19,10 @@ def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
     dearest = max((r.typical_usd for r in proj.rows), default=0.0)
     lines.append(
         f"typical ladder ${proj.typical_usd():.2f} (dearest match ${dearest:.2f}): expected, no retries or replays,"
-        " assumed reply sizes; caps are checked against the worst case"
+        f" assumed reply sizes; caps are checked against the {proj.basis} case"
     )
+    if proj.basis == "typical":
+        lines.append("hard stop: no call is made whose worst case could pass match_max_usd or ladder_max_usd")
     lines += [f"refused: {r}" for r in proj.refusals] or ["dry run ok: within every cap"]
     return lines
 
@@ -34,6 +36,7 @@ def projection_view(proj: Projection, ladder_max_usd: float) -> dict[str, object
         "total_usd": round(proj.total_usd, 4),
         "typical_usd": round(proj.typical_usd(), 4),
         "ladder_max_usd": ladder_max_usd,
+        "basis": proj.basis,
         "refusals": proj.refusals,
     }
 
@@ -61,3 +64,17 @@ def ladder_lines(state: LadderState, verified: bool, mismatches: list[str]) -> l
     lines.append(f"{status} · ${state.spent_usd():.4f}")
     lines.append("verified ✓" if verified else "verified ✗ " + ", ".join(mismatches))
     return lines
+
+
+def comparison_lines(cmp: Comparison) -> list[str]:
+    lines = [f"{'side a':<20}{'side b':<20}{'run 1':<8}{'run 2':<8}verdict"]
+    lines += [f"{m.a:<20}{m.b:<20}{m.results[0]:<8}{m.results[1]:<8}{m.verdict}" for m in cmp.matchups]
+    lines.append(f"final ordering: {cmp.ordering}")
+    return lines
+
+
+def comparison_view(cmp: Comparison) -> dict[str, object]:
+    return {
+        "matchups": [{"a": m.a, "b": m.b, "results": list(m.results), "verdict": m.verdict} for m in cmp.matchups],
+        "ordering": cmp.ordering,
+    }

@@ -24,7 +24,8 @@ duel replay demo --view arena       # re-watch a finished match in the arena vie
 duel replay demo --verify           # also re-run logged ghost runs in the sandbox ($0 API)
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
 duel duplicate --boards-max 8         # no-fluke: mirrored boards (seats swap), clipped, sign test/SPRT, verified
-duel ladder examples/ladder-fake.toml --dry-run  # no-fluke ladder plan: worst-case $ per step; refuses over cap
+duel ladder examples/ladder-fake.toml --dry-run  # no-fluke ladder plan: worst and typical $ per step; refuses over cap
+duel ladder-compare RUN1 RUN2        # two runs of one plan: each matchup and the ordering agree or too close to call
 duel tournament                     # round robin (<= 6) or Swiss over the config's [[tournament.entrants]];
                                     # [tournament] pool = true adds a shared, CTFd-decayed challenge pool
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match

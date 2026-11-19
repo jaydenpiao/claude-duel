@@ -39,7 +39,7 @@ from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
 from claude_duel.app.ghost_verify import verify_ghosts
 from claude_duel.app.harness import measure
-from claude_duel.app.ladder import play_ladder, project, verify_ladder
+from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
@@ -59,7 +59,14 @@ from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
 from claude_duel.presentation.duplicate import duplicate_lines, duplicate_view
-from claude_duel.presentation.ladder import ladder_lines, ladder_view, projection_lines, projection_view
+from claude_duel.presentation.ladder import (
+    comparison_lines,
+    comparison_view,
+    ladder_lines,
+    ladder_view,
+    projection_lines,
+    projection_view,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -87,6 +94,7 @@ _LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on t
     ("--boards-max", "match.boards_max", int),
     ("--match-max-usd", "budget.match_max_usd", float),
     ("--ladder-max-usd", "budget.ladder_max_usd", float),
+    ("--basis", "budget.basis", str),
     ("--cap-build", "caps.build", int),
     ("--cap-allocate", "caps.allocate", int),
     ("--cap-attack", "caps.attack", int),
@@ -102,11 +110,16 @@ def _models(value: str) -> list[str]:
 def _ladder_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     lad = sub.add_parser("ladder", help="play or resume a no-fluke ladder of duplicate matches (--dry-run: $0 plan)")
     lad.add_argument("plan", type=Path, help="ladder TOML (examples/ladder-*.toml)")
-    lad.add_argument("--dry-run", action="store_true", help="price the worst-case ladder and exit; no model calls")
+    lad.add_argument("--dry-run", action="store_true", help="price the ladder (worst and typical) and exit; no calls")
     lad.add_argument("--ladder-id", help="explicit id (re-running an existing id resumes it)")
     lad.add_argument("--format", choices=("text", "json"), default="text")
     for flag, key, kind in _LADDER_FLAGS:
         lad.add_argument(flag, dest=key, type=_models if kind == "models" else kind, help=f"overrides {key}")
+
+    cmp = sub.add_parser("ladder-compare", help="two runs of one ladder plan: each matchup agrees or is too close")
+    cmp.add_argument("first", help="ladder id of run 1")
+    cmp.add_argument("second", help="ladder id of run 2 (same plan; every run gets fresh seeds from its id)")
+    cmp.add_argument("--format", choices=("text", "json"), default="text")
 
 
 def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -263,6 +276,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
         "duplicate": lambda: _duplicate(settings, args),
         "ladder": lambda: _ladder(settings, args),
+        "ladder-compare": lambda: _ladder_compare(settings, args),
         "harness": lambda: _harness(settings, args),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
@@ -425,6 +439,12 @@ def _harness(settings: Settings, args: argparse.Namespace) -> int:
         f" · undecided {res.undecided} · first wins {res.first_rate():.1%}"
         f" · first-seat share {res.first_seat_share:.1%} · first ahead on margin {res.margin_first}"
     )
+    return 0
+
+
+def _ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
+    cmp = compare_ladders(read_ladder(settings, args.first), read_ladder(settings, args.second))
+    print(json.dumps(comparison_view(cmp)) if args.format == "json" else "\n".join(comparison_lines(cmp)))
     return 0
 
 
