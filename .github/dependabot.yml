@@ -12,9 +12,15 @@ updates:
       interval: weekly
     commit-message:
       prefix: bump
+    groups:
+      codeql:
+        patterns:
+          - "github/codeql-action/*"
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
     commit-message:
       prefix: bump
+    ignore:
+      - dependency-name: python  # pin is DEFAULT_IMAGE + Dockerfile ARG; bump both by hand

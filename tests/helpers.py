@@ -4,7 +4,9 @@ import json
 
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.heat import HeatScorer
+from claude_duel.domain.heat_tokens import REF_CAP
+from claude_duel.domain.models import AgentSpec, Event, LedgerRule, MatchState, Rules, SandboxLimits
 from claude_duel.ports import Completion, CompletionRequest
 
 
@@ -65,3 +67,22 @@ def run_bob(make_engine, new_state, metrics=None, **spec):  # type: ignore[no-un
     engine = make_engine({"alice": FakeProvider(), "bob": Builds(**spec)}, metrics=metrics)
     state = engine.run(new_state(**ONE))
     return state, next(c for c in state.challenges.values() if c.author == "bob")
+
+
+def similarity(a: str, b: str, *, token_cap: int | None = None, scorer: HeatScorer | None = None) -> int:
+    """One heat pair: legacy (exact while both walks fit, else ``HeatBoundError``) or the prefix of ``token_cap``."""
+    caps = {} if token_cap is None else {"heat_token_cap": token_cap, "heat_ref_cap": REF_CAP}
+    return (scorer or HeatScorer()).similarity(a, b, LedgerRule(heat_window=1, **caps)).pct
+
+
+def hanging_source(*, same_shape_only: bool = False) -> str:
+    """A check that accepts 0000003 and hangs on any wrong input, or only on a same-shape 7-digit input."""
+    accept = (
+        "import sys\n"
+        "s = sys.stdin.read().strip()\n"
+        "if s.isdigit() and int(s) * 7 == 21 and len(s) == 7:\n    print(FLAG)\n"
+    )
+    hang = "    n = 0\n    for i in range(10**10):\n        n += i\n"
+    if same_shape_only:
+        return accept + "elif s.isdigit() and len(s) == 7:\n" + hang + "else:\n    print('no')\n"
+    return accept + "else:\n" + hang
