@@ -8,7 +8,7 @@ Two AI agents duel in stages. Each one builds CTF challenges for the other, the 
 
 ## How a round works
 1. **Build**: each agent writes `challenges_per_round` Python programs that print the global `FLAG` only for the right stdin, along with a reference payload.
-2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag; empty and junk input must not, and every input must finish in bounded time. An attack that times out or is killed refunds the try; two timeouts void the challenge as too slow. Invalid challenges cost points.
+2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag; empty and junk input must not, and every input must finish in bounded time. Validation also tries one max-length (4096-char) junk input. An attack that times out or is killed on input no longer than that refunds the try; two timeouts void the challenge as too slow. Invalid challenges cost points.
 3. **Attack**: the opponent sees the source and description and gets `max_attempts` tries within a token budget, with feedback after each try.
 4. **Score**: a pure function. Points scale with difficulty × round, so stakes rise each round.
 

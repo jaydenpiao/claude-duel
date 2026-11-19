@@ -21,6 +21,7 @@ from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
+    LONG_TIMEOUT,
     Attack,
     AttackAttempt,
     CapHit,
@@ -36,7 +37,7 @@ from claude_duel.domain.models import (
     spent,
     timeouts,
 )
-from claude_duel.domain.probes import junk_inputs
+from claude_duel.domain.probes import MAX_PAYLOAD_CHARS, junk_inputs, long_probe
 from claude_duel.domain.scoring import (
     capture_points,
     heat_of_state,
@@ -590,11 +591,11 @@ class MatchEngine:
     def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
         """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
         budget = time.monotonic() + VALIDATION_TIME_FACTOR * state.limits.wall_seconds
-        for probe in ["", *junk_inputs(spec.reference_payload, seed=state.seed)]:
+        for probe in ["", *junk_inputs(spec.reference_payload, seed=state.seed), long_probe(spec.reference_payload)]:
             if time.monotonic() > budget:
                 return "too slow: validation ran over its time budget; check must answer every input quickly"
             out = self._run_challenge(spec.source, probe, flag, state, "validate")
-            shown = "empty input" if not probe else f"junk input {probe[:20]!r}"
+            shown = "empty input" if not probe else f"junk input {probe[:20]!r}" + ("..." if len(probe) > 20 else "")
             if flag in out.stdout:
                 return f"trivial: {shown} reveals flag"
             if out.timed_out or out.killed_reason in (KILL_WALL, KILL_SIGNAL):
@@ -900,6 +901,8 @@ class MatchEngine:
         stdin = terrain.apply(ground, payload) if ground else payload
         run = self._run_challenge(source, stdin, flag, state, "attack")
         if run.timed_out or run.killed_reason in (KILL_WALL, KILL_SIGNAL):
+            if len(stdin) > MAX_PAYLOAD_CHARS:  # S15-1: longer than validation probed, so not the author's fault
+                return AttackAttempt(payload=payload, output=LONG_TIMEOUT, tokens=tokens, usd_micros=micros)
             return AttackAttempt(payload=payload, output=ATTACK_TIMEOUT, tokens=tokens, usd_micros=micros, timeout=True)
         output = CAPTURED if flag in run.stdout else _sandbox_output(redact(run.stdout, (flag,))[:500])
         if state.rules.integrity_control:

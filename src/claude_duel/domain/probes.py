@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
+MAX_PAYLOAD_CHARS = 4096  # longest reference or attack payload; validation probes this length too (S15-1)
+
 
 def _same_class(c: str) -> str:
     """A different char of c's class (digit, lower, upper, else printable)."""
@@ -30,3 +32,10 @@ def junk_inputs(payload: str, seed: str = "") -> list[str]:
     same_shape = [p[:i] + _same_class(p[i]) + p[i + 1 :] for i in _indexes(len(p), seed) if p]
     probes = [" ", "a", "0", "\n", "A" * len(p), tweak, *same_shape, p[:mid], p[mid + 1 :]]
     return list(dict.fromkeys(x for x in probes if x.strip() and x.strip() != p))
+
+
+def long_probe(payload: str) -> str:
+    """One max-length junk input in the reference's first-char class: an honest check must answer it quickly, so a
+    timed-out attack of at most this length is the check's fault, not the attacker's."""
+    p = payload.strip()
+    return _same_class(p[0] if p else "a") * MAX_PAYLOAD_CHARS

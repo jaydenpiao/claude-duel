@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
+from claude_duel.domain.probes import MAX_PAYLOAD_CHARS
 
 _TokenCap = Annotated[int, Field(strict=True, ge=1, le=TOKEN_CAP)]
 _RefCap = Annotated[int, Field(strict=True, ge=1, le=REF_CAP)]
@@ -309,7 +310,7 @@ class ChallengeSpec(_Frozen):
     title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
-    reference_payload: str = Field(max_length=4096)
+    reference_payload: str = Field(max_length=MAX_PAYLOAD_CHARS)
     solver: str = Field(
         default="",
         max_length=8192,
@@ -354,6 +355,7 @@ class Validation(_Frozen):
 
 CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)
 ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
+LONG_TIMEOUT = "timed out: input longer than validation probed; the try is spent"
 
 
 class AttackAttempt(_Frozen):
