@@ -19,6 +19,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Preset `checked`: `attacker_solver` is on (design rec R3), so attackers can run a sandboxed solver and the solver budget relaxes to 200,000 `check()` calls. Brute-force-only puzzles become free captures.
 - Check form: `check()` may not import `hashlib`, `zlib`, `binascii` or `struct` (design rec R5; the program form keeps them), and the answer check also catches affine char-code lists (`a*c+b`) and position-to-character dicts.
 - Check form (preset `checked`): a solvability band (design rec R1). The author's solver may call `check()` at most 2,000 times (200,000 with `attacker_solver`), and at most 1 in 64 seeded random inputs shaped like the answer may pass; otherwise the build goes back to repair. `solver_checks`, `density_ppm` and `log2_space` are logged on `challenge_validated`.
 - Security (SV-5): with `attacker_solver` off, a reference solver that needs more than the 1x wall time (plus 1s for sandbox start) is rejected as "solver too slow"; solver time is recorded as `solver.seconds`.

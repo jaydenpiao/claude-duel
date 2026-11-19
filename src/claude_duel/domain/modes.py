@@ -25,6 +25,7 @@ MODES: dict[str, Rules] = {
         retry_hint=True,
         retry_feedback=True,
         solvability=SolvabilityRule(enabled=True),
+        attacker_solver=True,  # design rec R3: attackers may run a solver too, so brute-force-only puzzles stop paying
     ),
     # Scored modes (#67) run on a token clock, so provider latency never decides a result; the wall-clock
     # match_deadline_s stays only as a safety backstop that fails (never scores) a match.
