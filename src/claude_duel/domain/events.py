@@ -57,9 +57,11 @@ TERRAIN_DRAWN = "terrain_drawn"
 GHOST_RUN = "ghost_run"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
-# 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and the new
+# 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and later
 # Rules/Usage/AttackAttempt fields (a v1 build would reject them under extra="forbid").
-SCHEMA_VERSION = 2
+# 3 = rules v2 heat contract (heat_metric and heat_history_matches; a v2 reader would reject those
+# fields under extra="forbid"). Old v0-v2 events still fold.
+SCHEMA_VERSION = 3
 
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -121,6 +123,7 @@ class CallCharged(_Payload):
     output_tokens: int = 0
     reasoning_tokens: int = 0  # thinking/reasoning part of ``output_tokens`` (billed as output); absent before #145
     truncated: bool = False
+    refused: bool = False  # vendor declined to answer; omitted from the log when false (older logs stay identical)
     purpose: str = ""  # build / attack / ... (absent in older logs)
     summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
 
@@ -226,6 +229,7 @@ class RoundScored(_Payload):
     delta: dict[str, int]
     points: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> what its capture paid
     heat: dict[str, int] = Field(default_factory=dict)  # ledger: challenge id -> heat_penalty line (in delta)
+    heat_unchecked: list[str] = Field(default_factory=list)  # heat not compared exactly, charged 0, never a bound
 
 
 class FindingFlagged(_Payload):
@@ -391,7 +395,7 @@ def created_data(state: MatchState) -> dict[str, object]:
         "python": platform.python_version(),
         "framing_text": state.framing_text,
         "agents": [a.model_dump(mode="json") for a in state.agents],
-        "rules": state.rules.model_dump(mode="json"),
+        "rules": state.rules.dump(),
         "limits": state.limits.model_dump(mode="json"),
         **({"family_bans": state.family_bans} if state.family_bans else {}),  # old logs stay byte-identical
     }
