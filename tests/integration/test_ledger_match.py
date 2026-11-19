@@ -19,6 +19,7 @@ from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
+from claude_duel.domain.heat_tokens import REF_CAP
 from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import capture_points
@@ -375,7 +376,17 @@ def test_pre_keystone_ledger_log_replays_with_features_off(make_engine, new_stat
 def test_ledger_preset_turns_the_features_on() -> None:
     rule = preset("ledger").ledger
     assert rule is not None
-    assert (rule.keystone, rule.terrain, rule.heat_window) == (True, "seeded", 2)
+    assert (
+        rule.keystone,
+        rule.terrain,
+        rule.heat_window,
+        rule.heat_vs_opponent,
+        rule.heat_token_cap,
+        rule.heat_ref_cap,
+        rule.heat_compare,
+        rule.heat_metric,
+        rule.heat_history_matches,
+    ) == (True, "seeded", 2, True, None, REF_CAP, "full", "lcs-v1", 3)
 
 
 def test_pre_points_ledger_log_replays_clean(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
