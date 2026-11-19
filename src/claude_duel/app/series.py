@@ -75,7 +75,7 @@ def _play_series(
         )
         match = play(game_settings, state.game_id(n), metrics, observer, budget)
         if match.stage not in _COUNTED:
-            return state  # failed game: `duel series` again resumes it
+            return state  # failed game (e.g. cyber_policy): paused, never forfeited; `duel series` again resumes it
         decider = None
         if match.stage is Stage.COMPLETE and state.rule.sudden_death and sr.game_winner(match) is None:
             decider_settings = game_settings.model_copy(
