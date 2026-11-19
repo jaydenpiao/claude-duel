@@ -1,7 +1,9 @@
 """Solvability band for the check form (design rec R1): pure helpers; the engine does the running.
 
 Upper bound: the arena counts how many times the author's solver calls ``check`` (or any helper of the
-source). A solver that needs more
+source), plus the solver's own work: every loop step, function or lambda entry and ``mix`` call in the solver
+is a tick, and ``WORK_PER_CHECK`` ticks cost one check (so inlining check's logic is no way around the
+count). A solver that needs more
 calls than the rules allow is only reachable by brute force, which a checked-mode attacker (no code) can't do.
 
 Lower bound: the arena runs ``check`` on seeded random inputs shaped like the reference payload. If too many
@@ -17,6 +19,7 @@ import string
 
 from claude_duel.domain.contract import definitions, with_mix
 
+WORK_PER_CHECK = 10  # solver ticks (loop steps, function entries, mix calls) that cost one check() call
 DENSITY_MAX_LENGTH = 64  # longer payloads have a huge space; sampling them says nothing useful
 _ALPHABETS = (
     string.digits,
@@ -33,9 +36,59 @@ def nonce(secret: str, cid: str, purpose: str) -> str:
     return "N" + hashlib.sha256(f"solvability:{secret}:{cid}:{purpose}".encode()).hexdigest()[:24]
 
 
+class _Ticks(ast.NodeTransformer):
+    """Ticks every loop step (statement and comprehension), function or lambda entry in the solver."""
+
+    @staticmethod
+    def _tick() -> ast.stmt:
+        return ast.Expr(ast.Call(ast.Name("_arena_tick", ast.Load()), [], []))
+
+    @staticmethod
+    def _iter(node: ast.expr) -> ast.expr:
+        return ast.Call(ast.Name("_arena_iter", ast.Load()), [node], [])
+
+    def visit_For(self, node: ast.For) -> ast.For:
+        self.generic_visit(node)
+        node.iter = self._iter(node.iter)
+        return node
+
+    def visit_comprehension(self, node: ast.comprehension) -> ast.comprehension:
+        self.generic_visit(node)
+        node.iter = self._iter(node.iter)
+        return node
+
+    def visit_While(self, node: ast.While) -> ast.While:
+        self.generic_visit(node)
+        node.body.insert(0, self._tick())
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+        node.body.insert(0, self._tick())
+        return node
+
+    def visit_Lambda(self, node: ast.Lambda) -> ast.Lambda:
+        self.generic_visit(node)
+        tick = ast.Call(ast.Name("_arena_tick", ast.Load()), [], [])
+        node.body = ast.Subscript(ast.Tuple([tick, node.body], ast.Load()), ast.Constant(1), ast.Load())
+        return node
+
+
+def ticked(solver: str) -> str:
+    """The solver with ``_arena_tick`` calls on every unit of its own work (unchanged if it doesn't parse)."""
+    try:
+        tree = ast.parse(solver)
+    except SyntaxError:
+        return solver
+    return ast.unparse(ast.fix_missing_locations(_Ticks().visit(tree)))
+
+
 def counted(source: str, solver: str, tag: str) -> str:
     """The solver program with every call into the author's top-level functions counted (``check`` and helpers
-    alike; calls made inside a counted call are free). The count is written last, after ``tag``."""
+    alike; ``check`` is counted at any depth (the first
+    one inside a counted call is covered by it), helpers only when the solver calls them, and only plain-data
+    arguments may cross into author code), plus one per ``WORK_PER_CHECK`` ticks of the solver's own work
+    (``ticked``; ``mix`` called outside author code ticks too). The count is written last, after ``tag``."""
     defs = with_mix(source).rstrip()
     try:
         tree = ast.parse(definitions(source))
@@ -43,16 +96,35 @@ def counted(source: str, solver: str, tag: str) -> str:
     except SyntaxError:
         funcs = ["check"]
     hook = (
-        "\n\n_arena_calls = [0]\n_arena_depth = [0]\n"
-        "def _arena_count(f):\n"
+        "\n\n_arena_calls = [0]\n_arena_depth = [0]\n_arena_inner = [0]\n"
+        "_arena_work = [0]\n_arena_type = ().__class__.__class__\n"
+        "def _arena_tick():\n    if not _arena_depth[0]:\n        _arena_work[0] += 1\n"
+        "def _arena_iter(it):\n    for v in it:\n        _arena_tick()\n        yield v\n"
+        "def _arena_mix(f):\n    def ticked(x):\n        _arena_tick()\n        return f(x)\n    return ticked\n"
+        "mix = _arena_mix(mix)\n"
+        "def _arena_plain(v):\n"
+        "    if v is None or _arena_type(v) in (str, bytes, int, float, bool):\n        return True\n"
+        "    if _arena_type(v) in (list, tuple):\n        return all(_arena_plain(x) for x in v)\n"
+        "    if _arena_type(v) is dict:\n"
+        "        return all(_arena_plain(x) and _arena_plain(y) for x, y in v.items())\n"
+        "    return False\n"
+        "def _arena_count(f, always=False):\n"
         "    def counted(*a, **k):\n"
-        "        if _arena_depth[0]:\n            return f(*a, **k)\n"
-        "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n"
+        "        if _arena_depth[0]:\n"
+        "            if always:\n                _arena_inner[0] += 1\n"
+        "                if _arena_inner[0] > 1:\n                    _arena_calls[0] += 1\n"
+        "            return f(*a, **k)\n"
+        "        if not all(_arena_plain(x) for x in a) or not all(_arena_plain(x) for x in k.values()):\n"
+        "            raise TypeError('author functions take plain data only')\n"
+        "        _arena_calls[0] += 1\n        _arena_depth[0] = 1\n        _arena_inner[0] = 0\n"
         "        try:\n            return f(*a, **k)\n        finally:\n            _arena_depth[0] = 0\n"
-        "    return counted\n" + "".join(f"{name} = _arena_count({name})\n" for name in funcs)
+        "    return counted\n" + "".join(f"{name} = _arena_count({name}, {name == 'check'})\n" for name in funcs)
     )
-    tail = f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0]) + '\\n')\n"
-    return defs + hook + "\n\n" + solver + tail
+    tail = (
+        f"\n\nimport sys\nsys.stdout.write('\\n{tag}:' + str(_arena_calls[0] + _arena_work[0] // {WORK_PER_CHECK})"
+        " + '\\n')\n"
+    )
+    return defs + hook + "\n\n" + ticked(solver) + tail
 
 
 def _functions(tree: ast.Module) -> set[str]:

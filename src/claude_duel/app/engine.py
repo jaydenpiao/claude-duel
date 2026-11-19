@@ -557,7 +557,7 @@ class MatchEngine:
         cap = state.rules.solvability.solver_cap(state.rules.attacker_solver)
         if calls > cap:
             return (
-                f"solver too brute-force: it called check() {calls:,} times, over the {cap:,} allowed; "
+                f"solver too brute-force: {calls:,} check() calls (own loops count too), over the {cap:,} allowed; "
                 "your answer is only reachable by brute force, so give the attacker a chain of deductions"
             )
         return None
