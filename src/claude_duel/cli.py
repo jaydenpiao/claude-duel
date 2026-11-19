@@ -31,6 +31,7 @@ from claude_duel.app.container import (
     make_sandbox,
     migrate_results,
 )
+from claude_duel.app.control_variate import adjust
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
@@ -119,6 +120,12 @@ def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     har.add_argument("--seed", default="harness")
 
 
+def _cv_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    cv = sub.add_parser("control-variate", help="$0 offline luck adjustment of a duplicate match (reported only)")
+    cv.add_argument("--duplicate-id", required=True)
+    cv.add_argument("--format", choices=("text", "json"), default="text")
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="duel", description="Agent-vs-agent staged CTF arena")
     p.add_argument("--config", type=Path, help="TOML config file")
@@ -151,6 +158,7 @@ def _parser() -> argparse.ArgumentParser:
     _driver_parsers(sub)
     _ladder_parser(sub)
     _harness_parser(sub)
+    _cv_parser(sub)
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
@@ -264,6 +272,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "duplicate": lambda: _duplicate(settings, args),
         "ladder": lambda: _ladder(settings, args),
         "harness": lambda: _harness(settings, args),
+        "control-variate": lambda: _control_variate(settings, args.duplicate_id, args.format),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
@@ -398,6 +407,19 @@ def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> li
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
+
+
+def _control_variate(settings: Settings, duplicate_id: str, fmt: str) -> int:
+    res = adjust(settings, duplicate_id)
+    if fmt == "json":
+        print(json.dumps(dataclasses.asdict(res)))
+        return 0
+    lo, hi = res.ci95
+    print(f"control variate {duplicate_id} (reported only; the result stays on raw boards)")
+    for n, (r, b, a) in enumerate(zip(res.raw, res.baseline, res.adjusted, strict=True), 1):
+        print(f"board {n}: raw {r:+d} · baseline {b:+d} · adjusted {a:+d}")
+    print(f"adjusted margin {sum(res.adjusted):+d} · p={res.p_value:.4f} · 95% CI [{lo:.2f}, {hi:.2f}]")
+    return 0
 
 
 def _harness(settings: Settings, args: argparse.Namespace) -> int:
