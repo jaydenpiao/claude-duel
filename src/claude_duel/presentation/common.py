@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from claude_duel.domain import events as ev
 from claude_duel.domain.flags import scrub
 from claude_duel.domain.models import AgentSpec, Attack, Challenge, Event, Handicap, MatchState, Usage, Validation
-from claude_duel.domain.scoring import defense_award, solve_award
+from claude_duel.domain.scoring import defense_award, solve_award, weight
 from claude_duel.domain.series import decide
 
 SNIPPET_LINES = 3
@@ -111,8 +111,10 @@ def verdict(s: MatchState, e: Event) -> tuple[Challenge, str, bool]:
 
 def verdict_text(s: MatchState, e: Event) -> str:
     v = Validation.model_validate(e.data["validation"])
-    ch = s.challenges[v.challenge_id]
-    return "solvable ✓" if v.valid else f"rejected ✗ ({scrub(v.reason)}) -{s.rules.scoring.invalid_penalty * ch.round}"
+    if v.valid:
+        return "solvable ✓"
+    rule = s.rules.scoring
+    return f"rejected ✗ ({scrub(v.reason)}) -{rule.invalid_penalty * weight(s.challenges[v.challenge_id].round, rule)}"
 
 
 def labels(agents: Sequence[AgentSpec]) -> dict[str, str]:

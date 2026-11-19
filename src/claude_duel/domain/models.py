@@ -67,6 +67,7 @@ class ScoringRule(_Frozen):
     solve_points: int = 10
     defense_points: int = 10  # >= solve_points: a defense is never worth less than a capture (ADR 0006)
     invalid_penalty: int = 5
+    round_weight: Literal["linear", "flat"] = "linear"  # awards x round number, or every round x1 (no-fluke ladder)
     # efficiency (#35): a capture loses floor(max_penalty * tokens_used / reference_tokens) points, never below 1
     max_penalty: int = Field(default=10, ge=0)
     reference_tokens: int = Field(default=4000, ge=1)

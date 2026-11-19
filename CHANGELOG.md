@@ -62,6 +62,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `duel duplicate`: no-fluke duplicate play. Each board is one seed played twice with seats swapped; the board difference is clipped, a twice-truncated reply replays the board on a derived seed (then void), and the result needs the sign test (p <= 0.05) or the SPRT, never spend. Prints the board table, margin, p, bootstrap CI, SPRT state and spend vs `--match-max-usd`; `verify` recomputes every board. $0 with fake agents.
+- `ladder` mode preset (no-fluke): ledger scoring with flat round weights, 1 challenge a side, 3 tries, 1 round, terrain off; keystone and heat stay.
+- `ScoringRule.round_weight`: `linear` (default, unchanged) or `flat`, which scores every round at weight 1 for the no-fluke ladder.
 - `claude-fable-5-2` on the allowlist at $8/$40 per 1M input/output tokens (standard list from Anthropic pricing, 2026-11-13), premium like `claude-fable-5-1`. Defaults and launch prereg are unchanged.
 - Model refusals (Anthropic `stop_reason=refusal`, OpenAI content-filter / `message.refusal`) are a typed outcome, logged on `call_charged.refused` and `AttackAttempt.refused` only when true so older logs stay byte-identical (ADR 0016).
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
