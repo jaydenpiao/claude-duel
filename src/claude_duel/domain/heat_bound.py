@@ -5,9 +5,10 @@
 - ``legacy``: no pins (logs from before the caps). Exact whole-source LCS while both walks fit ``TOKEN_CAP``
   and the references fit ``REF_CAP``; past that ``HeatBoundError``, and replay reports
   the round as ``heat legacy-unreplayable``.
-- ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens.
-- ``full``: new matches. Whole-source LCS: a copied body is decided in linear time, other pairs by the
-  bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset ceiling is only a cold-skip filter (if it
+- ``prefix``: both caps pinned, compare not ``full``. LCS of the first ``heat_token_cap`` tokens (v1 logs).
+- ``full``: ``heat_compare=full`` (new matches; v2 omits ``heat_token_cap``). Whole-source LCS: a copied body is
+  decided in linear time, other pairs by the bit-parallel LCS inside the call's ``WORK_BUDGET``. The multiset
+  ceiling is only a cold-skip filter (if it
   is below the threshold, the exact LCS is too). Every source under ``PARSE_BYTES`` keeps its full walk, so a
   long exact copy is compared (a copied body in linear time). Admission caps a source so every pair a legal
   round can admit fits in ``WORK_BUDGET`` (``admit``); a pair over the work guard is ``heat over budget``:
@@ -21,7 +22,7 @@ from __future__ import annotations
 from typing import Literal, NamedTuple
 
 from claude_duel.domain.errors import HeatBoundError
-from claude_duel.domain.heat_tokens import REF_CAP, TOKEN_CAP, Profile, profile
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES, REF_CAP, TOKEN_CAP, Profile, profile
 from claude_duel.domain.models import LedgerRule, Rules
 
 Regime = Literal["legacy", "prefix", "full"]
@@ -42,22 +43,27 @@ class Hot(NamedTuple):
 
 def regime(rule: LedgerRule) -> Regime:
     """The comparison rule a log is scored by. ``LedgerRule`` validation already refused a partial pin."""
+    if rule.heat_compare == "full":
+        return "full"
     if rule.heat_token_cap is None:
         return "legacy"
-    return "full" if rule.heat_compare == "full" else "prefix"
+    return "prefix"
 
 
 def pin_heat_bound(rules: Rules) -> Rules:
-    """Config rules -> the rules a new log stores: both caps (the ceiling when unset) and ``full``
-    (``modes.pin_opponent_heat`` pins the opponent flag). Heat off is unchanged. Only config is passed here; a logged
-    contract (a resumed or child log) is never re-pinned."""
+    """Config rules -> the rules a new log stores: ``full`` compare, ``heat_ref_cap``, ``heat_metric=lcs-v1``
+    and ``heat_history_matches`` (``modes.pin_opponent_heat`` pins the opponent flag). ``heat_token_cap`` is
+    dropped (prefix-only). Heat off is unchanged. Only config is passed here; a logged contract (a resumed or
+    child log) is never re-pinned."""
     led = rules.ledger
     if led is None or not led.heat_window:
         return rules
     pins = {
-        "heat_token_cap": led.heat_token_cap or TOKEN_CAP,
         "heat_ref_cap": led.heat_ref_cap or REF_CAP,
         "heat_compare": "full",
+        "heat_metric": led.heat_metric or "lcs-v1",
+        "heat_history_matches": HISTORY_MATCHES if led.heat_history_matches is None else led.heat_history_matches,
+        "heat_token_cap": None,
     }
     if all(getattr(led, k) == v for k, v in pins.items()):
         return rules

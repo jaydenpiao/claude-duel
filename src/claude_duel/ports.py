@@ -13,6 +13,10 @@ from claude_duel.domain.models import Event, MatchState, SandboxLimits
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
 Purpose = Literal["build", "attack", "allocate"]
+KilledReason = Literal["wall", "signal", "output"]
+KILL_WALL: KilledReason = "wall"
+KILL_SIGNAL: KilledReason = "signal"
+KILL_OUTPUT: KilledReason = "output"
 
 
 class CompletionRequest(BaseModel):
@@ -56,7 +60,7 @@ class RunResult(BaseModel):
     stdout: str
     exit_code: int
     timed_out: bool
-    killed_reason: str | None = None
+    killed_reason: KilledReason | None = None
 
 
 class Sandbox(Protocol):

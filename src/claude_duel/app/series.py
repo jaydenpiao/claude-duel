@@ -60,7 +60,7 @@ def _play_series(
             "seed": settings.seed or sr.game_seed(series_id, 0),
             "rule": rule.model_dump(mode="json"),
             "agents": [a.model_dump(mode="json") for a in pin_agents(settings)],
-            "rules": settings.rules.model_dump(mode="json"),
+            "rules": settings.rules.dump(),
             "limits": settings.limits.model_dump(mode="json"),
         },
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
 
@@ -155,17 +155,32 @@ class LedgerRule(_Frozen):
     heat_vs_opponent: bool | None = Field(
         default=None, description="compare against the opponent's earlier challenges too (design R5 / #238)"
     )
-    # Heat pins (heat_bound.regime). Both caps absent: legacy (logs from before the caps). Both set: prefix,
-    # or full with heat_compare="full" (new matches). A partial pin, a non-int or an out-of-range cap is invalid.
-    heat_token_cap: _TokenCap | None = Field(default=None, description="paired heat pin; prefix width under prefix")
+    # Heat pins (heat_bound.regime). No caps: legacy. Both caps, compare not full: prefix (v1 logs).
+    # heat_compare="full" needs heat_ref_cap; heat_token_cap is prefix-only and optional to read.
+    # v2 heat-on logs also pin heat_metric, heat_vs_opponent and heat_history_matches (Rules._v2_heat_contract).
+    heat_token_cap: _TokenCap | None = Field(default=None, description="prefix width; absent on v2 full-heat logs")
     heat_ref_cap: _RefCap | None = Field(default=None, description="pinned max heat references per challenge")
     heat_compare: Literal["prefix", "full"] | None = Field(default=None, description="full: whole-source heat")
+    heat_metric: Literal["lcs-v1"] | None = Field(
+        default=None, description="exact AST LCS; required on v2 heat-on logs, absent on v1"
+    )
+    heat_history_matches: int | None = Field(
+        default=None,
+        ge=0,
+        le=20,
+        description="same model's last N matches frozen into heat_refs; required on v2 heat-on logs",
+    )
 
     @model_validator(mode="after")
     def _heat_pin_is_whole(self) -> LedgerRule:
-        if (self.heat_token_cap is None) != (self.heat_ref_cap is None):
+        has_token, has_ref = self.heat_token_cap is not None, self.heat_ref_cap is not None
+        if self.heat_compare == "full":
+            if not has_ref:
+                raise ValueError("heat_compare=full needs heat_ref_cap")
+            return self
+        if has_token != has_ref:
             raise ValueError("heat_token_cap and heat_ref_cap are pinned together")
-        if self.heat_compare is not None and self.heat_token_cap is None:
+        if self.heat_compare is not None and not has_token:
             raise ValueError("heat_compare needs both heat caps")
         return self
 
@@ -177,7 +192,7 @@ class DeepRule(_Frozen):
     max_ghost_runs: int = Field(default=24, ge=0, le=200)  # sandbox runs per round
 
 
-RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
+RULES_VERSION = 2  # bump when a Rules default changes meaning; logged with every match
 
 
 class Rules(_Frozen):
@@ -277,6 +292,35 @@ class Rules(_Frozen):
         tokens = self.max_output_tokens if own is None else own
         cap = self.wallet.max_output_tokens
         return tokens if cap is None else min(tokens, cap)
+
+    @model_validator(mode="after")
+    def _v2_heat_contract(self, info: ValidationInfo) -> Rules:
+        """v2 heat-on logs pin the whole-source contract; config may set pin_later and fill pins first."""
+        if info.context and info.context.get("pin_later"):
+            return self
+        led = self.ledger
+        if self.rules_version < 2 or led is None or not led.heat_window:
+            return self
+        if (
+            led.heat_compare != "full"
+            or led.heat_vs_opponent is None
+            or led.heat_ref_cap is None
+            or led.heat_metric != "lcs-v1"
+            or led.heat_history_matches is None
+        ):
+            raise ValueError(
+                "rules v2 heat-on logs need heat_compare=full, an explicit heat_vs_opponent, "
+                "heat_ref_cap, heat_metric=lcs-v1 and heat_history_matches"
+            )
+        return self
+
+    def dump(self) -> dict[str, Any]:
+        """JSON for a log. v2 omits ``heat_token_cap`` (prefix-only); v1 keeps it when set, and readers accept it."""
+        data = self.model_dump(mode="json")
+        ledger = data.get("ledger")
+        if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
+            ledger.pop("heat_token_cap", None)
+        return data
 
 
 class ChallengeSpec(_Frozen):
