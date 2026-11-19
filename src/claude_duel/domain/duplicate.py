@@ -149,13 +149,21 @@ def board_cap(rule: DuplicateRule, rules: Rules) -> int:
     return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY
 
 
+def build_fault(reason: str | None) -> bool:
+    """A build forfeited on a twice-truncated reply is a harness fault; every other invalid reason is scored."""
+    return (reason or "").startswith(f"malformed: {TRUNCATED}")
+
+
+def attack_fault(output: str) -> bool:
+    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored."""
+    return output.startswith(TRUNCATED)
+
+
 def fault(state: MatchState) -> str:
-    """The harness fault that voids a board, or "": a build forfeited on a twice-truncated reply, or an attack try
-    whose reply was truncated twice. Every other failure is the model's own and is scored."""
-    truncated = f"malformed: {TRUNCATED}"
-    if any((v.reason or "").startswith(truncated) for v in state.validations.values()):
+    """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
+    if any(build_fault(v.reason) for v in state.validations.values()):
         return "build truncated"
-    if any(a.output == TRUNCATED for tries in state.attempts.values() for a in tries):
+    if any(attack_fault(a.output) for tries in state.attempts.values() for a in tries):
         return "attack truncated"
     return ""
 
