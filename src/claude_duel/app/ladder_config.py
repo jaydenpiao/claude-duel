@@ -11,7 +11,7 @@ import json
 import re
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -48,6 +48,9 @@ class MatchPlan(_Plan):
 class BudgetPlan(_Plan):
     match_max_usd: float
     ladder_max_usd: float
+    # What the dry run checks the caps against. "typical" admits plans whose worst case is over a cap; the per-call
+    # hard stop then keeps actual spend under both caps (the run stops cleanly, resumable after raising a cap).
+    basis: Literal["worst", "typical"] = "worst"
 
 
 class CapsPlan(_Plan):
@@ -69,8 +72,9 @@ class LadderConfig(_Plan):
         return self.sides.a if name == "a" else self.sides.b
 
     def digest(self) -> str:
-        """sha256 of the canonical plan JSON, logged so a resumed or verified ladder proves its plan."""
-        canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        """sha256 of the canonical plan JSON, logged so a resumed or verified ladder proves its plan. Money is left
+        out: raising a cap after a hard stop resumes the same ladder, and spend never changes a result."""
+        canonical = json.dumps(self.model_dump(mode="json", exclude={"budget"}), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     def rules(self) -> Rules:
@@ -158,7 +162,7 @@ def _check_numbers(cfg: LadderConfig) -> None:
     boards = cfg.match
     if not 1 <= boards.boards_min <= boards.boards_max <= MAX_BOARDS:
         raise ConfigError(f"boards_min must be >= 1 and <= boards_max, and boards_max <= {MAX_BOARDS}")
-    positive = {**cfg.budget.model_dump(), **cfg.caps.model_dump()}
+    positive = {**cfg.budget.model_dump(exclude={"basis"}), **cfg.caps.model_dump()}
     for key, value in positive.items():
         if value <= 0:
             raise ConfigError(f"{key} must be > 0")

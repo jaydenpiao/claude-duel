@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from claude_duel.app.budget import CostBudget
+from claude_duel.app.budget import CostBudget, SpendCap
 from claude_duel.app.container import (
     build_budget,
     build_driver_lock,
@@ -13,7 +13,7 @@ from claude_duel.app.container import (
     build_store,
     pin_agents,
 )
-from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
+from claude_duel.app.driver import append, check_caps, open_or_create, pinned
 from claude_duel.app.replay import replay
 from claude_duel.app.session import play
 from claude_duel.config import Settings

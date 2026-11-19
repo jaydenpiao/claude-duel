@@ -8,14 +8,16 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.providers.fake import FakeProvider
+from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app import ladder as ladder_mod
 from claude_duel.app import ladder_config as lc
+from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, BudgetLimits, CostBudget
 from claude_duel.app.container import build_ladder_log, build_ledger
 from claude_duel.app.ladder import Projection, play_ladder, verify_ladder
 from claude_duel.cli import main
 from claude_duel.config import Settings
 from claude_duel.domain import ladder as ld
-from claude_duel.domain.errors import ConfigError
+from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import CallCaps, MatchState
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
@@ -116,3 +118,44 @@ def test_engine_sends_the_per_purpose_cap(make_engine: Callable, new_state: Call
     engine.run(state)
     assert seen["build"] == 900
     assert seen["attack"] <= 700
+
+
+def test_hard_stop_ends_a_typical_basis_ladder_cleanly_and_a_raised_cap_resumes_it(tmp_path: Path) -> None:
+
+    settings = _settings(tmp_path)
+    prices = {**DEFAULT_PRICES, FAKE_MODEL: (1.0, 2.0)}  # priced fake calls, so the dollar caps bite
+
+    def budget() -> CostBudget:
+        return CostBudget(BudgetLimits(match_max_usd=10, run_max_usd=10), build_ledger(settings), prices)
+
+    tight = lc.load(FAKE, {"budget.match_max_usd": 0.02, "budget.basis": "typical"})
+    with pytest.raises(BudgetExceededError, match="hard stop"):
+        play_ladder(settings, "lad-stop", tight, InMemoryMetrics(), budget=budget())
+    assert FileSpendLedger(settings.store_dir / "ledger.jsonl").spent_usd("lad-stop-s1-") <= 0.02
+    done = play_ladder(settings, "lad-stop", lc.load(FAKE), InMemoryMetrics(), budget=budget())  # same plan digest
+    assert done.done()
+    assert verify_ladder(settings, "lad-stop").consistent
+
+
+def test_compare_marks_agreement_and_too_close() -> None:
+    def run(lid: str, results: list[str]) -> ld.LadderState:
+        state = ld.LadderState(ladder_id=lid, config={}, digest="d", a=("x1", "x2"), b=("y1", "y2"), start=(0, 0))
+        for n, r in enumerate(results, 1):
+            a, b = state.next_pair()
+            state.steps.append(ld.Step(step_no=n, a=a, b=b, duplicate_id=f"{lid}-s{n}", result=r, usd=0))  # type: ignore[arg-type]
+        return state
+
+    same = ladder_mod.compare_ladders(run("r1", ["first", "first"]), run("r2", ["first", "first"]))
+    assert [m.verdict for m in same.matchups] == ["agree", "agree"]
+    assert same.ordering == "agree"
+    split = ladder_mod.compare_ladders(run("r1", ["first", "first"]), run("r2", ["second", "first"]))
+    assert split.ordering == "too close to call"
+    assert split.matchups[0].verdict == "too close to call"
+    assert split.matchups[0].results == ("first", "second")
+
+
+def test_final_plan_passes_on_typical_cost_and_is_refused_on_worst() -> None:
+    final = lc.load(EXAMPLES / "ladder-final.toml")
+    assert not ladder_mod.project(final).refusals
+    assert ladder_mod.project(lc.load(EXAMPLES / "ladder-final.toml", {"budget.basis": "worst"})).refusals
+    assert final.digest() == lc.load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 200}).digest()

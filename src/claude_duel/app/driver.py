@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
+from claude_duel.app.budget import SpendCap
 from claude_duel.app.container import build_ledger
 from claude_duel.config import Settings
 from claude_duel.domain.errors import BudgetExceededError
@@ -61,15 +61,6 @@ def pinned(settings: Settings, rules: Rules | None, limits: SandboxLimits | None
             id=log_id,
         )
     return settings.model_copy(update={"rules": rules, "limits": limits})
-
-
-@dataclass(frozen=True)
-class SpendCap:
-    """A spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
-
-    label: str
-    prefix: str
-    max_usd: float
 
 
 def check_caps(settings: Settings, caps: tuple[SpendCap, ...]) -> None:
