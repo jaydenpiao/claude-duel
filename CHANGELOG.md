@@ -61,6 +61,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- `claude-fable-5-2` on the allowlist at $8/$40 per 1M input/output tokens (standard list from Anthropic pricing, 2026-11-13), premium like `claude-fable-5-1`. Defaults and launch prereg are unchanged.
 - Model refusals (Anthropic `stop_reason=refusal`, OpenAI content-filter / `message.refusal`) are a typed outcome, logged on `call_charged.refused` and `AttackAttempt.refused` only when true so older logs stay byte-identical (ADR 0016).
 - `ledger` mode: the Sealed Ledger arena with stake allocation and stake-bounded `duel estimate` (#192).
 - `duel backup`: finished matches' event logs and state (never `*.secret`, flag-scanned) to a private GCS bucket, `DUEL_REPLAY_BUCKET` (#213).
