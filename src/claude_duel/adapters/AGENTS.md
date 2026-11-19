@@ -4,12 +4,12 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 
 ## providers/
 - `fake.py`: deterministic offline opponent; `skill` controls difficulty. Default for tests, CI and staging.
-- `scripted.py`: `ScriptedProvider` for the $0 no-fluke harness only: builds like `fake.py`, captures with a fixed seeded chance per try.
-- `openai.py`: httpx client; gpt-6/gpt-5.6 go through the Responses API (no temperature, strict `json_schema`, `reasoning.effort`), older models through Chat Completions JSON mode; a reply stopped at the cap is `truncated`; a content-filter finish, `message.refusal`, a refusal part, or Responses `content_filter` is `refused` (ADR 0016).
+- `scripted.py`: `ScriptedProvider` for the $0 no-fluke harness only: builds like `fake.py` keyed on the board seed, captures each challenge with one fixed seeded draw (retries cannot reroll a miss).
+- `openai.py`: httpx client; gpt-6/gpt-5.6 go through the Responses API (no temperature, strict `json_schema`, `reasoning.effort`), older models through Chat Completions JSON mode; both paths send a stable pseudonymous `safety_identifier` (sha256 of a per-install id in `<store_dir>/install-id`, created atomically at 0600; a per-process id if the store is read-only; never under HOME); a reply stopped at the cap is `truncated`; a content-filter finish, `message.refusal`, a refusal part, or Responses `content_filter` is `refused` (ADR 0016).
 - `anthropic.py`: Messages API client on the same port; no temperature or cache_control, cache tokens billed as input; 529 is transient, "credit balance" is quota. Sends the strict `json_schema` and `effort` via `output_config`; `stop_reason == "max_tokens"` is `truncated`, `stop_reason == "refusal"` is `refused` (ADR 0016); thinking tokens are reported in `reasoning_tokens` (already inside output, billed as output).
-- `http.py`: `raise_for_status(resp, vendor)`, shared by every HTTP adapter; maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).
+- `http.py`: `raise_for_status(resp, vendor)`, shared by every HTTP adapter; maps HTTP errors to domain errors (quota, OpenAI `cyber_policy` from the parsed `error.code` only, retryable, `Retry-After`).
 - `registry.py`: `FACTORIES`, vendor name -> adapter factory; read only by `app/container.py`. Vendor metadata (prefix, key env, default model) is `domain/vendors.VENDORS` (ADR 0013, quality M11).
-- `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota errors are not retried. It fails fast when a retry-after is above the backoff cap or the next try would pass the per-call deadline (`deadline_s`, `Settings.provider_call_deadline`, 120s; the clock is injectable for tests).
+- `retry.py`: `RetryingProvider` wraps any provider with jittered backoff (`backoff_delay`); quota and `cyber_policy` errors are not retried. It fails fast when a retry-after is above the backoff cap or the next try would pass the per-call deadline (`deadline_s`, `Settings.provider_call_deadline`, 120s; the clock is injectable for tests).
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 
 ## sandbox/
