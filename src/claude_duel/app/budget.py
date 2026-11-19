@@ -37,6 +37,10 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     "claude-fable-5-1": (10.00, 50.00),
     "claude-fable-5-2": (8.00, 40.00),  # standard list, 2026-11-13, same Anthropic pricing URL
     "gpt-6-astra": (10.00, 50.00),
+    # Standard list, 2026-11-19, https://developers.openai.com/api/docs/pricing (per-model pages agree)
+    "gpt-6.1-terra": (1.00, 5.00),
+    "gpt-6.2-sol": (2.00, 10.00),
+    "gpt-6.2-astra": (8.00, 40.00),
 }
 # Top-tier models (#10): priced and allowlisted, but refused unless a config sets ``allow_premium = true``,
 # so a typo or a default can never start a costly match. The spend caps still apply on top.
@@ -49,6 +53,9 @@ PREMIUM: frozenset[str] = frozenset(
         "claude-fable-5-1",
         "claude-fable-5-2",
         "gpt-6-astra",
+        "gpt-6.1-terra",
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
     }
 )
 
