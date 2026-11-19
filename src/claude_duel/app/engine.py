@@ -339,7 +339,7 @@ class MatchEngine:
                 return None, REFUSED, False
             self._note(state, agent, completion.text)
             try:
-                last, problem, probed = self._judge(state, cid, agent, completion)
+                last, problem, probed = self._judge(state, cid, agent, completion, index)
             except MalformedOutputError as exc:
                 self._metrics.incr("model.malformed", purpose="build")
                 problem = f"malformed: {exc}"
@@ -352,7 +352,7 @@ class MatchEngine:
         return (last, None, False) if last is not None else (None, errors[-1], False)
 
     def _judge(
-        self, state: MatchState, cid: str, agent: str, completion: Completion
+        self, state: MatchState, cid: str, agent: str, completion: Completion, index: int = 0
     ) -> tuple[ChallengeSpec, str | None, bool]:
         """Parse, shape, variety and assess one build answer (spec, problem, probe_solved);
         raises ``MalformedOutputError`` if unparseable."""
@@ -360,7 +360,7 @@ class MatchEngine:
             raise MalformedOutputError(TRUNCATED)
         spec, problem = self._shape(state, agents.parse_challenge(completion.text))
         if problem is None and state.rules.variety:
-            problem = variety.repeat_reason(state, agent, spec)
+            problem = variety.repeat_reason(state, agent, spec) or variety.family_reason(state, agent, index, spec)
         probed = False
         if problem is None:
             spec, problem, probed = self._assess(state, cid, agent, spec)

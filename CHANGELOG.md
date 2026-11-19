@@ -19,6 +19,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Checked mode (R2 follow-ups): a challenge declares its assigned family id (a wrong one goes back to repair); families the same model drew in its last 3 matches are avoided, frozen into match_created; the prompt's one example now comes from a vetted per-axis pool, each tested through the checked arena.
 - Check form: the arena defines a published 32-bit integer mixer mix(x) for authors and solvers (hashlib stays banned); it can't be rebound (R5 follow-up).
 - Checked mode: an attacker's solver gets the same check() budget as the author's (200,000 calls); over it, the attempt counts as malformed (R1/R3 follow-up).
 - Checked mode assigns each challenge slot a family from a seeded taxonomy (combinatorial witness, tiny language, bot game, cipher, simulation, encoding, lock puzzle). Both agents share the axis but get different families; no family repeats and at most one lock puzzle per match. Prompts show one example and drop the fixed family anchors and the brute-force solver template (design rec R2).

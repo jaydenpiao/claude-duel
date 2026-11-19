@@ -12,7 +12,7 @@ from claude_duel.app.container import build_engine, build_event_log, build_store
 from claude_duel.app.framings import framing_text
 from claude_duel.config import Settings
 from claude_duel.domain import events as ev
-from claude_duel.domain import heat
+from claude_duel.domain import heat, variety
 from claude_duel.domain.errors import EventLogCorruptError, MatchNotFoundError
 from claude_duel.domain.heat_bound import admit
 from claude_duel.domain.heat_tokens import HISTORY_MATCHES
@@ -47,10 +47,12 @@ def open_match(
             rules=rules,
             limits=settings.limits,
         )
+        if rules.variety:  # R2: frozen into match_created, so replay never rereads the store
+            state.family_bans = variety.history_bans(_history(store, settings, match_id), state.agents)
         if rules.ledger is not None and rules.ledger.heat_window:
             history = rules.ledger.heat_history_matches
             state.heat_refs = heat.history_refs(
-                _history(settings, match_id),
+                _folded_history(settings, match_id),
                 state.agents,
                 HISTORY_MATCHES if history is None else history,
                 source_limit=rules.ledger.heat_ref_cap,
@@ -63,6 +65,19 @@ def open_match(
         if warn_drift:
             _warn_on_drift(settings, state)
     return state
+
+
+def _history(store: MatchStore, settings: Settings, match_id: str) -> list[MatchState]:
+    """Saved matches in this store (secrets never opened); logs that aren't matches are skipped."""
+    out = []
+    for other in build_event_log(settings).ids():
+        if other == match_id:
+            continue
+        try:
+            out.append(store.snapshot(other))
+        except (MatchNotFoundError, EventLogCorruptError, ValueError, OSError):
+            continue
+    return out
 
 
 def play(
@@ -85,7 +100,7 @@ def play(
         return engine.run(state)
 
 
-def _history(settings: Settings, match_id: str) -> list[MatchState]:
+def _folded_history(settings: Settings, match_id: str) -> list[MatchState]:
     """Other matches in this store, folded from their logs (no secrets); unreadable logs are skipped."""
     log_ = build_event_log(settings)
     out = []

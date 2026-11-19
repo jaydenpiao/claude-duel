@@ -40,7 +40,7 @@ def test_check_prompt_has_no_fixed_family_anchors() -> None:
     text = "\n".join(agents._check_rules(preset("checked"), 1))
     assert "range(100000)" not in text.split("One valid example")[0]
     assert "a tiny VM, a grid walk" not in text
-    assert text.count('{"title": ') == 1  # exactly one example
+    assert text.count('{"title": ') == 0  # the one example comes from variety.prompt_lines (axis pool)
     assert "constructively" in text
     program = "\n".join(agents.build_rules(preset("classic"), 1))
     assert "tiny stack VM" not in program
