@@ -597,7 +597,9 @@ class MatchEngine:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
         if spec.solver and not spec.reference_payload.strip():
             return "no reference input: the solver never printed one"
-        rejected = policy.check(spec, state.rules.max_source_bytes(round_no)) or heavy(spec.source, state.rules)
+        rejected = policy.check(spec, state.rules.max_source_bytes(round_no), state.rules.challenge_form) or heavy(
+            spec.source, state.rules
+        )
         if rejected:
             return rejected
         flag = self._flag_for(state, cid)

@@ -20,6 +20,9 @@ from claude_duel.domain.models import ChallengeSpec
 PURE_MODULES = frozenset(
     {"hashlib", "base64", "json", "re", "string", "math", "itertools", "binascii", "zlib", "struct"}
 )
+# Check form (design rec R5): hashes, CRCs and byte packing make answers reachable only by brute force, never
+# by reasoning, so check() may not import them. The program form keeps them for legacy challenges.
+CHECK_FORM_BANNED = frozenset({"hashlib", "zlib", "binascii", "struct"})
 RESTRICTED_MODULES: dict[str, frozenset[str]] = {"sys": frozenset({"stdin", "stdout", "exit"})}
 ALLOWED_IMPORTS = PURE_MODULES | frozenset(RESTRICTED_MODULES)
 BANNED_NAMES = frozenset(
@@ -68,12 +71,30 @@ MAZE_SOURCE = (
 )
 
 
-def check(spec: ChallengeSpec, max_source_bytes: int) -> str | None:
+def check(spec: ChallengeSpec, max_source_bytes: int, form: str = "program") -> str | None:
     """Return a rejection reason, or None if the challenge passes."""
     for field in (spec.source, spec.description, spec.reference_payload, spec.solver):
         if FLAG_PATTERN.search(field):
             return "flag-shaped literal present"
-    return check_source(spec.source, max_source_bytes) or answer_exposed(ast.parse(spec.source), spec.reference_payload)
+    rejected = check_source(spec.source, max_source_bytes)
+    if rejected:
+        return rejected
+    tree = ast.parse(spec.source)
+    return (_check_form_imports(tree) if form == "check" else None) or answer_exposed(tree, spec.reference_payload)
+
+
+def _check_form_imports(tree: ast.AST) -> str | None:
+    for node in ast.walk(tree):
+        names = [a.name for a in node.names] if isinstance(node, ast.Import) else []
+        if isinstance(node, ast.ImportFrom):
+            names = [node.module or ""]
+        banned = sorted({n.split(".")[0] for n in names} & CHECK_FORM_BANNED)
+        if banned:
+            return (
+                f"import not allowed in check(): {', '.join(banned)} (hashes and CRCs can only be brute-forced; "
+                "build a puzzle the attacker can reason through)"
+            )
+    return None
 
 
 def check_source(source: str, max_source_bytes: int) -> str | None:
@@ -102,7 +123,29 @@ def answer_exposed(tree: ast.AST, payload: str) -> str | None:
     answer = payload.strip()
     if len(answer) < MIN_PAYLOAD_CHARS:
         return f"reference_payload must be at least {MIN_PAYLOAD_CHARS} characters"
-    return _in_literals(tree, answer) or _in_char_codes(tree, answer)
+    return _in_literals(tree, answer) or _in_char_codes(tree, answer) or _in_char_maps(tree, answer)
+
+
+def _in_char_maps(tree: ast.AST, answer: str) -> str | None:
+    """A dict of int positions to single characters (``{0: 'a', 1: 'b'}``) that spells the answer."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict) or len(node.keys) < MIN_PAYLOAD_CHARS:
+            continue
+        pairs = [
+            (k.value, v.value)
+            for k, v in zip(node.keys, node.values, strict=True)
+            if isinstance(k, ast.Constant)
+            and type(k.value) is int
+            and isinstance(v, ast.Constant)
+            and isinstance(v.value, str)
+            and len(v.value) == 1
+        ]
+        if len(pairs) != len(node.keys):
+            continue
+        spelled = "".join(ch for _, ch in sorted(pairs))
+        if answer in (spelled, spelled[::-1]):
+            return "the accepting input appears in the source as a position-to-character map; derive it with logic"
+    return None
 
 
 def _in_literals(tree: ast.AST, answer: str) -> str | None:
@@ -150,13 +193,29 @@ def _int_sequences(tree: ast.AST) -> list[list[int]]:
 
 
 def _shifted(seq: list[int], codes: list[int]) -> bool:
-    """seq equals codes up to a constant offset or a constant XOR."""
+    """seq equals codes up to a constant offset, a constant XOR, or an affine map ``a*c + b``."""
     if len(seq) != len(codes):
         return False
     return (
         len({a - b for a, b in zip(seq, codes, strict=True)}) == 1
         or len({a ^ b for a, b in zip(seq, codes, strict=True)}) == 1
+        or _affine(seq, codes)
     )
+
+
+def _affine(seq: list[int], codes: list[int]) -> bool:
+    """seq[i] == a * codes[i] + b for one integer pair (a, b), solved from two points with different codes."""
+    pairs = list(zip(codes, seq, strict=True))
+    first = pairs[0]
+    other = next((p for p in pairs if p[0] != first[0]), None)
+    if other is None:
+        return False
+    rise, run = other[1] - first[1], other[0] - first[0]
+    if rise % run:
+        return False
+    a = rise // run
+    b = first[1] - a * first[0]
+    return a != 0 and all(y == a * x + b for x, y in pairs)
 
 
 def _check_node(node: ast.AST, parent: ast.AST | None) -> str | None:

@@ -13,7 +13,14 @@ from claude_duel.domain.errors import MalformedOutputError
 from claude_duel.domain.heat_bound import regime
 from claude_duel.domain.heat_tokens import HISTORY_MATCHES
 from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
-from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
+from claude_duel.domain.policy import (
+    BANNED_NAMES,
+    CHECK_FORM_BANNED,
+    MAZE_SOURCE,
+    MIN_PAYLOAD_CHARS,
+    PURE_MODULES,
+    RESTRICTED_MODULES,
+)
 
 SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 
@@ -95,7 +102,8 @@ def check_rules(rules: Rules, round_no: int) -> list[str]:
         "input string, already stripped. Return True for the accepting input and False otherwise.",
         "2. FLAG is already a global and the arena handles it: it reads stdin and prints FLAG when check(s) is "
         "True. Never use FLAG, sys or stdin yourself; never print anything. check('') must be False.",
-        f"3. Allowed imports: {', '.join(sorted(PURE_MODULES))}. Nothing else (no random).",
+        f"3. Allowed imports: {', '.join(sorted(PURE_MODULES - CHECK_FORM_BANNED))}. Nothing else (no random, "
+        "no hashes or CRCs: an answer only brute force can find is rejected).",
         "4. No name (except a bare _) or attribute may start with _ (no dunders, no __dict__, no globals()).",
         f"5. Banned names, not even as variable names: {', '.join(sorted(BANNED_NAMES))}.",
         f"6. Source at most {budget} bytes; check must finish in well under a second.",
