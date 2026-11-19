@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from claude_duel.domain.models import AgentSpec, MatchState, Stage
+from claude_duel.domain.series import decide
 
 ELO_START, ELO_K = 1500.0, 32.0
 
@@ -68,14 +69,8 @@ def entrant(agent: AgentSpec) -> str:
 
 
 def raw_winner(state: MatchState) -> str | None:
-    """Winner on raw ``scores`` (no ``score_offset``), then fewer attack tokens; None on a full tie."""
-    (a, sa), (b, sb) = sorted((x.name, state.scores.get(x.name, 0)) for x in state.agents)
-    if sa != sb:
-        return a if sa > sb else b
-    spent = {n: sum(x.tokens_used for x in state.attacks.values() if x.attacker == n) for n in (a, b)}
-    if spent[a] != spent[b]:
-        return a if spent[a] < spent[b] else b
-    return None
+    """Winner on raw ``scores`` (no ``score_offset``) with the shared tiebreak (``series.decide``)."""
+    return decide(state, state.scores)
 
 
 def results(states: Iterable[MatchState]) -> list[Result]:
@@ -126,15 +121,16 @@ def bradley_terry(rs: Iterable[Result], iters: int = 200) -> dict[str, float]:
 
 
 def ratings(rs: list[Result], boot: int = 200, seed: int = 0) -> list[Rating]:
-    """Ratings sorted best first; ``lo``/``hi`` are the bootstrap 2.5th/97.5th percentiles of the BT score."""
+    """Ratings sorted best first; ``lo``/``hi`` are the bootstrap 2.5th/97.5th percentiles of the BT score over the
+    resamples that include the entrant (no 1500 fill-in)."""
     rs = sorted(rs)
     point, display = bradley_terry(rs), elo(rs)
     rng = random.Random(seed)  # noqa: S311 - a reproducible bootstrap, not a secret
     samples: dict[str, list[float]] = {n: [] for n in point}
     for _ in range(boot):
         fit = bradley_terry([rng.choice(rs) for _ in rs], iters=60)
-        for n in point:
-            samples[n].append(fit.get(n, ELO_START))
+        for n, v in fit.items():  # an entrant left out of a resample has no estimate there (#138)
+            samples[n].append(v)
     count = {n: sum(n in (x.a, x.b) for x in rs) for n in point}
     out = []
     for n, v in point.items():
