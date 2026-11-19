@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.vendors import VENDORS
-from claude_duel.ports import Completion, CompletionRequest, SpendLedger
+from claude_duel.ports import CHAT_MODELS, RESPONSES_MODELS, Completion, CompletionRequest, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
 # and deliberately not configurable: a config that could add models or lower prices would bypass the spend caps.
@@ -62,6 +62,8 @@ def vendor_of(model: str) -> str:
 def check_model_allowed(model: str, allow_premium: bool = False) -> None:
     if model not in DEFAULT_PRICES:
         raise ConfigError(f"model {model!r} is not in the allowlist: {sorted(DEFAULT_PRICES)}")
+    if vendor_of(model) == "openai" and not model.startswith(RESPONSES_MODELS) and model not in CHAT_MODELS:
+        raise ConfigError(f"model {model!r} has no OpenAI route (neither /responses nor the chat allowlist)")
     if model in PREMIUM and not allow_premium:
         raise ConfigError(f"model {model!r} is premium; set allow_premium = true in the config to use it")
 

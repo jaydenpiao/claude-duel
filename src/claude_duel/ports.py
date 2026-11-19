@@ -18,6 +18,11 @@ KILL_SIGNAL: KilledReason = "signal"
 KILL_OUTPUT: KilledReason = "output"
 
 
+# OpenAI routing (#191): a model is sent to /responses by prefix, or to /chat only if listed; config rejects the rest.
+RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
+CHAT_MODELS = frozenset({"gpt-4o-mini", "gpt-4.1-mini"})  # the only OpenAI models sent to /chat
+
+
 class CompletionRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
     system: str
@@ -38,6 +43,7 @@ class Completion(BaseModel):
     output_tokens: int
     reasoning_tokens: int = 0  # thinking/reasoning tokens, already inside output_tokens and billed as output
     truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
+    reasoning_effort: str | None = None  # the effort the adapter actually sent (None = vendor default)
     refused: bool = False  # the vendor declined to answer (safety classifier); omitted from the log when false
     reasoning_summary: str = (
         ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)

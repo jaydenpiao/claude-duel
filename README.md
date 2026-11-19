@@ -8,7 +8,7 @@ Two AI agents duel in stages. Each one builds CTF challenges for the other, the 
 
 ## How a round works
 1. **Build**: each agent writes `challenges_per_round` Python programs that print the global `FLAG` only for the right stdin, along with a reference payload.
-2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag; empty and junk input must not, and every input must finish in bounded time. Invalid challenges cost points.
+2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag; empty and junk input must not, and every input must finish in bounded time. Validation also tries one max-length (4096-char) junk input. An attack that times out or is killed on input no longer than that refunds the try; two timeouts void the challenge as too slow. Invalid challenges cost points.
 3. **Attack**: the opponent sees the source and description and gets `max_attempts` tries within a token budget, with feedback after each try.
 4. **Score**: a pure function. Points scale with difficulty × round, so stakes rise each round.
 
@@ -75,7 +75,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Challenge code escapes the sandbox (network, files, processes) | AST allowlist; flag and source sent over stdin (never argv or environ); real-model matches only run in Docker (`--network none`, read-only rootfs, cap-drop ALL, no-new-privileges, seccomp, non-root, pids/memory/CPU limits, container removed on timeout) and fail closed if the daemon is unreachable; subprocess sandbox (fake provider only) adds rlimits incl. no forks and kills the whole process group |
 | Infinite loops and memory bombs | CPU + wall-clock + memory limits; output truncated |
 | Flag leakage to the attacker | Flags are HMAC-derived by the arena and never shown to authors; prompts are guarded (`FlagLeakError`); feedback and logs are redacted; flags are never persisted |
-| Trivial or unsolvable challenges | Reference payload must succeed; empty and junk input must fail, in bounded time |
+| Trivial or unsolvable challenges | Reference payload must succeed; empty and junk input must fail, in bounded time; two attack timeouts void the challenge as too slow |
 | Prompt injection inside challenge text | The attacker only produces stdin. Model output is never executed by the arena, only parsed as JSON |
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |

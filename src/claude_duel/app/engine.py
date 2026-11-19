@@ -19,7 +19,10 @@ from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redac
 from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
+    ATTACK_TIMEOUT,
     CAPTURED,
+    LONG_TIMEOUT,
+    TIMEOUTS_TO_VOID,
     TRUNCATED,
     Attack,
     AttackAttempt,
@@ -34,8 +37,10 @@ from claude_duel.domain.models import (
     SandboxLimits,
     Stage,
     Validation,
+    spent,
+    timeouts,
 )
-from claude_duel.domain.probes import junk_inputs
+from claude_duel.domain.probes import MAX_PAYLOAD_CHARS, junk_inputs, long_probe
 from claude_duel.domain.scoring import (
     capture_points,
     heat_of_state,
@@ -264,6 +269,7 @@ class MatchEngine:
             "purpose": request.purpose,
             "summary": self._summary(state, completion.reasoning_summary),
         }
+        charged["reasoning_effort"] = completion.reasoning_effort
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
@@ -586,11 +592,11 @@ class MatchEngine:
     def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
         """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
         budget = time.monotonic() + VALIDATION_TIME_FACTOR * state.limits.wall_seconds
-        for probe in ["", *junk_inputs(spec.reference_payload)]:
+        for probe in ["", *junk_inputs(spec.reference_payload, seed=state.seed), long_probe(spec.reference_payload)]:
             if time.monotonic() > budget:
                 return "too slow: validation ran over its time budget; check must answer every input quickly"
             out = self._run_challenge(spec.source, probe, flag, state, "validate")
-            shown = "empty input" if not probe else f"junk input {probe[:20]!r}"
+            shown = "empty input" if not probe else f"junk input {probe[:20]!r}" + ("..." if len(probe) > 20 else "")
             if flag in out.stdout:
                 return f"trivial: {shown} reveals flag"
             if out.timed_out or out.killed_reason in (KILL_WALL, KILL_SIGNAL):
@@ -808,9 +814,10 @@ class MatchEngine:
         while True:
             history = state.attempts.get(key, [])
             tokens = sum(a.tokens for a in history)
+            used = spent(history)
             if done := self._attack_outcome(ch.id, attacker, history):
                 return done
-            if len(history) >= state.max_attempts(attacker):
+            if used >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
             if stake is not None and tokens >= stake:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
@@ -825,7 +832,7 @@ class MatchEngine:
                 spec.title,
                 _with_terrain(spec.description, state.terrains.get(ch.id)),
                 spec.source,
-                len(history) + 1,
+                used + 1,
                 pairs,
                 self._memory(state, attacker),
                 self._scratch(state),
@@ -836,18 +843,31 @@ class MatchEngine:
             left = None if stake is None else stake - tokens
             if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
-            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=len(history) + 1)
+            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
             if not completion.refused:
                 self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.logged())
+            if attempt.timeout:
+                count = timeouts(state.attempts.get(key, []))
+                self._checkpoint(
+                    state,
+                    ev.CHALLENGE_TIMEOUT,
+                    challenge_id=ch.id,
+                    attacker=attacker,
+                    key=key,
+                    count=count,
+                    voided=count >= TIMEOUTS_TO_VOID,
+                )
 
     @staticmethod
     def _attack_outcome(challenge_id: str, attacker: str, history: list[AttackAttempt]) -> Attack | None:
-        """A finished attack from already-logged tries: a capture. Refusals are spent tries, not an end."""
+        """A finished attack from already-logged tries: a capture, or two timeouts (challenge voided)."""
         if history and history[-1].captured:
             return Attack.of(challenge_id, attacker, history, solved=True, reason="flag captured")
+        if timeouts(history) >= TIMEOUTS_TO_VOID:
+            return Attack.of(challenge_id, attacker, history, solved=False, reason=ATTACK_TIMEOUT)
         return None
 
     def _attempt(
@@ -881,6 +901,10 @@ class MatchEngine:
         source = contract.with_feedback(spec.source) if state.rules.retry_feedback else spec.source
         stdin = terrain.apply(ground, payload) if ground else payload
         run = self._run_challenge(source, stdin, flag, state, "attack")
+        if run.timed_out or run.killed_reason in (KILL_WALL, KILL_SIGNAL):
+            if len(stdin) > MAX_PAYLOAD_CHARS:  # S15-1: longer than validation probed, so not the author's fault
+                return AttackAttempt(payload=payload, output=LONG_TIMEOUT, tokens=tokens, usd_micros=micros)
+            return AttackAttempt(payload=payload, output=ATTACK_TIMEOUT, tokens=tokens, usd_micros=micros, timeout=True)
         output = CAPTURED if flag in run.stdout else _sandbox_output(redact(run.stdout, (flag,))[:500])
         if state.rules.integrity_control:
             self._control(state, agent, payload, flag)
