@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- OpenAI requests send a stable pseudonymous `safety_identifier` (sha256 of a per-install id, never a name or other personal data). A `cyber_policy` response is a non-retryable `CyberPolicyError` and stops the run, instead of a generic 4xx client error.
 - Repair hints cover junk-input and too-slow validation rejections; the forge prompt, README and app engine docs now say empty and junk input must fail in bounded time.
 - `junk_inputs` lives in `domain/probes.py`. Sandbox `killed_reason` is a `Literal` with named constants, so a renamed reason cannot silently skip the too-slow check.
 - image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).

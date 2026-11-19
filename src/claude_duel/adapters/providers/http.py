@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 from claude_duel.domain.errors import (
+    CyberPolicyError,
     PermanentProviderError,
     QuotaExceededError,
     RateLimitError,
@@ -20,8 +23,22 @@ def _retry_after(resp: httpx.Response) -> float | None:
         return None
 
 
+def _error_code(resp: httpx.Response) -> str | None:
+    try:
+        payload: Any = resp.json()
+    except ValueError:
+        return None
+    err = payload.get("error") if isinstance(payload, dict) else None
+    code = err.get("code") if isinstance(err, dict) else None
+    return code if isinstance(code, str) else None
+
+
 def raise_for_status(resp: httpx.Response, vendor: str) -> None:
     """Map HTTP status to the provider error taxonomy."""
+    if resp.status_code >= 400 and (_error_code(resp) == "cyber_policy" or "cyber_policy" in resp.text):
+        raise CyberPolicyError(
+            f"{vendor} cyber_policy: access limited for this safety identifier or organization; not retried"
+        )
     if resp.status_code == 429 and "insufficient_quota" in resp.text:
         raise QuotaExceededError(f"{vendor} quota exhausted or spend limit reached; top up or raise the limit")
     if resp.status_code == 429:

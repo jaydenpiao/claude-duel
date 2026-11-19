@@ -20,6 +20,7 @@ from claude_duel.config import load_settings
 from claude_duel.domain import vendors
 from claude_duel.domain.errors import (
     ConfigError,
+    CyberPolicyError,
     PermanentProviderError,
     QuotaExceededError,
     RateLimitError,
@@ -42,6 +43,8 @@ def _resp(status: int, text: str = "", headers: dict[str, str] | None = None) ->
         (500, "", TransientProviderError),
         (408, "", TransientProviderError),
         (400, "", PermanentProviderError),
+        (403, '{"error":{"code":"cyber_policy"}}', CyberPolicyError),
+        (400, "cyber_policy", CyberPolicyError),
     ],
 )
 def test_raise_for_status_maps_errors(status: int, text: str, error: type[Exception]) -> None:

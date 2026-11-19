@@ -10,6 +10,10 @@ content-filter reason is marked ``refused``.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +25,24 @@ from claude_duel.ports import Completion, CompletionRequest
 
 HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
+
+
+def install_id_path() -> Path:
+    """Per-install id file under ``$XDG_DATA_HOME`` or ``~/.local/share``, in ``claude-duel/install-id``."""
+    root = Path(os.environ["XDG_DATA_HOME"]) if os.environ.get("XDG_DATA_HOME") else Path.home() / ".local/share"
+    return root / "claude-duel" / "install-id"
+
+
+def default_safety_identifier(path: Path | None = None) -> str:
+    """Stable sha256 of a random per-install id (never a hostname, username, or other personal data)."""
+    path = path or install_id_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file() or not path.read_text().strip():
+        path.write_text(uuid.uuid4().hex)
+        path.chmod(0o600)
+    return hashlib.sha256(path.read_text().strip().encode()).hexdigest()
+
+
 # nano/mini still accept "minimal". gpt-6-luna does not; the documented migration from minimal is "low".
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
 LOW_EFFORT_MODELS = ("gpt-6-luna",)
@@ -47,8 +69,10 @@ class OpenAIProvider:
         base_url: str = "https://api.openai.com/v1",
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
+        safety_identifier: str | None = None,
     ) -> None:
         self._model = model
+        self._safety_identifier = safety_identifier if safety_identifier is not None else default_safety_identifier()
         self._summaries = True  # ask for reasoning summaries until the org turns out not to be verified for them
         self._client = httpx.Client(
             base_url=base_url,
@@ -89,6 +113,7 @@ class OpenAIProvider:
             "max_completion_tokens": request.max_tokens,
             "temperature": request.temperature,
             "response_format": {"type": "json_object"},
+            "safety_identifier": self._safety_identifier,
             "messages": [
                 {"role": "system", "content": request.system},
                 {"role": "user", "content": request.prompt},
@@ -108,6 +133,7 @@ class OpenAIProvider:
             "max_output_tokens": request.max_tokens,
             "text": {"format": fmt},
             "store": False,
+            "safety_identifier": self._safety_identifier,
         }
         effort = default_effort(self._model, request.reasoning_effort)
         reasoning = ({"effort": effort} if effort is not None else {}) | (

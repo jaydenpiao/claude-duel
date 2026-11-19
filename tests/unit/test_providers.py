@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import random
+from pathlib import Path
 
 import httpx
 import pytest
@@ -10,9 +12,10 @@ from hypothesis import strategies as st
 from pydantic import SecretStr
 
 from claude_duel.adapters.providers.fake import TEMPLATES, FakeProvider
-from claude_duel.adapters.providers.openai import OpenAIProvider
+from claude_duel.adapters.providers.openai import OpenAIProvider, default_safety_identifier
 from claude_duel.adapters.providers.retry import RetryingProvider, backoff_delay
 from claude_duel.domain.errors import (
+    CyberPolicyError,
     PermanentProviderError,
     ProviderTimeoutError,
     QuotaExceededError,
@@ -76,6 +79,12 @@ class TestRetry:
             self.make(inner, []).complete(REQ)
         assert inner.calls == 1
 
+    def test_cyber_policy_not_retried(self) -> None:
+        inner = Scripted(CyberPolicyError("cyber_policy"))
+        with pytest.raises(CyberPolicyError):
+            self.make(inner, []).complete(REQ)
+        assert inner.calls == 1
+
     @given(st.integers(0, 30), st.floats(0.01, 5), st.floats(1, 60), st.integers())
     def test_backoff_bounded(self, attempt: int, base: float, cap: float, seed: int) -> None:
         d = backoff_delay(attempt, base, cap, random.Random(seed))
@@ -83,7 +92,7 @@ class TestRetry:
 
 
 def _openai(handler: httpx.MockTransport) -> OpenAIProvider:
-    return OpenAIProvider(SecretStr("sk-test-0000000000"), "m", transport=handler)
+    return OpenAIProvider(SecretStr("sk-test-0000000000"), "m", transport=handler, safety_identifier="id-for-tests")
 
 
 class TestOpenAI:
@@ -123,6 +132,36 @@ class TestOpenAI:
         with pytest.raises(QuotaExceededError, match="spend limit"):
             p.complete(REQ)
         assert not QuotaExceededError.retryable
+
+    def test_cyber_policy_is_permanent(self) -> None:
+        body = {"error": {"code": "cyber_policy", "message": "access limited"}}
+        p = _openai(httpx.MockTransport(lambda r: httpx.Response(403, json=body)))
+        with pytest.raises(CyberPolicyError, match="not retried"):
+            p.complete(REQ)
+        assert not CyberPolicyError.retryable
+        assert issubclass(CyberPolicyError, PermanentProviderError)
+
+    def test_chat_and_responses_send_safety_identifier(self) -> None:
+        seen: list[dict[str, object]] = []
+
+        def h(req: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(req.content))
+            if req.url.path.endswith("/responses"):
+                return httpx.Response(200, json={"output": [], "usage": {}})
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "{}"}}], "usage": {}},
+            )
+
+        _openai(httpx.MockTransport(h)).complete(REQ)
+        OpenAIProvider(
+            SecretStr("sk-test-0000000000"),
+            "gpt-6-luna",
+            transport=httpx.MockTransport(h),
+            safety_identifier="id-for-tests",
+        ).complete(REQ)
+        assert all(s["safety_identifier"] == "id-for-tests" for s in seen)
+        assert len(seen) == 2
 
     def test_timeout_and_transport(self) -> None:
         def timeout(r: httpx.Request) -> httpx.Response:
@@ -193,3 +232,22 @@ class TestDeadline:
         sleeps: list[float] = []
         inner = Scripted(RateLimitError("429", retry_after=2), "ok")
         assert self.make(inner, sleeps, [0.0], 10).complete(REQ).text == "ok"
+
+
+class TestSafetyIdentifier:
+    def test_stable_hash_is_not_the_raw_id(self, tmp_path: Path) -> None:
+        path = tmp_path / "install-id"
+        first = default_safety_identifier(path)
+        second = default_safety_identifier(path)
+        raw = path.read_text().strip()
+        assert first == second
+        assert len(first) == 64
+        assert first == hashlib.sha256(raw.encode()).hexdigest()
+        assert first != raw
+        assert len(raw) == 32
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+    def test_new_path_gets_a_different_id(self, tmp_path: Path) -> None:
+        a = default_safety_identifier(tmp_path / "a")
+        b = default_safety_identifier(tmp_path / "b")
+        assert a != b
