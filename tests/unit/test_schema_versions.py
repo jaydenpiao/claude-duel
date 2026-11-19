@@ -39,3 +39,18 @@ def test_series_version_is_checked() -> None:
         sr.fold("s", [_created(sr.SERIES_CREATED, {}, v=sr.SERIES_SCHEMA_VERSION + 1)])
     with pytest.raises(EventLogCorruptError, match="SeriesState"):
         sr.fold("s", [_created(sr.SERIES_CREATED, {"junk": 1})])
+
+
+def test_challenge_timeout_is_a_v3_event() -> None:
+    event = Event(
+        v=ev.SCHEMA_VERSION,
+        seq=1,
+        type=ev.CHALLENGE_TIMEOUT,
+        trace_id="t",
+        data={"challenge_id": "c", "attacker": "a", "key": "k", "count": 1, "voided": False},
+    )
+    payload = ev.payload(event)
+    assert ev.SCHEMA_VERSION == 3
+    assert isinstance(payload, ev.ChallengeTimeout)
+    assert payload.count == 1
+    assert payload.voided is False

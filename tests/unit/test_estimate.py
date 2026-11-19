@@ -70,3 +70,10 @@ def test_agent_output_cap_raises_the_estimate() -> None:
     walled = estimate(Rules(wallet=WalletRule(max_output_tokens=1000)), MODEL, lim, agents)
     assert walled.tokens == walled.calls * (IN_TOKENS + 1000)
     assert estimate(rules, MODEL, lim, (AgentSpec(name="a"), AgentSpec(name="b"))) == base
+
+
+def test_refunded_timeouts_stay_inside_the_bound() -> None:
+    """1 round, max_attempts=3: a void needs 2 timeouts and the first is refunded, so 4 attack calls per challenge."""
+    rules = Rules(rounds=1, challenges_per_round=1, max_attempts=3, max_format_retries=0, early_bonus_attempts=0)
+    builds = 1 + (1 if rules.difficulty_gate else 0)
+    assert estimate(rules, "fake-1", BudgetLimits()).calls == 2 * (builds + 4)
