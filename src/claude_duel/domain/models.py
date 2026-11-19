@@ -167,11 +167,21 @@ class LedgerRule(_Frozen):
         return self
 
 
+class ProphecyRule(_Frozen):
+    """Prophecy menu tier (design-prophecy-wiring.md 5): sealed forecasts about the opponent's next round."""
+
+    max_per_round: int = Field(default=2, ge=1, le=2)
+    pool: int = Field(default=6, ge=1, le=20)  # per agent per match: total |swing| never exceeds it
+    round_cap: int = Field(default=3, ge=1, le=6)  # also capped by the target's cheapest defense award
+    rates_version: int = Field(default=0, ge=0)  # prophecy.PROPHECY_RATES key, so replay is deterministic
+
+
 class DeepRule(_Frozen):
     """Deep layer (design-core-logic deep-layer doc), phase 1: Ghost Codex replay, no imports. Ledger only."""
 
     ghosts: bool = False  # replay past captures' payloads against the opponent's new challenges, $0 API
     max_ghost_runs: int = Field(default=24, ge=0, le=200)  # sandbox runs per round
+    prophecy: ProphecyRule | None = None  # off by default
 
 
 RULES_VERSION = 2  # bump when a Rules default changes meaning; logged with every match
@@ -476,6 +486,16 @@ class Keystone(_Frozen):
     revealed: bool = False
 
 
+class ProphecySeal(_Frozen):
+    """One sealed prophecy; template, stake and salt stay unset until revealed (only the commit is logged first)."""
+
+    commit: str
+    template: str | None = None
+    stake: int | None = None
+    salt: str = ""
+    revealed: bool = False
+
+
 class MatchState(BaseModel):
     """Mutable aggregate; persisted after every unit of work."""
 
@@ -503,6 +523,9 @@ class MatchState(BaseModel):
     scored_rounds: list[int] = Field(default_factory=list)
     attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
     ghost_runs: dict[str, bool] = Field(default_factory=dict)  # "<round>:<ghost id>><challenge id>" -> hit
+    prophecies: dict[str, ProphecySeal] = Field(default_factory=dict)  # "<target round>:<agent>:<slot>" -> seal
+    prophecy_points: dict[str, int] = Field(default_factory=dict)  # agent -> settled prophecy total (>= 0)
+    prophecy_swing: dict[str, int] = Field(default_factory=dict)  # agent -> sum of |settled delta| (<= pool)
     build_errors: dict[str, list[str]] = Field(default_factory=dict)
     last_seq: int = -1
     failure: str | None = None

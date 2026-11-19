@@ -27,14 +27,17 @@ MISS = RoundArtifacts(challenges=(B,), keystone=None, captures=3, ghost_kills=2,
 C = ChallengeFacts(cid="c3", size=50, tag="checksum")
 SHORT = RoundArtifacts(challenges=(A, B), keystone="c1", captures=2, ghost_kills=1, stakes=(1_000,))
 CHK = RoundArtifacts(challenges=(C,), keystone="c3")
+MAZE = RoundArtifacts(
+    challenges=(ChallengeFacts(cid="c4", size=200, tag="maze"), ChallengeFacts(cid="c5", size=300, tag="state-machine"))
+)
 FIXTURES = {  # template -> (settles true, settles false)
     "keystone_longest": (HIT, SHORT),
     "keystone_shortest": (SHORT, HIT),
     "keystone_first": (SHORT, HIT),
-    "uses_hash": (HIT, MISS),
+    "uses_maze": (MAZE, HIT),
     "uses_vm": (HIT, CHK),
     "uses_checksum": (CHK, HIT),
-    "no_hash": (MISS, HIT),
+    "uses_state_machine": (MAZE, HIT),
     "ghost_kill": (MISS, HIT),
     "no_captures": (HIT, MISS),
     "one_capture_max": (HIT, MISS),
@@ -62,7 +65,7 @@ def test_commit_matches_reveal_and_a_tampered_reveal_fails() -> None:
     sealed = commit(p("uses_vm", 2), "salt")
     assert verify(p("uses_vm", 2), "salt", sealed)
     assert not verify(p("uses_vm", 3), "salt", sealed)
-    assert not verify(p("uses_hash", 2), "salt", sealed)
+    assert not verify(p("uses_maze", 2), "salt", sealed)
 
 
 def test_invalid_json_is_skipped_not_replaced() -> None:

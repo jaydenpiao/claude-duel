@@ -62,6 +62,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Prophecy domain glue (no engine wiring yet): `prophecy_*` seal/skip/reveal/settle events and `round_scored.prophecy`, part of the unreleased SCHEMA 3 (no v3 log from a real match exists yet, so no bump). Menu swaps `uses_hash`/`no_hash` for `uses_maze`/`uses_state_machine` since R5 bans hash libraries.
 - `call_charged` logs the reasoning effort actually sent, including defaults (#191).
 - `claude-fable-5-2` on the allowlist at $8/$40 per 1M input/output tokens (standard list from Anthropic pricing, 2026-11-13), premium like `claude-fable-5-1`. Defaults and launch prereg are unchanged.
 - Model refusals (Anthropic `stop_reason=refusal`, OpenAI content-filter / `message.refusal`) are a typed outcome, logged on `call_charged.refused` and `AttackAttempt.refused` only when true so older logs stay byte-identical (ADR 0016).
