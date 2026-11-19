@@ -7,16 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import budget
 from claude_duel.app.container import build_event_log, build_series_log, build_store
 from claude_duel.app.series import play_series, verify_series
 from claude_duel.cli import main
 from claude_duel.config import Settings
+from claude_duel.domain import events as ev
 from claude_duel.domain import series as sr
-from claude_duel.domain.errors import BudgetExceededError, EventLogCorruptError
+from claude_duel.domain.errors import BudgetExceededError, CyberPolicyError, EventLogCorruptError
 from claude_duel.domain.events import initial_state
-from claude_duel.domain.models import AgentSpec, Attack, Event, Rules
+from claude_duel.domain.models import AgentSpec, Attack, Event, Rules, Stage
 from claude_duel.observability import InMemoryMetrics
+from claude_duel.ports import Completion, CompletionRequest
 
 AGENTS = (AgentSpec(name="alice", skill=5), AgentSpec(name="bob", skill=0))
 
@@ -106,3 +109,29 @@ def test_cli_series(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pyt
     assert main(["--config", str(cfg), "series", "--series-id", "c1", "--games", "1"]) == 0
     assert "series verified ✓" in capsys.readouterr().out
     assert main(["--config", str(cfg), "series", "--games", "2"]) == 2
+
+
+def test_cyber_policy_pauses_the_series(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An identifier-level limit is not a forfeit: no try is spent, no game is recorded, and a rerun resumes it."""
+    settings = _settings(tmp_path)
+    real = FakeProvider.complete
+
+    def limited(self: FakeProvider, request: CompletionRequest) -> Completion:
+        if request.purpose == "attack":
+            raise CyberPolicyError("cyber_policy")
+        return real(self, request)
+
+    monkeypatch.setattr(FakeProvider, "complete", limited)
+    with pytest.raises(CyberPolicyError):
+        play_series(settings, "s9", sr.SeriesRule(games=3), InMemoryMetrics())
+    assert sr.fold("s9", build_series_log(settings).read("s9")).games == []  # paused, nothing advanced
+    game = build_store(settings).load("s9-g1")
+    assert game.stage is Stage.FAILED
+    kinds = [e.type for e in build_event_log(settings).read("s9-g1")]
+    assert ev.ATTACK_STARTED in kinds  # it reached an attack
+    assert ev.ATTACK_ATTEMPTED not in kinds  # and spent no try
+    assert "CyberPolicyError" in (game.failure or "")
+    monkeypatch.setattr(FakeProvider, "complete", real)  # the provider swap; only an explicit rerun resumes
+    state = play_series(settings, "s9", sr.SeriesRule(games=3), InMemoryMetrics())
+    assert state.done()
+    assert verify_series(settings, "s9").consistent
