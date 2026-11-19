@@ -64,7 +64,8 @@ def test_ledger_overlay_series_and_tournament_share_the_heat_pin(tmp_path: Path)
     path.write_text('[rules]\nmode = "ledger"\n\n[rules.ledger]\nheat_window = 2\n', encoding="utf-8")
     loaded = load_settings(path, env={})
     assert loaded.rules.ledger is not None
-    assert (loaded.rules.ledger.heat_token_cap, loaded.rules.ledger.heat_compare) == (256, "full")
+    assert (loaded.rules.ledger.heat_token_cap, loaded.rules.ledger.heat_compare) == (None, "full")
+    assert (loaded.rules.ledger.heat_metric, loaded.rules.ledger.heat_history_matches) == ("lcs-v1", 3)
     assert loaded.rules.ledger.keystone is False
     rules = loaded.rules.model_copy(update={"rounds": 1, "challenges_per_round": 1})
     settings = loaded.model_copy(
@@ -82,10 +83,11 @@ def test_ledger_overlay_series_and_tournament_share_the_heat_pin(tmp_path: Path)
     match = build_store(settings).load("overlay-g1")
     assert match.rules.ledger is not None
     assert (match.rules.ledger.heat_token_cap, match.rules.ledger.heat_ref_cap, match.rules.ledger.heat_compare) == (
-        256,
+        None,
         48,
         "full",
     )
+    assert "heat_token_cap" not in match.rules.dump()["ledger"]
     logged = sr.fold("overlay", build_series_log(settings).read("overlay")).rules
     assert logged == match.rules
     tour = settings.model_copy(update={"store_dir": tmp_path / "tour"})
