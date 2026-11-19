@@ -23,8 +23,11 @@ from claude_duel.domain.models import TRUNCATED, AgentSpec, Event, MatchState, R
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
-MAX_BOARDS = 16
+MAX_BOARDS = 64  # money caps bind first; this only stops a typo
 Result = Literal["first", "second", "inconclusive", "void"]
+
+
+SIGN_TEST_ALPHA = 0.05
 
 
 class DuplicateRule(BaseModel):
@@ -86,10 +89,8 @@ class DuplicateState(BaseModel):
         return ms.sprt(r.wins, r.losses, self.rule.sprt_p1, self.rule.alpha, self.rule.beta)
 
     def done(self) -> bool:
-        n = len(self.boards)
-        if self.capped or n >= self.rule.boards_max:
-            return True
-        return n >= self.rule.boards_min and self.rule.stop == "sprt" and self.sprt() != "continue"
+        r = self.record()
+        return self.capped or stop_now(self.rule, len(self.boards), r.wins, r.losses)
 
     def p_value(self) -> float:
         r = self.record()
@@ -105,12 +106,7 @@ class DuplicateState(BaseModel):
         if self.void_share_exceeded():
             return "void"
         r = self.record()
-        test = self.sprt()
-        if r.wins > r.losses and (self.p_value() <= 0.05 or test == "first"):
-            return "first"
-        if r.losses > r.wins and (self.p_value() <= 0.05 or test == "second"):
-            return "second"
-        return "inconclusive"
+        return verdict(self.rule, r.wins, r.losses)
 
     def winner(self) -> str | None:
         res = self.result()
@@ -124,6 +120,24 @@ class DuplicateState(BaseModel):
 
     def half_id(self, board_no: int, half: int, replay: int = 0) -> str:
         return f"{self.duplicate_id}-b{board_no}{'ab'[half]}" + (f"-r{replay}" if replay else "")
+
+
+def stop_now(rule: DuplicateRule, boards: int, wins: int, losses: int) -> bool:
+    """The stop rule after ``boards`` boards: boards_max, or the SPRT past boards_min."""
+    if boards >= rule.boards_max:
+        return True
+    sprt = ms.sprt(wins, losses, rule.sprt_p1, rule.alpha, rule.beta)
+    return boards >= rule.boards_min and rule.stop == "sprt" and sprt != "continue"
+
+
+def verdict(rule: DuplicateRule, wins: int, losses: int) -> Result:
+    """A side wins only when the sign test (p <= 0.05) or the SPRT backs it; void handling is the caller's."""
+    p, test = ms.sign_test_p(wins, losses), ms.sprt(wins, losses, rule.sprt_p1, rule.alpha, rule.beta)
+    if wins > losses and (p <= SIGN_TEST_ALPHA or test == "first"):
+        return "first"
+    if losses > wins and (p <= SIGN_TEST_ALPHA or test == "second"):
+        return "second"
+    return "inconclusive"
 
 
 def next_board_usd(state: DuplicateState) -> float:

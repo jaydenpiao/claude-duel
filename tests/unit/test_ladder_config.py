@@ -40,7 +40,7 @@ def test_examples_validate(name: str) -> None:
         (_plan(), {"start_tier.a": -1}, r"start_tier.a=-1 is out of range"),
         (_plan(match={"boards_min": 5, "boards_max": 4}), {}, "boards_min must be >= 1 and <= boards_max"),
         (_plan(match={"boards_min": 0, "boards_max": 4}), {}, "boards_min must be >= 1"),
-        (_plan(match={"boards_min": 1, "boards_max": 17}), {}, "boards_max <= 16"),
+        (_plan(match={"boards_min": 1, "boards_max": 65}), {}, "boards_max <= 64"),
         (_plan(), {"caps.attack": 0}, "attack must be > 0"),
         (_plan(), {"budget.match_max_usd": -1.0}, "match_max_usd must be > 0"),
         (_plan(), {"budget.match_max_usd": 11.0}, "match_max_usd must be <= ladder_max_usd"),
