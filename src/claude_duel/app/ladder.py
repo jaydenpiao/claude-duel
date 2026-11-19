@@ -38,6 +38,10 @@ class Projection:
     total_usd: float
     refusals: list[str]  # non-empty: the ladder must not start
 
+    def typical_usd(self) -> float:
+        """The same path at typical cost: an expected figure to pick caps from, never the refusal basis."""
+        return sum(r.typical_usd for r in self.rows)
+
 
 def match_usd(cfg: LadderConfig, a: str, b: str, *, worst: bool = True) -> float:
     """One duplicate match: two halves per board, each half a match where both agents play."""

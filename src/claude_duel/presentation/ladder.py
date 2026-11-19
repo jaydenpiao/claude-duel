@@ -16,6 +16,11 @@ def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
     lines = [f"{'side a':<20}{'side b':<20}{'worst $':>10}{'typical $':>11}"]
     lines += [f"{r.a:<20}{r.b:<20}{r.worst_usd:>10.2f}{r.typical_usd:>11.2f}" for r in proj.rows]
     lines.append(f"worst-case ladder ${proj.total_usd:.2f} / ladder_max_usd ${ladder_max_usd:.2f}")
+    dearest = max((r.typical_usd for r in proj.rows), default=0.0)
+    lines.append(
+        f"typical ladder ${proj.typical_usd():.2f} (dearest match ${dearest:.2f}): expected, no retries or replays,"
+        " assumed reply sizes; caps are checked against the worst case"
+    )
     lines += [f"refused: {r}" for r in proj.refusals] or ["dry run ok: within every cap"]
     return lines
 
@@ -27,6 +32,7 @@ def projection_view(proj: Projection, ladder_max_usd: float) -> dict[str, object
             for r in proj.rows
         ],
         "total_usd": round(proj.total_usd, 4),
+        "typical_usd": round(proj.typical_usd(), 4),
         "ladder_max_usd": ladder_max_usd,
         "refusals": proj.refusals,
     }

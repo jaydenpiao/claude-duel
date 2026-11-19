@@ -81,9 +81,13 @@ def test_cli_dry_run_and_play(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "c.toml").write_text('sandbox = "subprocess"\n')
     assert main(["ladder", str(FAKE), "--dry-run"]) == 0
-    assert "dry run ok" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "dry run ok" in out
+    assert "typical ladder $0.00" in out
     assert main(["ladder", str(FAKE), "--dry-run", "--format", "json", "--boards-max", "3"]) == 0
-    assert '"refusals": []' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert '"refusals": []' in out
+    assert '"typical_usd": 0.0' in out
     assert main(["--config", "c.toml", "ladder", str(FAKE), "--ladder-id", "lad-four"]) == 0
     out = capsys.readouterr().out
     assert "ladder lad-four" in out

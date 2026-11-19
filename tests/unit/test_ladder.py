@@ -72,6 +72,7 @@ def test_projection_golden(name: str, total: float, rows: int) -> None:
     assert round(proj.total_usd, 2) == total
     assert len(proj.rows) == rows
     assert all(r.typical_usd <= r.worst_usd for r in proj.rows)
+    assert proj.typical_usd() <= proj.total_usd
 
 
 def test_match_cost_scales_with_boards_and_replays() -> None:
