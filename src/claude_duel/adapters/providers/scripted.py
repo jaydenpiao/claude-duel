@@ -1,7 +1,8 @@
-"""Scripted bot for the $0 no-fluke harness: captures with a fixed chance per try.
+"""Scripted bot for the $0 no-fluke harness: cracks a challenge with a fixed chance (drawn once per challenge).
 
 Both bots on a board build the same fake template (chosen by the board's ``build_seed``, never the agent name), so
-the only skill gap is the capture chance. Each attack try draws once from the bot's own seeded ``random.Random``;
+the only skill gap is the capture chance. Each challenge draws once from the bot's own seeded ``random.Random`` (a
+miss misses every try, as a bot that cannot see the trick would);
 a run is reproducible because the engine's call order is deterministic. Only ``app/harness.py`` wires it.
 """
 
@@ -23,6 +24,7 @@ class ScriptedProvider(FakeProvider):
         self._pct = capture_pct
         self._rng = random.Random(seed)  # noqa: S311 - a reproducible simulation draw, not a secret
         self._build_seed = build_seed
+        self._cracked: dict[str, bool] = {}
 
     def complete(self, request: CompletionRequest) -> Completion:
         if request.purpose == "build":
@@ -30,7 +32,13 @@ class ScriptedProvider(FakeProvider):
             return super().complete(request.model_copy(update={"prompt": prompt}))
         if request.purpose != "attack":
             return super().complete(request)
-        hit = self._rng.random() * 100 < self._pct
+        challenge = re.search(r"^CHALLENGE: (\S+)$", request.prompt, re.M)
+        key = challenge.group(1) if challenge else ""
+        hit = self._cracked.get(key) if key else None
+        if hit is None:
+            hit = self._rng.random() * 100 < self._pct
+            if key:
+                self._cracked[key] = hit
         known = next((t.payload for t in TEMPLATES if t.source in request.prompt), None)
         payload = known if hit and known is not None else "scripted-miss"
         return self._wrap(request, "```json\n" + json.dumps({"payload": payload}) + "\n```")
