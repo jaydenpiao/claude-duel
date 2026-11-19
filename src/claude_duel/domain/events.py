@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
+    ATTACK_TIMEOUT,
     AgentSpec,
     Attack,
     AttackAttempt,
@@ -46,6 +47,7 @@ ATTACK_STARTED = "attack_started"
 ALLOCATE_STARTED = "allocate_started"
 ATTACK_ATTEMPTED = "attack_attempted"
 CHALLENGE_ATTACKED = "challenge_attacked"
+CHALLENGE_TIMEOUT = "challenge_timeout"
 ROUND_SCORED = "round_scored"
 FINDING_FLAGGED = "finding_flagged"
 NOTE_RECORDED = "note_recorded"
@@ -60,7 +62,7 @@ GHOST_RUN = "ghost_run"
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and later
 # Rules/Usage/AttackAttempt fields (a v1 build would reject them under extra="forbid").
 # 3 = rules v2 heat contract (heat_metric and heat_history_matches; a v2 reader would reject those
-# fields under extra="forbid"). Old v0-v2 events still fold.
+# fields under extra="forbid") and the challenge_timeout event. Old v0-v2 events still fold.
 SCHEMA_VERSION = 3
 
 
@@ -163,6 +165,16 @@ class AttackAttempted(_Payload):
 class ChallengeAttacked(_Payload):
     key: str
     attack: Attack
+
+
+class ChallengeTimeout(_Payload):
+    """An attack sandbox run hit the wall or a signal; the try is refunded. ``count`` is timeouts on this challenge."""
+
+    challenge_id: str
+    attacker: str
+    key: str
+    count: int
+    voided: bool = False  # true on the timeout that voids the challenge
 
 
 class BudgetOverridden(_Payload):
@@ -311,6 +323,19 @@ def _attacked(state: MatchState, p: ChallengeAttacked) -> None:
     state.attacks[p.key] = p.attack
 
 
+def _challenge_timeout(state: MatchState, p: ChallengeTimeout) -> None:
+    """When ``voided``, mark the challenge invalid so scoring applies the author forfeit."""
+    if not p.voided or p.challenge_id not in state.validations:
+        return
+    current = state.validations[p.challenge_id]
+    if current.valid:
+        state.validations[p.challenge_id] = Validation(
+            challenge_id=p.challenge_id,
+            valid=False,
+            reason=ATTACK_TIMEOUT,
+        )
+
+
 def _overridden(state: MatchState, p: BudgetOverridden) -> None:
     del state, p  # audit only
 
@@ -362,6 +387,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     ALLOCATE_STARTED: (AllocateStarted, _allocate_started),
     ATTACK_ATTEMPTED: (AttackAttempted, _attempted),
     CHALLENGE_ATTACKED: (ChallengeAttacked, _attacked),
+    CHALLENGE_TIMEOUT: (ChallengeTimeout, _challenge_timeout),
     ROUND_SCORED: (RoundScored, _scored),
     FINDING_FLAGGED: (FindingFlagged, _flagged),
     NOTE_RECORDED: (NoteRecorded, _noted),
