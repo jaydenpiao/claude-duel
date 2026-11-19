@@ -110,6 +110,25 @@ class ClockRule(_Frozen):
     input_divisor: int = Field(default=4, ge=1)
 
 
+class SolvabilityRule(_Frozen):
+    """Check-form solvability band (design rec R1): the answer must be reachable without brute force, and
+    random guesses must rarely pass. Off by default; the ``checked`` preset turns it on."""
+
+    enabled: bool = False
+    max_solver_checks: int | None = Field(
+        default=None,
+        ge=1,
+        description="check() calls the author's solver may make; None: 2,000, or 200,000 with attacker_solver",
+    )
+    density_samples: int = Field(default=4096, ge=16, le=65_536)
+    max_density_ppm: int = Field(default=15_625, ge=1, le=1_000_000, description="15,625 ppm = 1 in 64")
+
+    def solver_cap(self, attacker_solver: bool) -> int:
+        if self.max_solver_checks is not None:
+            return self.max_solver_checks
+        return 200_000 if attacker_solver else 2_000
+
+
 class MemoryRule(_Frozen):
     """Between-round memory (#19): what each agent is shown about earlier rounds (domain/memory.py)."""
 
@@ -213,6 +232,7 @@ class Rules(_Frozen):
     scoring: ScoringRule = ScoringRule()
     framing: FramingRule = FramingRule()
     memory: MemoryRule = MemoryRule()
+    solvability: SolvabilityRule = SolvabilityRule()
     ledger: LedgerRule | None = Field(default=None, description="Sealed Ledger stakes (mode ledger); None = off")
     deep: DeepRule | None = Field(default=None, description="deep layer on top of ledger; None = off")
     wallet: WalletRule = WalletRule()
@@ -351,6 +371,9 @@ class Validation(_Frozen):
     challenge_id: str
     valid: bool
     reason: str
+    solver_checks: int | None = None  # R1: check() calls the author's solver made (logged for tuning)
+    density_ppm: int | None = None  # R1: share of seeded random inputs check() accepted
+    log2_space: float | None = None  # R1: size of the sampled input space
 
 
 CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)

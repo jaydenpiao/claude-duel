@@ -1,7 +1,16 @@
 """Named rule presets (ADR 0007). A mode is plain ``Rules`` data; config overrides any field on top."""
 
 from claude_duel.domain.heat_tokens import HISTORY_MATCHES, REF_CAP
-from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
+from claude_duel.domain.models import (
+    ClockRule,
+    DeepRule,
+    LedgerRule,
+    MemoryRule,
+    Rules,
+    ScoringRule,
+    SolvabilityRule,
+    WalletRule,
+)
 
 MODES: dict[str, Rules] = {
     "classic": Rules(),
@@ -15,6 +24,7 @@ MODES: dict[str, Rules] = {
         early_bonus_attempts=2,
         retry_hint=True,
         retry_feedback=True,
+        solvability=SolvabilityRule(enabled=True),
     ),
     # Scored modes (#67) run on a token clock, so provider latency never decides a result; the wall-clock
     # match_deadline_s stays only as a safety backstop that fails (never scores) a match.

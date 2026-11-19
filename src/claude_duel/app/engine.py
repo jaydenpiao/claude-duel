@@ -12,7 +12,7 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
+from claude_duel.domain import contract, findings, ghosts, memory, policy, solvability, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
 from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
@@ -120,6 +120,7 @@ class MatchEngine:
         self._store = store
         self._log = event_log
         self._metrics = metrics
+        self._solv: dict[str, dict[str, Any]] = {}  # R1 measurements per challenge, logged on validation
         self._observer = IsolatedObserver(observer, metrics) if observer is not None else None
         self._heat = HeatScorer()  # heat memo shared by scoring and memory across this engine's rounds
 
@@ -376,7 +377,7 @@ class MatchEngine:
             if ch.id in state.validations:
                 continue
             ok, reason = self._check(state, ch)
-            v = Validation(challenge_id=ch.id, valid=ok, reason=reason)
+            v = Validation(challenge_id=ch.id, valid=ok, reason=reason, **self._solv.get(ch.id, {}))
             self._checkpoint(state, ev.CHALLENGE_VALIDATED, validation=v.model_dump(mode="json"))
 
     def _check(self, state: MatchState, ch: Challenge) -> tuple[bool, str]:
@@ -531,9 +532,19 @@ class MatchEngine:
             return spec, None
         decoy = _decoy(state, cid, "solver")  # SV-1: never the real flag, so the payload can't be derived from it
         started = time.monotonic()
-        payload, reason = self._run_solver(state, spec.source, spec.solver, decoy, "solve_reference")
+        band = state.rules.solvability
+        tag = None
+        if band.enabled and state.rules.challenge_form == "check":  # fresh per try: a repair hint can't leak it
+            tag = solvability.nonce(
+                state.secret or state.match_id, f"{cid}:{len(state.build_errors.get(cid, []))}", "solver"
+            )
+        payload, reason, calls = self._run_solver(state, spec.source, spec.solver, decoy, "solve_reference", tag)
         took = time.monotonic() - started
         self._metrics.timing("solver.seconds", took)
+        if calls is not None:
+            self._solv.setdefault(cid, {})["solver_checks"] = calls
+            self._metrics.timing("solver.checks", calls)
+        reason = reason or (self._over_budget(state, calls) if tag else None)
         if reason:
             return spec, reason
         if not state.rules.attacker_solver and took > state.limits.wall_seconds + SOLVER_GRACE_SECONDS:
@@ -543,16 +554,31 @@ class MatchEngine:
             )
         return spec.model_copy(update={"reference_payload": payload}), None
 
+    @staticmethod
+    def _over_budget(state: MatchState, calls: int | None) -> str | None:
+        """R1 upper bound: too many check() calls means the answer is only reachable by brute force."""
+        if calls is None:
+            return "solver failed: it stopped before the end (do not exit early; just print the answer)"
+        cap = state.rules.solvability.solver_cap(state.rules.attacker_solver)
+        if calls > cap:
+            return (
+                f"solver too brute-force: it called check() {calls:,} times, over the {cap:,} allowed; "
+                "your answer is only reachable by brute force, so give the attacker a chain of deductions"
+            )
+        return None
+
     def _run_solver(
-        self, state: MatchState, source: str, solver: str, flag: str, purpose: str
-    ) -> tuple[str, str | None]:
+        self, state: MatchState, source: str, solver: str, flag: str, purpose: str, tag: str | None = None
+    ) -> tuple[str, str | None, int | None]:
         """Run a solver (same policy and sandbox, empty stdin, 4x time): (its stdout payload, None) or ("", why)."""
         program, cap = solver, state.rules.max_source_bytes(state.round)
         if state.rules.challenge_form == "check":
             program, cap = contract.solver_program(source, solver), 2 * cap
         rejected = policy.check_source(program, cap)  # the whole program that runs, definitions included
         if rejected:
-            return "", f"solver: {rejected}"
+            return "", f"solver: {rejected}", None
+        if tag is not None:  # arena code added after the policy check: counts check() calls (R1)
+            program = solvability.counted(source, solver, tag)
         lim = state.limits
         slow = lim.model_copy(
             update={
@@ -561,7 +587,8 @@ class MatchEngine:
             }
         )
         out = self._run_challenge(program, "", flag, state, purpose, slow)
-        payload = out.stdout.strip()
+        stdout, calls = solvability.split_count(out.stdout, tag) if tag else (out.stdout, None)
+        payload = stdout.strip()
         if not payload or out.exit_code or out.timed_out:
             status = "timeout" if out.timed_out else f"exit {out.exit_code}"
             seen = redact(payload, (flag,))[
@@ -569,8 +596,8 @@ class MatchEngine:
             ]  # belt and braces: the solver runs on a decoy flag (SV-1)
             reason = f"solver failed ({status}); it printed {seen!r}"
             assert_no_flag(reason, flag, "solver failure")
-            return "", reason
-        return payload, None
+            return "", reason, calls
+        return payload, None, calls
 
     def _problem(self, state: MatchState, cid: str, round_no: int, spec: ChallengeSpec) -> str | None:
         """Why a challenge is invalid (policy, then sandboxed reference and empty-input runs), or None."""
@@ -601,7 +628,7 @@ class MatchEngine:
         second = _decoy(state, cid, "second")
         if second not in self._run_challenge(spec.source, spec.reference_payload, second, state, "validate").stdout:
             return "flag-dependent: the reference payload only works for one flag (it must not depend on FLAG)"
-        return self._probes(state, spec, flag)
+        return self._probes(state, spec, flag) or self._density(state, cid, spec)
 
     def _probes(self, state: MatchState, spec: ChallengeSpec, flag: str) -> str | None:
         """S10-1: empty and junk inputs must neither reveal the flag nor time out, within a shared time budget."""
@@ -615,6 +642,35 @@ class MatchEngine:
                 return f"trivial: {shown} reveals flag"
             if out.timed_out or out.killed_reason in (KILL_WALL, KILL_SIGNAL):
                 return f"too slow: {shown} timed out or was killed; check must answer every input quickly"
+        return None
+
+    def _density(self, state: MatchState, cid: str, spec: ChallengeSpec) -> str | None:
+        """R1 lower bound: seeded random inputs shaped like the answer must rarely pass check()."""
+        band, payload = state.rules.solvability, spec.reference_payload.strip()
+        if not band.enabled or state.rules.challenge_form != "check" or len(payload) > solvability.DENSITY_MAX_LENGTH:
+            return None
+        tag = solvability.nonce(state.secret or state.match_id, cid, "density")
+        inputs = solvability.samples(state.seed or state.match_id, cid, payload, band.density_samples)
+        lim = state.limits
+        slow = lim.model_copy(
+            update={
+                "wall_seconds": lim.wall_seconds * SOLVER_TIME_FACTOR,
+                "cpu_seconds": lim.cpu_seconds * SOLVER_TIME_FACTOR,
+            }
+        )
+        program = solvability.density_program(spec.source, inputs, tag)
+        out = self._run_challenge(program, "", _decoy(state, cid, "density"), state, "density", slow)
+        _, hits = solvability.split_count(out.stdout, tag)
+        if hits is None:  # too slow to sample: not evidence either way, so the challenge stands
+            self._metrics.incr("density.unmeasured")
+            return None
+        density = solvability.ppm(hits, len(inputs))
+        self._solv.setdefault(cid, {}).update(density_ppm=density, log2_space=solvability.log2_space(payload))
+        if density > band.max_density_ppm:
+            return (
+                f"too easy to guess: {density / 10_000:.1f}% of random inputs like your answer pass check() "
+                f"(the limit is {band.max_density_ppm / 10_000:.2f}%); make the accepted set much smaller"
+            )
         return None
 
     # -- stage 3: attack --------------------------------------------------
@@ -908,7 +964,7 @@ class MatchEngine:
         if state.rules.attacker_solver and move.solver.strip():
             self._metrics.incr("attack.solver")
             decoy = flag_of(state.secret, f"{agent}:attacker-solver", state.round)  # never the challenge's flag
-            payload, failed = self._run_solver(state, spec.source, move.solver, decoy, "attack_solver")
+            payload, failed, _ = self._run_solver(state, spec.source, move.solver, decoy, "attack_solver")
             if failed:
                 return AttackAttempt(payload=MALFORMED, output=failed, tokens=tokens, usd_micros=micros)
         self._flag(state, findings.scan_payload(agent, state.round, payload), flag)
