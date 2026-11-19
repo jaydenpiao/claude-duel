@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from claude_duel.app.budget import CostBudget
+from claude_duel.app.budget import CostBudget, SpendCap
 from claude_duel.app.container import (
     build_budget,
     build_driver_lock,
@@ -13,7 +13,7 @@ from claude_duel.app.container import (
     pin_agents,
     pin_entrants,
 )
-from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
+from claude_duel.app.driver import append, check_caps, open_or_create, pinned
 from claude_duel.app.series import play_series
 from claude_duel.app.session import open_match
 from claude_duel.config import Settings

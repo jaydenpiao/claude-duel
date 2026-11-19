@@ -42,3 +42,16 @@ def test_fable_5_2_is_premium_at_list_price() -> None:
         check_model_allowed("claude-fable-5-2")
     check_model_allowed("claude-fable-5-2", allow_premium=True)
     assert vendor_of("claude-fable-5-2") == "anthropic"
+
+
+@pytest.mark.parametrize(
+    ("model", "price"),
+    [("gpt-6.1-terra", (1.00, 5.00)), ("gpt-6.2-sol", (2.00, 10.00)), ("gpt-6.2-astra", (8.00, 40.00))],
+)
+def test_gpt_6_2_lineup_is_premium_at_list_price(model: str, price: tuple[float, float]) -> None:
+    """Standard OpenAI list, 2026-11-19, short context."""
+    assert DEFAULT_PRICES[model] == price
+    with pytest.raises(ConfigError, match="premium"):
+        check_model_allowed(model)
+    check_model_allowed(model, allow_premium=True)
+    assert vendor_of(model) == "openai"
