@@ -14,6 +14,7 @@ from claude_duel.domain.heat_bound import regime
 from claude_duel.domain.heat_tokens import HISTORY_MATCHES
 from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
+from claude_duel.domain.probes import MAX_PAYLOAD_CHARS
 
 SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
 
@@ -32,7 +33,7 @@ M = TypeVar("M", bound=BaseModel)
 
 class AttackMove(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    payload: str = Field(max_length=4096)
+    payload: str = Field(max_length=MAX_PAYLOAD_CHARS)
     solver: str = Field(default="", max_length=8192)  # only read when Rules.attacker_solver is on
 
 
@@ -148,7 +149,9 @@ class _BuildAnswer(ChallengeSpec):
     """What the model returns: a ChallengeSpec; stray extra keys (models add notes) are ignored."""
 
     model_config = ConfigDict(frozen=True, extra="ignore")
-    reference_payload: str = Field(default="", max_length=4096)  # a solver may supply it; models often omit it
+    reference_payload: str = Field(
+        default="", max_length=MAX_PAYLOAD_CHARS
+    )  # a solver may supply it; models often omit it
     difficulty: int = Field(default=2, ge=1, le=3)
 
 
@@ -285,7 +288,9 @@ _HINTS = (
     ),
     (
         "too slow",
-        "Every input must be answered in bounded time: do not loop or hang on a wrong or empty input. ",
+        "Every input must be answered in bounded time: do not loop or hang on a wrong or empty input, and reject"
+        " wrong-length input before doing work (inputs can be up to "
+        f"{MAX_PAYLOAD_CHARS} characters). ",
     ),
     ("reference_payload must be at least", f"Make the accepting input at least {MIN_PAYLOAD_CHARS} characters. "),
     ("__dict__", "FLAG is already a global: never look it up via __dict__, globals() or sys.modules. "),

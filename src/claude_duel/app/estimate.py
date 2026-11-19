@@ -6,7 +6,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits
-from claude_duel.domain.models import AgentSpec, Rules
+from claude_duel.domain.models import TIMEOUTS_TO_VOID, AgentSpec, Rules
+
+REFUNDED = TIMEOUTS_TO_VOID - 1  # paid attack calls past max_attempts: the refunded timeouts before a void
 
 IN_TOKENS, OUT_TOKENS = 2000, 400  # assumed tokens per call (docs/design/design-rules-abstraction.md)
 
@@ -35,7 +37,7 @@ def estimate(rules: Rules, model: str, limits: BudgetLimits, agents: Sequence[Ag
     bonus = rules.early_bonus_attempts
     allocs = rules.rounds * 2 if rules.ledger is not None else 0
     calls = min(
-        rules.rounds * 2 * rules.challenges_per_round * (builds + rules.max_attempts + bonus) + allocs,
+        rules.rounds * 2 * rules.challenges_per_round * (builds + rules.max_attempts + bonus + REFUNDED) + allocs,
         limits.match_max_calls,
     )
     bounds = [(calls * per_call_tokens, "rules"), (limits.match_max_tokens, "match cap")]
