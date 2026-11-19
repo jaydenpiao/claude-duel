@@ -15,7 +15,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from claude_duel.app import ladder_config, repro
+from claude_duel import cli_nofluke
 from claude_duel.app.backup import backup
 from claude_duel.app.bench import run_bench, solve_rate
 from claude_duel.app.budget import check_model_allowed
@@ -31,22 +31,18 @@ from claude_duel.app.container import (
     make_sandbox,
     migrate_results,
 )
-from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
 from claude_duel.app.ghost_verify import verify_ghosts
-from claude_duel.app.harness import measure
-from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
 from claude_duel.app.session import play
 from claude_duel.app.sync import sync
 from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
-from claude_duel.domain.duplicate import DuplicateRule
 from claude_duel.domain.errors import ConfigError, DuelError, HeatBoundError
 from claude_duel.domain.events import fold
 from claude_duel.domain.models import AgentSpec, Event, MatchState, Stage
@@ -58,88 +54,16 @@ from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
-from claude_duel.presentation.duplicate import duplicate_lines, duplicate_view
-from claude_duel.presentation.ladder import (
-    LadderTicker,
-    comparison_lines,
-    comparison_view,
-    ladder_lines,
-    ladder_view,
-    projection_lines,
-    projection_view,
-)
 
 _LOG = logging.getLogger(__name__)
 
 
 def _driver_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Multi-match drivers: series and duplicate."""
+    """Multi-match drivers: series (duplicate, ladder and harness live in cli_nofluke.py)."""
     series = sub.add_parser("series", help="play or resume a best-of-N series of matches, then verify it")
     series.add_argument("--series-id", help="explicit id (re-running an existing id resumes it)")
     series.add_argument("--games", type=int, default=3, help="best of N (odd, default 3)")
     series.add_argument("--format", choices=("text", "json"), default="text")
-    dup = sub.add_parser("duplicate", help="play or resume a duplicate match (mirrored boards), then verify it")
-    dup.add_argument("--duplicate-id", help="explicit id (re-running an existing id resumes it)")
-    dup.add_argument("--boards-min", type=int, default=4)
-    dup.add_argument("--boards-max", type=int, default=8)
-    dup.add_argument("--match-max-usd", type=float, default=2.0, help="no board starts that could pass this")
-    dup.add_argument("--format", choices=("text", "json"), default="text")
-
-
-_LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on the command line (flags win)
-    ("--side-a", "sides.a", "models"),
-    ("--side-b", "sides.b", "models"),
-    ("--start-tier-a", "start_tier.a", int),
-    ("--start-tier-b", "start_tier.b", int),
-    ("--boards-min", "match.boards_min", int),
-    ("--boards-max", "match.boards_max", int),
-    ("--match-max-usd", "budget.match_max_usd", float),
-    ("--ladder-max-usd", "budget.ladder_max_usd", float),
-    ("--basis", "budget.basis", str),
-    ("--cap-build", "caps.build", int),
-    ("--cap-allocate", "caps.allocate", int),
-    ("--cap-attack", "caps.attack", int),
-    ("--max-attempts", "caps.max_attempts", int),
-    ("--run-date", "run_date", str),
-)
-
-
-def _models(value: str) -> list[str]:
-    return [m.strip() for m in value.split(",") if m.strip()]
-
-
-def _ladder_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    lad = sub.add_parser("ladder", help="play or resume a no-fluke ladder of duplicate matches (--dry-run: $0 plan)")
-    lad.add_argument("plan", type=Path, help="ladder TOML (examples/ladder-*.toml)")
-    lad.add_argument("--dry-run", action="store_true", help="price the ladder (worst and typical) and exit; no calls")
-    lad.add_argument("--ladder-id", help="explicit id (re-running an existing id resumes it)")
-    lad.add_argument("--watch", action="store_true", help="print one line per half, build and attack as it happens")
-    lad.add_argument("--format", choices=("text", "json"), default="text")
-    for flag, key, kind in _LADDER_FLAGS:
-        lad.add_argument(flag, dest=key, type=_models if kind == "models" else kind, help=f"overrides {key}")
-
-    cmp = sub.add_parser("ladder-compare", help="two runs of one ladder plan: each matchup agrees or is too close")
-    cmp.add_argument("first", help="ladder id of run 1")
-    cmp.add_argument("second", help="ladder id of run 2 (same plan; every run gets fresh seeds from its id)")
-    cmp.add_argument("--format", choices=("text", "json"), default="text")
-
-
-def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    har = sub.add_parser("harness", help="$0 no-fluke harness: scripted bots of known strength play duplicate matches")
-    har.add_argument("--pct-a", type=int, default=80, help="first bot's capture chance per try (percent)")
-    har.add_argument("--pct-b", type=int, default=50)
-    har.add_argument("--matches", type=int, default=50)
-    har.add_argument("--boards-min", type=int, default=4)
-    har.add_argument("--boards-max", type=int, default=8)
-    har.add_argument("--seed", default="harness")
-    rep = har.add_argument_group("--repro: two-run agreement under the real stop rule (board model stated, no play)")
-    rep.add_argument("--repro", action="store_true", help="simulate run pairs instead of playing scripted bots")
-    rep.add_argument("--p-win", type=float, default=0.65, help="stronger side's chance to win a decided board")
-    rep.add_argument("--p-tie", type=float, default=0.25, help="share of boards that score 0")
-    rep.add_argument("--runs", type=int, default=2000, help="matches (or ladder run pairs with --plan)")
-    rep.add_argument("--sprt-p1", type=float, default=0.75)
-    rep.add_argument("--plan", type=Path, help="ladder TOML: simulate whole ladders (needs --strengths)")
-    rep.add_argument("--strengths", help="model=logit,... Bradley-Terry strengths for --plan")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -172,8 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     est.add_argument("--mode", help="one preset (default: all)")
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
     _driver_parsers(sub)
-    _ladder_parser(sub)
-    _harness_parser(sub)
+    cli_nofluke.add_parsers(sub)
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
@@ -284,10 +207,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "resume": lambda: _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2,
         "estimate": lambda: _estimate(settings, args.mode, args.model),
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
-        "duplicate": lambda: _duplicate(settings, args),
-        "ladder": lambda: _ladder(settings, args),
-        "ladder-compare": lambda: _ladder_compare(settings, args),
-        "harness": lambda: _harness(settings, args),
+        **cli_nofluke.handlers(settings, args),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
@@ -434,95 +354,6 @@ def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> li
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
-
-
-def _harness(settings: Settings, args: argparse.Namespace) -> int:
-    try:
-        rule = DuplicateRule(boards_min=args.boards_min, boards_max=args.boards_max, sprt_p1=args.sprt_p1)
-    except ValueError as exc:
-        raise ConfigError(f"bad harness: {exc}") from exc
-    if args.repro:
-        return _repro(args, rule)
-    res = measure(
-        settings.store_dir / "harness", args.pct_a, args.pct_b, matches=args.matches, rule=rule, seed=args.seed
-    )
-    print(
-        f"{args.pct_a}% vs {args.pct_b}% over {res.matches} matches: first {res.first} · second {res.second}"
-        f" · undecided {res.undecided} · first wins {res.first_rate():.1%}"
-        f" · first-seat share {res.first_seat_share:.1%} · first ahead on margin {res.margin_first}"
-    )
-    return 0
-
-
-def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
-    if args.plan is None:
-        m = repro.matchup(rule, args.p_win, args.p_tie, args.runs, args.seed)
-        print(
-            f"{args.p_win:.0%} board edge, {args.p_tie:.0%} ties, boards {rule.boards_min}-{rule.boards_max},"
-            f" sprt_p1 {rule.sprt_p1}: stronger backed {m.first:.1%} · weaker backed {m.wrong:.2%}"
-            f" · two runs agree {m.repeat_agree:.1%} · mean boards {m.mean_boards:.1f} ({args.runs} runs)"
-        )
-        return 0
-    try:
-        strength = {k.strip(): float(v) for k, v in (kv.split("=") for kv in (args.strengths or "").split(",") if kv)}
-    except ValueError as exc:
-        raise ConfigError("--strengths is model=logit,model=logit,...") from exc
-    overrides = {"match.boards_min": rule.boards_min, "match.boards_max": rule.boards_max}
-    cfg = ladder_config.load(args.plan, overrides)
-    missing = [m for m in (*cfg.sides.a, *cfg.sides.b) if m not in strength]
-    if missing:
-        raise ConfigError(f"--strengths lacks {', '.join(missing)}")
-    lad = repro.ladder(cfg, strength, args.p_tie, args.runs, args.seed)
-    print(
-        f"ladder {args.plan.name}, boards {rule.boards_min}-{rule.boards_max}: final ordering agrees"
-        f" {lad.ordering_agree:.1%} · matchups agree {lad.matchup_agree:.1%} · opposite winners {lad.contradict:.2%}"
-        f" · mean boards {lad.mean_boards:.1f}"
-        f" over {lad.mean_steps:.1f} steps ({args.runs} run pairs)"
-    )
-    return 0
-
-
-def _ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
-    cmp = compare_ladders(read_ladder(settings, args.first), read_ladder(settings, args.second))
-    print(json.dumps(comparison_view(cmp)) if args.format == "json" else "\n".join(comparison_lines(cmp)))
-    return 0
-
-
-def _ladder(settings: Settings, args: argparse.Namespace) -> int:
-    overrides = {key: getattr(args, key) for _, key, _ in _LADDER_FLAGS if getattr(args, key) is not None}
-    cfg = ladder_config.load(args.plan, overrides)
-    proj = project(cfg)
-    if args.dry_run or proj.refusals:
-        if args.format == "json":
-            print(json.dumps(projection_view(proj, cfg.budget.ladder_max_usd)))
-        else:
-            print("\n".join(projection_lines(proj, cfg.budget.ladder_max_usd)))
-        return 1 if proj.refusals else 0
-    ladder_id = args.ladder_id or uuid.uuid4().hex[:12]
-    ticker = LadderTicker(sys.stdout) if args.watch and args.format == "text" else None
-    metrics = build_metrics(settings, ladder_id, InMemoryMetrics())
-    state = play_ladder(settings, ladder_id, cfg, metrics, ticker)
-    report = verify_ladder(settings, ladder_id)
-    if args.format == "json":
-        print(json.dumps(ladder_view(state, report.consistent, report.mismatches)))
-    else:
-        print("\n".join(ladder_lines(state, report.consistent, report.mismatches)))
-    return 0 if report.consistent and state.done() else 1
-
-
-def _duplicate(settings: Settings, args: argparse.Namespace) -> int:
-    dup_id = args.duplicate_id or uuid.uuid4().hex[:12]
-    try:
-        rule = DuplicateRule(boards_min=args.boards_min, boards_max=args.boards_max, match_max_usd=args.match_max_usd)
-    except ValueError as exc:
-        raise ConfigError(f"bad duplicate: {exc}") from exc
-    state = play_duplicate(settings, dup_id, rule, build_metrics(settings, dup_id, InMemoryMetrics()))
-    report = verify_duplicate(settings, dup_id)
-    if args.format == "json":
-        print(json.dumps(duplicate_view(state, report.consistent, report.mismatches)))
-    else:
-        print("\n".join(duplicate_lines(state, report.consistent, report.mismatches)))
-    return 0 if report.consistent and state.done() else 1
 
 
 def _ratings(settings: Settings, boot: int, fmt: str) -> int:
