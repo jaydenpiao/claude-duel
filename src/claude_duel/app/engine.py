@@ -20,6 +20,7 @@ from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     CAPTURED,
+    TRUNCATED,
     Attack,
     AttackAttempt,
     CapHit,
@@ -60,7 +61,6 @@ from claude_duel.ports import (
 
 _LOG = logging.getLogger(__name__)
 MALFORMED = "<malformed>"
-TRUNCATED = "truncated: the reply hit max_output_tokens twice"
 REFUSED = "refused: the model declined to answer"  # engine-authored display / build forfeit reason (ADR 0016)
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 VALIDATION_TIME_FACTOR = 6  # empty and junk probes share this many wall_seconds

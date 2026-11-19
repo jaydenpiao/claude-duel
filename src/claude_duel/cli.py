@@ -30,6 +30,7 @@ from claude_duel.app.container import (
     make_sandbox,
     migrate_results,
 )
+from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.estimate import estimate, render
 from claude_duel.app.experiment import footer as experiment_footer
 from claude_duel.app.experiment import run_stakes
@@ -42,6 +43,7 @@ from claude_duel.app.session import play
 from claude_duel.app.sync import sync
 from claude_duel.app.tournament import play_tournament
 from claude_duel.config import Settings, load_settings
+from claude_duel.domain.duplicate import DuplicateRule
 from claude_duel.domain.errors import ConfigError, DuelError, HeatBoundError
 from claude_duel.domain.events import fold
 from claude_duel.domain.models import Event, MatchState, Stage
@@ -53,8 +55,23 @@ from claude_duel.observability import InMemoryMetrics, configure_logging, log
 from claude_duel.presentation.arena import ArenaView
 from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
+from claude_duel.presentation.duplicate import duplicate_lines, duplicate_view
 
 _LOG = logging.getLogger(__name__)
+
+
+def _driver_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Multi-match drivers: series and duplicate."""
+    series = sub.add_parser("series", help="play or resume a best-of-N series of matches, then verify it")
+    series.add_argument("--series-id", help="explicit id (re-running an existing id resumes it)")
+    series.add_argument("--games", type=int, default=3, help="best of N (odd, default 3)")
+    series.add_argument("--format", choices=("text", "json"), default="text")
+    dup = sub.add_parser("duplicate", help="play or resume a duplicate match (mirrored boards), then verify it")
+    dup.add_argument("--duplicate-id", help="explicit id (re-running an existing id resumes it)")
+    dup.add_argument("--boards-min", type=int, default=4)
+    dup.add_argument("--boards-max", type=int, default=8)
+    dup.add_argument("--match-max-usd", type=float, default=2.0, help="no board starts that could pass this")
+    dup.add_argument("--format", choices=("text", "json"), default="text")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -86,10 +103,7 @@ def _parser() -> argparse.ArgumentParser:
     est = sub.add_parser("estimate", help="offline worst-case cost per match for each preset (no API calls)")
     est.add_argument("--mode", help="one preset (default: all)")
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
-    series = sub.add_parser("series", help="play or resume a best-of-N series of matches, then verify it")
-    series.add_argument("--series-id", help="explicit id (re-running an existing id resumes it)")
-    series.add_argument("--games", type=int, default=3, help="best of N (odd, default 3)")
-    series.add_argument("--format", choices=("text", "json"), default="text")
+    _driver_parsers(sub)
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
@@ -200,6 +214,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "resume": lambda: _run(settings, args.match_id, args) if _exists(settings, args.match_id) else 2,
         "estimate": lambda: _estimate(settings, args.mode, args.model),
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
+        "duplicate": lambda: _duplicate(settings, args),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
@@ -334,6 +349,21 @@ def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> li
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
+
+
+def _duplicate(settings: Settings, args: argparse.Namespace) -> int:
+    dup_id = args.duplicate_id or uuid.uuid4().hex[:12]
+    try:
+        rule = DuplicateRule(boards_min=args.boards_min, boards_max=args.boards_max, match_max_usd=args.match_max_usd)
+    except ValueError as exc:
+        raise ConfigError(f"bad duplicate: {exc}") from exc
+    state = play_duplicate(settings, dup_id, rule, build_metrics(settings, dup_id, InMemoryMetrics()))
+    report = verify_duplicate(settings, dup_id)
+    if args.format == "json":
+        print(json.dumps(duplicate_view(state, report.consistent, report.mismatches)))
+    else:
+        print("\n".join(duplicate_lines(state, report.consistent, report.mismatches)))
+    return 0 if report.consistent and state.done() else 1
 
 
 def _ratings(settings: Settings, boot: int, fmt: str) -> int:

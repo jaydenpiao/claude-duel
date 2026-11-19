@@ -353,6 +353,7 @@ class Validation(_Frozen):
 
 
 CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)
+TRUNCATED = "truncated: the reply hit max_output_tokens twice"  # a harness fault, not a model choice
 
 
 class AttackAttempt(_Frozen):
