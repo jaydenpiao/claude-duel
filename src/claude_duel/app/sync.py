@@ -13,6 +13,7 @@ import json
 import uuid
 from contextlib import nullcontext, suppress
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -117,10 +118,10 @@ def _load(
     return loaded, rejected
 
 
-def _close(db: ResultsStore, run: str, status: str, counts: RunCounts) -> None:
+def _close(db: ResultsStore, run: str, status: Literal["halted", "failed"], counts: RunCounts) -> None:
     # Best effort: the original error matters more than a failure to record it (e.g. the connection is gone).
     with suppress(Exception):
-        db.finish_run(run, "halted" if status == "halted" else "failed", counts, [], None)
+        db.finish_run(run, status, counts, [], None)
 
 
 def reason(exc: BaseException) -> str:
@@ -184,7 +185,7 @@ def _match_row(state: MatchState, chain: list[tuple[str, Event]]) -> MatchRow:
         mode=r.mode,
         challenge_form=r.challenge_form,
         framing=r.framing.kind,
-        rules=r.model_dump(mode="json"),
+        rules=r.dump(),
         limits=state.limits.model_dump(mode="json"),
         failure=None if state.failure is None else public_text(state.failure),
         projection_version=PROJECTION_VERSION,

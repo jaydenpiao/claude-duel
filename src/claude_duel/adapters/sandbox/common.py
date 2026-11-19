@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from typing import IO
 
 from claude_duel.domain.models import SandboxLimits
-from claude_duel.ports import RunResult
+from claude_duel.ports import KILL_OUTPUT, KILL_SIGNAL, KILL_WALL, KilledReason, RunResult
 
 _CHUNK = 4096
 
@@ -70,12 +70,12 @@ def kill_group(pgid: int) -> None:
         return
 
 
-def _reason(proc: subprocess.Popen[bytes], timed_out: bool, overflow: threading.Event) -> str | None:
+def _reason(proc: subprocess.Popen[bytes], timed_out: bool, overflow: threading.Event) -> KilledReason | None:
     if timed_out:
-        return "wall"
+        return KILL_WALL
     if overflow.is_set():
-        return "output"
-    return "signal" if proc.returncode < 0 else None
+        return KILL_OUTPUT
+    return KILL_SIGNAL if proc.returncode < 0 else None
 
 
 def _write(pipe: IO[bytes], data: bytes) -> None:

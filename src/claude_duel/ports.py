@@ -13,6 +13,10 @@ from claude_duel.domain.models import Event, MatchState, SandboxLimits
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
 Purpose = Literal["build", "attack", "allocate"]
+KilledReason = Literal["wall", "signal", "output"]
+KILL_WALL: KilledReason = "wall"
+KILL_SIGNAL: KilledReason = "signal"
+KILL_OUTPUT: KilledReason = "output"
 
 
 class CompletionRequest(BaseModel):
@@ -35,6 +39,10 @@ class Completion(BaseModel):
     output_tokens: int
     reasoning_tokens: int = 0  # thinking/reasoning tokens, already inside output_tokens and billed as output
     truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
+    refused: bool = False  # the vendor declined to answer (safety classifier); omitted from the log when false
+    reasoning_summary: str = (
+        ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
+    )
 
     @property
     def total_tokens(self) -> int:
@@ -52,7 +60,7 @@ class RunResult(BaseModel):
     stdout: str
     exit_code: int
     timed_out: bool
-    killed_reason: str | None = None
+    killed_reason: KilledReason | None = None
 
 
 class Sandbox(Protocol):

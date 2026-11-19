@@ -12,16 +12,15 @@ import hashlib
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
+
+from claude_duel.domain.models import _Frozen
+from claude_duel.domain.stakes import LedgerRule
 
 Kind = Literal["ghost_kills_ge", "keystone_is", "uses_construct", "capture_count_le", "max_stake_ge"]
 Selector = Literal["longest", "shortest", "first"]
 MAX_ATOMS = 3
 VACUITY = (0.05, 0.95)
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class Atom(_Frozen):
@@ -38,7 +37,7 @@ class Prophecy(_Frozen):
     stake: int = Field(ge=1, le=3)
 
 
-class Challenge(_Frozen):
+class ChallengeFacts(_Frozen):
     cid: str
     size: int  # source bytes
     tag: str  # memory.technique
@@ -47,7 +46,7 @@ class Challenge(_Frozen):
 class RoundArtifacts(_Frozen):
     """What the target authored and did in the settled round, all from the event log."""
 
-    challenges: tuple[Challenge, ...]  # in authored order
+    challenges: tuple[ChallengeFacts, ...]  # in authored order
     keystone: str | None = None
     captures: int = 0  # captures the target made
     ghost_kills: int = 0  # the target's challenges killed by ghosts
@@ -69,7 +68,7 @@ def _atom(a: Atom, art: RoundArtifacts) -> bool:
     return hit != a.negate
 
 
-def _select(sel: Selector | None, cs: tuple[Challenge, ...]) -> str | None:
+def _select(sel: Selector | None, cs: tuple[ChallengeFacts, ...]) -> str | None:
     if not cs:
         return None
     if sel == "first":
@@ -98,7 +97,7 @@ def _a(kind: Kind, **kw: object) -> Atom:
     return Atom.model_validate({"kind": kind, **kw})
 
 
-ATTACK_TOKENS = 12_000  # LedgerRule.attack_tokens default
+ATTACK_TOKENS = LedgerRule().attack_tokens  # default; deep matches pass their own
 PROPHECY_RATES: dict[int, dict[str, float]] = {0: {}}  # rates_version -> template hit rates; v0: nothing vacuous
 
 

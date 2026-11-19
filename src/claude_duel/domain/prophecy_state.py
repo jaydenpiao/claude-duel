@@ -33,7 +33,7 @@ def artifacts_of(state: MatchState, target: str, round_no: int) -> prophecy.Roun
     )
     return prophecy.RoundArtifacts(
         challenges=tuple(
-            prophecy.Challenge(cid=c.id, size=len(c.spec.source.encode()), tag=technique(c.spec.source))
+            prophecy.ChallengeFacts(cid=c.id, size=len(c.spec.source.encode()), tag=technique(c.spec.source))
             for c in valid
             if c.spec is not None
         ),

@@ -142,7 +142,7 @@ The ×3 figure is below §6's $0.0037 (separate call), so the ≈ $0.072 per mat
 | Last round | No menu, no seal |
 | Tampered reveal | Replay raises `tampered` (test 10) |
 | **Self-fulfilling forecasts** | Prophecies are about the *opponent*, so the prophet can only fulfil one through its own play. In the current menu that only helps when the play is good anyway (e.g. `no_captures` by writing harder challenges, `ghost_kill` from its own earlier captures). **Invariant (test):** no template's hit is made more likely by the prophet *losing* points. So never add `capture_count_ge`, "opponent defends ≥ n" or "opponent's stake on my challenge ≤ n". The swing is also tiny (pool 6) next to a round's defense awards. |
-| Collusion (both sides predict "no_captures" and both write impossible challenges) | Blocked by the solvability gate from design-variety-solvability.md and by defense ≥ capture. Flag it in the moment detector if both sides hit `no_captures` in the same round. |
+| Collusion (both sides predict "no_captures" and both write impossible challenges) | Blocked by the solvability gate (SV-5, R1) and by defense ≥ capture. Flag it in the moment detector if both sides hit `no_captures` in the same round. |
 
 ## 9. Acceptance criteria
 1. With `deep.prophecy=None`, every existing snapshot, replay and test is byte-identical, and so is the allocate prompt.
@@ -175,7 +175,7 @@ The ×3 figure is below §6's $0.0037 (separate call), so the ≈ $0.072 per mat
 The order follows the earlier build list: the Ledger stack → #203 → #210 → P1 → P2 → (#211) → P3 → P4.
 
 ## 12. Open questions
-1. **Template conflict with the variety design.** design-variety-solvability.md recommends banning hash libraries in challenge code. That would make `uses_hash` and `no_hash` vacuous (0% or 100% hit). Swap them for `uses_maze` and `uses_state_machine` (tags already exist, `memory.py:23-24`) in P1. jayden or Elon should confirm, because it edits #214's menu.
+1. **Template conflict with the variety design.** The variety design (R5 static bans) recommends banning hash libraries in challenge code. That would make `uses_hash` and `no_hash` vacuous (0% or 100% hit). Swap them for `uses_maze` and `uses_state_machine` (tags already exist, `memory.py:23-24`) in P1. jayden or Elon should confirm, because it edits #214's menu.
 2. **Seed in the log.** `match_created.seed` is logged, so a log reader (the TUI viewer) can derive salts and brute-force the 36 candidates before settlement. The same is true of keystones today. Models never see the log, so the game is sound. The only loss is TUI suspense for someone reading the raw JSONL. Accept it, or add a per-match secret salt revealed at match end (that changes replay inputs, so the safest choice is to defer).
 3. Should the target see the commit hash in its prompt (theatre) or nothing (recommended)?
 4. Do we want **stronger models on the compose tier** before launch? Recommend no (phase 5).

@@ -1,4 +1,4 @@
-"""#139: match events are schema v2; series and tournament events carry their own version and typed payloads."""
+"""#139 / #258: match events are schema v3; series and tournament events carry their own version and typed payloads."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ def _created(kind: str, data: dict[str, object], v: int = 1) -> Event:
     return Event(v=v, seq=0, type=kind, trace_id="t", data=data)
 
 
-def test_match_schema_is_v2_and_newer_is_refused() -> None:
-    assert ev.SCHEMA_VERSION == 2
-    with pytest.raises(EventLogCorruptError, match="v3"):
-        ev.payload(Event(v=3, seq=0, type=ev.NOTE_RECORDED, trace_id="t", data={}))
+def test_match_schema_is_v3_and_newer_is_refused() -> None:
+    assert ev.SCHEMA_VERSION == 3
+    ev.payload(Event(v=2, seq=0, type=ev.MATCH_RECOVERED, trace_id="t", data={}))
+    with pytest.raises(EventLogCorruptError, match="v4"):
+        ev.payload(Event(v=4, seq=0, type=ev.MATCH_RECOVERED, trace_id="t", data={}))
 
 
 def test_tournament_version_and_typed_payloads() -> None:

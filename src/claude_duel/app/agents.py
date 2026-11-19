@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.contract import WRAPPER, definitions
 from claude_duel.domain.errors import MalformedOutputError
-from claude_duel.domain.models import ChallengeSpec, Rules
+from claude_duel.domain.heat_bound import regime
+from claude_duel.domain.heat_tokens import HISTORY_MATCHES
+from claude_duel.domain.models import ChallengeSpec, LedgerRule, Rules
 from claude_duel.domain.policy import BANNED_NAMES, MAZE_SOURCE, MIN_PAYLOAD_CHARS, PURE_MODULES, RESTRICTED_MODULES
 
 SYSTEM = "You are a contestant in LLM Duels, a sandboxed CTF arena. Respond with a single JSON object and nothing else."
@@ -120,8 +122,8 @@ def build_rules(rules: Rules, round_no: int) -> list[str]:
         "RULES (the arena rejects any challenge that breaks one):",
         "1. FLAG is a global the arena injects before your code runs. Read it, print it. Never assign, define, "
         "hardcode or invent a flag value.",
-        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty input must NOT "
-        "print it.",
+        "2. The attacker's input arrives on sys.stdin. Print FLAG only for the right input. Empty or junk input "
+        "must NOT print it, and every input must be answered in bounded time.",
         f"3. Allowed imports: {', '.join(sorted(PURE_MODULES))}; {restricted}. Nothing else.",
         "4. No name (except a bare _) or attribute may start with _ (so no __name__ / if __name__ == '__main__' "
         "guard, no dunders). "
@@ -155,11 +157,28 @@ def heat_rule(rules: Rules) -> list[str]:
     led = rules.ledger
     if led is None or not led.heat_window:
         return []
+    caps = _heat_cap_sentence(led)
     return [
         f"HEAT: a defended challenge whose code structure (AST, names and literals ignored) is "
-        f">= {led.heat_threshold_pct}% similar to one of your own valid challenges from the last {led.heat_window} "
-        f"rounds costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new."
+        f">= {led.heat_threshold_pct}% similar to a valid challenge from the last {led.heat_window} rounds "
+        "(yours or your opponent's) or to one your model built in its last "
+        f"{led.heat_history_matches if led.heat_history_matches is not None else HISTORY_MATCHES} matches "
+        f"costs you a heat penalty of up to {led.heat_max_pct}% of its defense award. Write something new.{caps}"
     ]
+
+
+def _heat_cap_sentence(led: LedgerRule) -> str:
+    """Disclose how heat is compared; empty when this match did not pin the caps (legacy)."""
+    mode = regime(led)
+    if mode == "legacy":
+        return ""
+    refs = f"at most {led.heat_ref_cap} references, this match's recent challenges first"
+    if mode == "full":
+        return (
+            f" Comparison uses the whole program, not only its beginning, and {refs}."
+            " A pair too large to compare exactly is heat over budget and never charged."
+        )
+    return f" Comparison uses the first {led.heat_token_cap} AST tokens and {refs}."
 
 
 def build_prompt(
@@ -202,7 +221,9 @@ def _program_rules(rules: Rules, round_no: int) -> list[str]:
         f"Minimal valid example (make yours harder; later rounds score more): {json.dumps(EXAMPLE_CHALLENGE)}",
         'SOLVER (recommended): you cannot run code, so do not work the answer out in your head. Give "solver": '
         "a short program under the same rules that prints the accepting input (it gets no stdin and is never shown "
-        "to the attacker); the arena runs it and uses its output as reference_payload (then leave reference_payload "
+        "to the attacker). It runs ALONE, without your source: it cannot call your check or helper functions, so "
+        "copy any it needs into the solver; the arena runs it and uses its output as reference_payload "
+        "(then leave reference_payload "
         '""). Example: if the challenge derives a 6-letter key from a seed with a loop and compares the input to '
         "it, the solver is that same loop ending in print(key).",
         _RETURN_KEYS,
@@ -245,7 +266,7 @@ _HINTS = (
     (
         "NameError",
         "Your solver used a name it never defined; it gets no stdin and only its own code"
-        " (in the check form it may call check() and your helpers). ",
+        " (in the check form it may call check() and your helpers; otherwise copy every helper it uses). ",
     ),
     (
         "reference payload does not reveal flag",
@@ -256,6 +277,15 @@ _HINTS = (
         "trivial: empty input",
         "Empty input must be rejected: start with a length test such as"
         f" if len(s) < {MIN_PAYLOAD_CHARS}: return False. ",
+    ),
+    (
+        "trivial: junk input",
+        "Junk input must be rejected too: compare the whole input to the answer, "
+        "not only its length or whether it is non-empty. ",
+    ),
+    (
+        "too slow",
+        "Every input must be answered in bounded time: do not loop or hang on a wrong or empty input. ",
     ),
     ("reference_payload must be at least", f"Make the accepting input at least {MIN_PAYLOAD_CHARS} characters. "),
     ("__dict__", "FLAG is already a global: never look it up via __dict__, globals() or sys.modules. "),

@@ -1,7 +1,7 @@
 Changelog: 2026-10-29 — ghost phase moved before the terrain draw and allocation, matching the build (#210).
 # Design: the deep layer on top of Sealed Ledger
 Status: draft for Elon, 2026-10-29 (3:30 PM EDT). Design only, no repo code changed.
-Base: design-core-logic.md (Sealed Ledger: forge → validate → commit → allocate → attack → reveal → score). Fits ADR 0007 (one `Rules`, `SCORERS` registry), ADR 0006 (defense ≥ capture; captures discount-only), ADR 0004 (event-sourced replay), ADR 0009 (memory), ADR 0013 draft (CAPPED void).
+Base: design-core-logic.md (Sealed Ledger: forge → validate → commit → allocate → attack → reveal → score). Fits ADR 0007 (one `Rules`, `SCORERS` registry), ADR 0006 (defense ≥ capture; captures discount-only), ADR 0004 (event-sourced replay), ADR 0009 (memory), ADR 0014 (CAPPED void).
 Bar from the owner: "something that has never been created or thought of before." Known systems are the floor. Every layer has a **Prior art** subsection; where something exists I say so plainly.
 
 ## 0. Headline
@@ -114,9 +114,9 @@ All layers are Rules sections (`rules.deep.*`) with pure scorer terms composed o
 
 ## 5. Model swap plan (gpt-5-nano shuts down 2026-12-11)
 - Prices from the model pages: [gpt-5-nano](https://developers.openai.com/api/docs/models/gpt-5-nano) $0.05 in / $0.40 out per 1M; [gpt-5-mini](https://developers.openai.com/api/docs/models/gpt-5-mini) $0.25 / $2.00.
-- Launch must complete before 2026-12-11. After that, default to the cheapest current non-deprecated OpenAI small model (pick at swap time; re-check the page), with gpt-5-mini as the priced fallback.
+- Launch must complete before 2026-12-11. After that, default to the cheapest current non-deprecated OpenAI small model (pick at swap time; re-check the page), with gpt-6-luna as the default replacement (cheaper than OpenAI's suggested gpt-5.6-luna; gpt-5-mini remains a priced allowlist option).
 - Every match freezes model id + prices in `match_created`, so ratings across the swap stay comparable only through a 10-match bridge series (old vs new) logged in the corpus.
-- gpt-5-mini would be 5× nano per token: ≈ $0.35/match (estimate), so it is a fallback only; `match_max_usd` must be raised by a run override, not the default.
+- Default is now gpt-6-luna at Standard short-context rates, $0.10 in / $0.50 out per 1M ([pricing](https://developers.openai.com/api/docs/pricing)). That is an intentional cheaper alternative to the deprecation page's named replacement `gpt-5.6-luna` ($0.20 / $1.20). The adapter sets no Flex or Batch service tier, so the ledger bills those Standard rates. gpt-5-mini stays on the allowlist for explicit opts-in.
 
 ## 6. Costs (estimates, not measured)
 Base Ledger: ≈ $0.06/match with ×3 reasoning headroom (design-core-logic.md §6). Per match, 3 rounds, 2 sides, nano prices:

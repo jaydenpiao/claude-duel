@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+
+from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
+
+_TokenCap = Annotated[int, Field(strict=True, ge=1, le=TOKEN_CAP)]
+_RefCap = Annotated[int, Field(strict=True, ge=1, le=REF_CAP)]
 
 
 class Stage(StrEnum):
@@ -117,13 +122,48 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # Feature switches default off so a log pinned before they existed replays as written; the ledger
+    # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
-        default=True, description="each author commits to one challenge: defended x2, captured -base//2"
+        default=False, description="each author commits to one challenge: defended x2, captured -base//2"
     )
-    terrain: Literal["none", "seeded"] = "seeded"  # a public stdin transform per challenge (domain/terrain.py)
-    heat_window: int = Field(default=2, ge=0, le=20)  # own past rounds compared for novelty; 0 turns heat off
+    terrain: Literal["none", "seeded"] = "none"  # a public stdin transform per challenge (domain/terrain.py)
+    heat_window: int = Field(default=0, ge=0, le=20)  # past rounds compared for novelty; 0 turns heat off
     heat_threshold_pct: int = Field(default=70, ge=1, le=100)  # pre-order AST LCS similarity at or over this -> heat
     heat_max_pct: int = Field(default=50, ge=0, le=100)  # heat penalty cap, % of that challenge's defense award
+    # The ledger preset logs True. None = a log written before this flag: own-only (#198) or opponent (#238)
+    # heat, told apart by heat.vs_opponent (heat_refs) and, when that is silent, by replay (app/replay.py).
+    heat_vs_opponent: bool | None = Field(
+        default=None, description="compare against the opponent's earlier challenges too (design R5 / #238)"
+    )
+    # Heat pins (heat_bound.regime). No caps: legacy. Both caps, compare not full: prefix (v1 logs).
+    # heat_compare="full" needs heat_ref_cap; heat_token_cap is prefix-only and optional to read.
+    # v2 heat-on logs also pin heat_metric, heat_vs_opponent and heat_history_matches (Rules._v2_heat_contract).
+    heat_token_cap: _TokenCap | None = Field(default=None, description="prefix width; absent on v2 full-heat logs")
+    heat_ref_cap: _RefCap | None = Field(default=None, description="pinned max heat references per challenge")
+    heat_compare: Literal["prefix", "full"] | None = Field(default=None, description="full: whole-source heat")
+    heat_metric: Literal["lcs-v1"] | None = Field(
+        default=None, description="exact AST LCS; required on v2 heat-on logs, absent on v1"
+    )
+    heat_history_matches: int | None = Field(
+        default=None,
+        ge=0,
+        le=20,
+        description="same model's last N matches frozen into heat_refs; required on v2 heat-on logs",
+    )
+
+    @model_validator(mode="after")
+    def _heat_pin_is_whole(self) -> LedgerRule:
+        has_token, has_ref = self.heat_token_cap is not None, self.heat_ref_cap is not None
+        if self.heat_compare == "full":
+            if not has_ref:
+                raise ValueError("heat_compare=full needs heat_ref_cap")
+            return self
+        if has_token != has_ref:
+            raise ValueError("heat_token_cap and heat_ref_cap are pinned together")
+        if self.heat_compare is not None and not has_token:
+            raise ValueError("heat_compare needs both heat caps")
+        return self
 
 
 class ProphecyRule(_Frozen):
@@ -143,7 +183,7 @@ class DeepRule(_Frozen):
     prophecy: ProphecyRule | None = None  # off by default
 
 
-RULES_VERSION = 1  # bump when a Rules default changes meaning; logged with every match
+RULES_VERSION = 2  # bump when a Rules default changes meaning; logged with every match
 
 
 class Rules(_Frozen):
@@ -207,6 +247,16 @@ class Rules(_Frozen):
         return data
 
     @model_validator(mode="after")
+    def _ledger_pairs_with_kind(self) -> Rules:
+        """Ledger stakes and ledger scoring come together (review M18): one without the other fails mid-match."""
+        if (self.ledger is None) == (self.scoring.kind == "ledger"):
+            raise ValueError(
+                'ledger scoring needs [rules.ledger] and [rules.ledger] needs scoring kind "ledger"; '
+                'use mode = "ledger"'
+            )
+        return self
+
+    @model_validator(mode="after")
     def _ledger_k_fits(self) -> Rules:
         """Every challenge must be fundable at ``min_alloc`` (review-pr190: 1 <= K <= attack_tokens // min_alloc)."""
         if self.ledger is not None and self.challenges_per_round > self.ledger.attack_tokens // self.ledger.min_alloc:
@@ -219,8 +269,13 @@ class Rules(_Frozen):
         return self
 
     def max_source_bytes(self, round_no: int) -> int:
-        """Escalation: authors get more room every round."""
-        return self.max_source_bytes_base * round_no
+        """Escalation: authors get more room every round. Whole-source heat stops at what one call can compare."""
+        cap = self.max_source_bytes_base * round_no
+        if self.ledger is not None and self.ledger.heat_window and self.ledger.heat_compare == "full":
+            from claude_duel.domain.heat_bound import admit_bytes  # noqa: PLC0415
+
+            return min(cap, PARSE_BYTES, admit_bytes(self))
+        return cap
 
     def output_cap(self, own: int | None = None) -> int:
         """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
@@ -228,11 +283,40 @@ class Rules(_Frozen):
         cap = self.wallet.max_output_tokens
         return tokens if cap is None else min(tokens, cap)
 
+    @model_validator(mode="after")
+    def _v2_heat_contract(self, info: ValidationInfo) -> Rules:
+        """v2 heat-on logs pin the whole-source contract; config may set pin_later and fill pins first."""
+        if info.context and info.context.get("pin_later"):
+            return self
+        led = self.ledger
+        if self.rules_version < 2 or led is None or not led.heat_window:
+            return self
+        if (
+            led.heat_compare != "full"
+            or led.heat_vs_opponent is None
+            or led.heat_ref_cap is None
+            or led.heat_metric != "lcs-v1"
+            or led.heat_history_matches is None
+        ):
+            raise ValueError(
+                "rules v2 heat-on logs need heat_compare=full, an explicit heat_vs_opponent, "
+                "heat_ref_cap, heat_metric=lcs-v1 and heat_history_matches"
+            )
+        return self
+
+    def dump(self) -> dict[str, Any]:
+        """JSON for a log. v2 omits ``heat_token_cap`` (prefix-only); v1 keeps it when set, and readers accept it."""
+        data = self.model_dump(mode="json")
+        ledger = data.get("ledger")
+        if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
+            ledger.pop("heat_token_cap", None)
+        return data
+
 
 class ChallengeSpec(_Frozen):
     """What an author submits."""
 
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120, pattern=r"^[^\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+$")
     description: str = Field(max_length=2000)
     source: str = Field(min_length=1)
     reference_payload: str = Field(max_length=4096)
@@ -288,10 +372,19 @@ class AttackAttempt(_Frozen):
     output: str
     tokens: int
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
+    refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
 
     @property
     def captured(self) -> bool:
+        """True only when the engine stored ``CAPTURED`` after seeing the flag in stdout."""
         return self.output == CAPTURED
+
+    def logged(self) -> dict[str, object]:
+        """Event payload: ``refused`` is present only when true, so older logs stay byte-identical."""
+        data = self.model_dump(mode="json")
+        if not data.get("refused"):
+            data.pop("refused", None)
+        return data
 
 
 class Attack(_Frozen):
@@ -425,6 +518,7 @@ class MatchState(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     usage_by_agent: dict[str, Usage] = Field(default_factory=dict)  # folded from call_charged.agent (wallets)
     notes: dict[str, dict[int, str]] = Field(default_factory=dict)  # agent -> round -> private scratchpad note
+    heat_refs: dict[str, list[str]] = Field(default_factory=dict)  # agent -> sources from its model's last matches (R5)
 
     def handicap(self, name: str) -> Handicap:
         return next((a.handicap for a in self.agents if a.name == name), Handicap())

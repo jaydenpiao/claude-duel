@@ -1,11 +1,11 @@
 """Deterministic, pure scoring."""
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.ghosts import ghost_award
-from claude_duel.domain.heat import heat_lines
+from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
 
 
@@ -34,7 +34,10 @@ def score_round(
     attacks: Mapping[str, Attack],
     rules: Rules,
     keystones: Mapping[str, str] | None = None,
+    heat_refs: Mapping[str, Sequence[str]] | None = None,
     ghost_hits: Mapping[str, str] | None = None,
+    *,
+    scorer: HeatScorer | None = None,
 ) -> dict[str, int]:
     challenges = list(challenges)
     by_challenge = {a.challenge_id: a for a in attacks.values()}
@@ -45,7 +48,7 @@ def score_round(
         validations=validations,
         attacks={a.challenge_id: a for a in attacks.values()},
         keystones=keystones or {},
-        heat=round_heat(challenges, validations, by_challenge, round_no, rules),
+        heat=round_heat(challenges, validations, by_challenge, round_no, rules, heat_refs, scorer=scorer),
         ghost_hits=ghost_hits or {},
     )
     return SCORERS[rules.scoring.kind](facts, rules.scoring)
@@ -98,19 +101,39 @@ def round_heat(
     attacks: Mapping[str, Attack],
     round_no: int,
     rules: Rules,
+    refs: Mapping[str, Sequence[str]] | None = None,
+    *,
+    scorer: HeatScorer | None = None,
 ) -> dict[str, int]:
     """The round's ``heat_penalty`` lines (challenge id -> points), logged in ``round_scored.heat``; {} off ledger."""
     if rules.ledger is None:
         return {}
-    return heat_lines(
-        challenges, validations, attacks, round_no, rules.ledger, lambda ch: paid_defense(ch, round_no, rules.scoring)
+    return (scorer or HeatScorer()).lines(
+        challenges,
+        validations,
+        attacks,
+        round_no,
+        rules.ledger,
+        lambda ch: paid_defense(ch, round_no, rules.scoring),
+        refs,
     )
 
 
-def heat_of_state(state: MatchState, round_no: int) -> dict[str, int]:
+def heat_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> dict[str, int]:
     """``round_heat`` for a folded match: what ``round_scored.heat`` records (and replay recomputes)."""
     attacks = {a.challenge_id: a for a in state.attacks.values()}
-    return round_heat(state.challenges.values(), state.validations, attacks, round_no, state.rules)
+    return round_heat(
+        state.challenges.values(), state.validations, attacks, round_no, state.rules, state.heat_refs, scorer=scorer
+    )
+
+
+def heat_unchecked_of_state(state: MatchState, round_no: int, scorer: HeatScorer | None = None) -> list[str]:
+    """This round's challenges with a heat reference not compared exactly (``round_scored.heat_unchecked``)."""
+    if state.rules.ledger is None:
+        return []
+    scorer = scorer or HeatScorer()
+    rule, refs = state.rules.ledger, state.heat_refs
+    return scorer.unchecked_ids(state.challenges.values(), state.validations, round_no, rule, refs)
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
@@ -187,23 +210,35 @@ def ledger(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
     _check_stakes(facts)
     scores = classic(facts, rule)
     _cool(facts, rule, scores)
+    _stake_discounts(facts, rule, scores)
+    _keystone_bets(facts, rule, scores)
+    return scores
+
+
+def _stake_discounts(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """Each valid capture pays its discounted award (``_captures``) instead of the full classic award."""
     for attacker, classic_paid, paid in _captures(
         facts.challenges, facts.validations, facts.attacks, facts.round_no, rule
     ).values():
         scores[attacker] -= classic_paid - paid
-    # Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
-    # heat line: the keystone bet and the novelty penalty stay independent.
-    for author, cid in facts.keystones.items():  # revealed keystone: a defender-side bet (ADR 0006 holds)
+
+
+def _keystone_bets(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:
+    """A revealed keystone: a defender-side bet (ADR 0006 holds); an invalid keystone forfeits.
+
+    Heat is priced on classic's defense award (``round_heat``), so a keystone's doubled defense does not double its
+    heat line: the keystone bet and the novelty penalty stay independent.
+    """
+    for author, cid in facts.keystones.items():
         stone = next((c for c in facts.challenges if c.id == cid and c.author == author), None)
         ok = facts.validations.get(cid)
         if stone is None or stone.spec is None or ok is None or not ok.valid:
-            continue  # an invalid keystone forfeits
+            continue
         hit = facts.attacks.get(cid)
         if hit is not None and hit.solved:
             scores[author] -= solve_award(stone.spec, facts.round_no, max(1, hit.attempts), rule) // 2
         else:  # doubles what classic paid, so a probe-solved (halved) stone stays at 2x, not 3x
             scores[author] += paid_defense(stone, facts.round_no, rule)
-    return scores
 
 
 def _cool(facts: RoundFacts, rule: ScoringRule, scores: dict[str, int]) -> None:

@@ -23,6 +23,7 @@ from claude_duel.presentation.common import (
     spend,
     verdict,
     verdict_text,
+    who,
 )
 
 __all__ = ["Commentary", "scrub", "snippet"]
@@ -48,12 +49,11 @@ class Commentary(MatchFold):
         self._out.flush()
 
     def _created(self, s: MatchState, e: Event) -> None:
-        a, b = s.agents
         self._say(f"claude duel · match {s.match_id}")
-        self._say(f"{a.name} ({a.model}) vs {b.name} ({b.model})")
+        self._say(" vs ".join(who(s, a.name) for a in s.agents))
         for agent in s.agents:
             if agent.handicap.is_set():
-                self._say(f"handicap {agent.name}: {handicap_text(agent.handicap)}")
+                self._say(f"handicap {who(s, agent.name)}: {handicap_text(agent.handicap)}")
         r = s.rules
         self._say(
             f"{r.rounds} rounds · {r.challenges_per_round} challenges each per round · up to {r.max_attempts} tries"
@@ -69,27 +69,27 @@ class Commentary(MatchFold):
     def _built(self, s: MatchState, e: Event) -> None:
         ch = Challenge.model_validate(e.data["challenge"])
         if ch.spec is None:
-            self._say(f"{ch.author} forfeited a challenge: {scrub(ch.forfeit_reason or 'no valid answer')}")
+            self._say(f"{who(s, ch.author)} forfeited a challenge: {scrub(ch.forfeit_reason or 'no valid answer')}")
             return
-        self._say(f"{ch.author} built a challenge guarding the arena's flag: {scrub(ch.spec.title)}")
+        self._say(f"{who(s, ch.author)} built a challenge guarding the arena's flag: {scrub(ch.spec.title)}")
         self._say(f"  difficulty {ch.spec.difficulty} · {len(ch.spec.source.splitlines())} lines")
         for line in snippet(ch.spec.source):
             self._say(f"  │ {line}")
 
     def _validated(self, s: MatchState, e: Event) -> None:
         ch, title, _ = verdict(s, e)
-        self._say(f"arena check on {ch.author}'s {title!r}: {verdict_text(s, e)}")
+        self._say(f"arena check on {who(s, ch.author)}'s {title!r}: {verdict_text(s, e)}")
 
     def _attempted(self, s: MatchState, e: Event) -> None:
         a = attempt_view(s, e)
         res = f"captured the flag ✓ +{a.award}" if a.captured else "no flag"
-        self._say(f"{a.attacker} attacks {a.title!r} (try {a.try_no}/{s.max_attempts(a.attacker)})… {res}")
+        self._say(f"{who(s, a.attacker)} attacks {a.title!r} (try {a.try_no}/{s.max_attempts(a.attacker)})… {res}")
 
     def _attacked(self, s: MatchState, e: Event) -> None:
         held = defense(s, e)
         if held is not None:
             atk, ch, award = held
-            self._say(f"  → defended ({atk.reason}), {ch.author} +{award}")
+            self._say(f"  → defended ({atk.reason}), {who(s, ch.author)} +{award}")
 
     def _scored(self, s: MatchState, e: Event) -> None:
         self._say(f"scoreboard after round {e.data['round']}: {board(s)}")
@@ -98,7 +98,7 @@ class Commentary(MatchFold):
 
     def _flagged(self, s: MatchState, e: Event) -> None:
         f = s.findings[-1]
-        self._say(f"  ⚑ finding ({f.severity}): {f.agent} · {f.category} · {f.rule_id} (logged, not scored)")
+        self._say(f"  ⚑ finding ({f.severity}): {who(s, f.agent)} · {f.category} · {f.rule_id} (logged, not scored)")
 
     def _recovered(self, s: MatchState, e: Event) -> None:
         self._say("resuming where the match stopped")
@@ -117,7 +117,7 @@ class Commentary(MatchFold):
 
     def _costs(self, s: MatchState) -> None:
         for a in s.agents:
-            self._say(f"  {a.name}: {agent_cost(s, a.name)}")
+            self._say(f"  {who(s, a.name)}: {agent_cost(s, a.name)}")
 
     def _spend(self, s: MatchState) -> str:
         return spend(s, self._lifetime(), self._cap)
