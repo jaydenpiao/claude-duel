@@ -8,7 +8,7 @@ Two AI agents duel in stages. Each one builds CTF challenges for the other, the 
 
 ## How a round works
 1. **Build**: each agent writes `challenges_per_round` Python programs that print the global `FLAG` only for the right stdin, along with a reference payload.
-2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag and empty input must not. Invalid challenges cost points.
+2. **Validate**: static AST allowlist (pure imports, `sys.stdin`/`sys.stdout` only, no `_` names, size, flag literals), then a sandbox run: the reference payload must reveal the flag; empty and junk input must not, and every input must finish in bounded time. Invalid challenges cost points.
 3. **Attack**: the opponent sees the source and description and gets `max_attempts` tries within a token budget, with feedback after each try.
 4. **Score**: a pure function. Points scale with difficulty × round, so stakes rise each round.
 
@@ -73,7 +73,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 | Challenge code escapes the sandbox (network, files, processes) | AST allowlist; flag and source sent over stdin (never argv or environ); real-model matches only run in Docker (`--network none`, read-only rootfs, cap-drop ALL, no-new-privileges, seccomp, non-root, pids/memory/CPU limits, container removed on timeout) and fail closed if the daemon is unreachable; subprocess sandbox (fake provider only) adds rlimits incl. no forks and kills the whole process group |
 | Infinite loops and memory bombs | CPU + wall-clock + memory limits; output truncated |
 | Flag leakage to the attacker | Flags are HMAC-derived by the arena and never shown to authors; prompts are guarded (`FlagLeakError`); feedback and logs are redacted; flags are never persisted |
-| Trivial or unsolvable challenges | Reference payload must succeed and empty input must fail |
+| Trivial or unsolvable challenges | Reference payload must succeed; empty and junk input must fail, in bounded time |
 | Prompt injection inside challenge text | The attacker only produces stdin. Model output is never executed by the arena, only parsed as JSON |
 | Secrets in logs | Keys only come from env and are held as `SecretStr`; the JSON log formatter scrubs keys and flags |
 | Score tampering | hash-chained event log; `duel replay` refolds it, rescores and flags mismatches |
@@ -119,7 +119,7 @@ Lifecycle: `pending → build → validate → attack → score → (build | com
 **Allowed models** (`app/budget.py:DEFAULT_PRICES`, USD per 1M input/output tokens; any other model is refused unless a config adds it to `prices`):
 `gpt-5-nano` (0.05/0.40), `gpt-4o-mini` (0.15/0.60), `gpt-5-mini` (0.25/2.00),
 `gpt-4.1-mini` (0.40/1.60), `claude-haiku-5-5` (0.10/0.50), `gpt-6-luna` (0.10/0.50).
-Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `gpt-6-astra` (10/50). Prices pinned 2026-10-22 from https://docs.anthropic.com/en/docs/about-claude/pricing and https://platform.openai.com/docs/pricing.
+Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-5-5` (2/10), `gpt-6.1-sol` (2/10), `claude-opus-5-5` (4/20), `gpt-5.6-sol` (4/20), `claude-fable-5-1` (10/50), `claude-fable-5-2` (8/40), `gpt-6-astra` (10/50). Older prices pinned 2026-10-22; `claude-fable-5-2` from https://docs.anthropic.com/en/docs/about-claude/pricing on 2026-11-13. OpenAI prices from https://platform.openai.com/docs/pricing.
 
 **Output cap and thinking** (#145): `[rules] max_output_tokens` (default 1500, reasoning included) and `[rules] reasoning_effort` (`low`/`medium`/`high`; when unset, `gpt-6-luna` sends `low` and pinned `gpt-5-nano`/`gpt-5-mini` send `minimal`) go to every agent identically; `[[agents]] max_output_tokens` overrides the cap for one agent (thinking models need far more than 1500). Both vendors get the same strict answer schema as structured output. A reply cut off at the cap gets exactly one call asking for brevity; a second cut-off is the failure reason `truncated`. Thinking/reasoning tokens are logged per call (`reasoning_tokens`) and billed as output.
 
