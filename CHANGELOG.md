@@ -61,6 +61,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- `duel harness`: the $0 no-fluke harness. Scripted bots with a fixed capture chance per try play duplicate matches through the real engine and sandbox, and it reports how often the stronger bot wins and the first-seat share (side bias).
 - `duel ladder PLAN [--dry-run]`: the no-fluke ladder of duplicate matches from a TOML plan (examples/ladder-a/b/c/fake.toml) with flag overrides. The validator names each broken rule and retires gpt-5-nano from 2026-12-11 by the plan's `run_date`. The $0 dry run prices the worst-case path and refuses before any call if a match or the ladder could pass its cap; a real run always dry-runs first. `Rules.call_caps` (per-purpose output caps) is new in the unreleased RULES 2 and is omitted from logs when unset.
 - `duel duplicate`: no-fluke duplicate play. Each board is one seed played twice with seats swapped; the board difference is clipped, a twice-truncated reply replays the board on a derived seed (then void), and the result needs the sign test (p <= 0.05) or the SPRT, never spend. Prints the board table, margin, p, bootstrap CI, SPRT state and spend vs `--match-max-usd`; `verify` recomputes every board. $0 with fake agents.
 - `ladder` mode preset (no-fluke): ledger scoring with flat round weights, 1 challenge a side, 3 tries, 1 round, terrain off; keystone and heat stay.

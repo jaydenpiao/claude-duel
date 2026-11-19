@@ -4,6 +4,7 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 
 ## providers/
 - `fake.py`: deterministic offline opponent; `skill` controls difficulty. Default for tests, CI and staging.
+- `scripted.py`: `ScriptedProvider` for the $0 no-fluke harness only: builds like `fake.py`, captures with a fixed seeded chance per try.
 - `openai.py`: httpx client; gpt-6/gpt-5.6 go through the Responses API (no temperature, strict `json_schema`, `reasoning.effort`), older models through Chat Completions JSON mode; a reply stopped at the cap is `truncated`; a content-filter finish, `message.refusal`, a refusal part, or Responses `content_filter` is `refused` (ADR 0016).
 - `anthropic.py`: Messages API client on the same port; no temperature or cache_control, cache tokens billed as input; 529 is transient, "credit balance" is quota. Sends the strict `json_schema` and `effort` via `output_config`; `stop_reason == "max_tokens"` is `truncated`, `stop_reason == "refusal"` is `refused` (ADR 0016); thinking tokens are reported in `reasoning_tokens` (already inside output, billed as output).
 - `http.py`: `raise_for_status(resp, vendor)`, shared by every HTTP adapter; maps HTTP errors to domain errors (quota vs retryable, `Retry-After`).

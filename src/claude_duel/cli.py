@@ -38,6 +38,7 @@ from claude_duel.app.experiment import run_stakes
 from claude_duel.app.export import DEFAULT_OUT
 from claude_duel.app.export import write as write_export
 from claude_duel.app.ghost_verify import verify_ghosts
+from claude_duel.app.harness import measure
 from claude_duel.app.ladder import play_ladder, project, verify_ladder
 from claude_duel.app.replay import replay
 from claude_duel.app.series import SeriesReport, play_series, verify_series
@@ -108,6 +109,16 @@ def _ladder_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
         lad.add_argument(flag, dest=key, type=_models if kind == "models" else kind, help=f"overrides {key}")
 
 
+def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    har = sub.add_parser("harness", help="$0 no-fluke harness: scripted bots of known strength play duplicate matches")
+    har.add_argument("--pct-a", type=int, default=80, help="first bot's capture chance per try (percent)")
+    har.add_argument("--pct-b", type=int, default=50)
+    har.add_argument("--matches", type=int, default=50)
+    har.add_argument("--boards-min", type=int, default=4)
+    har.add_argument("--boards-max", type=int, default=8)
+    har.add_argument("--seed", default="harness")
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="duel", description="Agent-vs-agent staged CTF arena")
     p.add_argument("--config", type=Path, help="TOML config file")
@@ -139,6 +150,7 @@ def _parser() -> argparse.ArgumentParser:
     est.add_argument("--model", help="price at this allowlisted model (default: configured openai_model)")
     _driver_parsers(sub)
     _ladder_parser(sub)
+    _harness_parser(sub)
     rat = sub.add_parser("ratings", help="offline Elo + Bradley-Terry (95%% bootstrap CI) over all completed matches")
     rat.add_argument("--boot", type=int, default=200, help="bootstrap resamples (0: no CI)")
     rat.add_argument("--format", choices=("text", "json"), default="text")
@@ -251,6 +263,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "series": lambda: _series(settings, args.series_id or uuid.uuid4().hex[:12], args.games, args.format),
         "duplicate": lambda: _duplicate(settings, args),
         "ladder": lambda: _ladder(settings, args),
+        "harness": lambda: _harness(settings, args),
         "ratings": lambda: _ratings(settings, max(args.boot, 0), args.format),
         "tournament": lambda: _tournament(settings, args.tournament_id or uuid.uuid4().hex[:12], args.format),
         "card": lambda: _card(settings, args.match_id, args.out),
@@ -385,6 +398,22 @@ def _series_text(series_id: str, state: SeriesState, report: SeriesReport) -> li
     lines.append(f"series {series_id} best of {state.rule.games}: {result} · wins {state.wins()}")
     lines.append(f"series verified {'✓' if report.consistent else '✗ ' + ', '.join(report.mismatches)}")
     return lines
+
+
+def _harness(settings: Settings, args: argparse.Namespace) -> int:
+    try:
+        rule = DuplicateRule(boards_min=args.boards_min, boards_max=args.boards_max)
+    except ValueError as exc:
+        raise ConfigError(f"bad harness: {exc}") from exc
+    res = measure(
+        settings.store_dir / "harness", args.pct_a, args.pct_b, matches=args.matches, rule=rule, seed=args.seed
+    )
+    print(
+        f"{args.pct_a}% vs {args.pct_b}% over {res.matches} matches: first {res.first} · second {res.second}"
+        f" · undecided {res.undecided} · first wins {res.first_rate():.1%}"
+        f" · first-seat share {res.first_seat_share:.1%}"
+    )
+    return 0
 
 
 def _ladder(settings: Settings, args: argparse.Namespace) -> int:
