@@ -159,3 +159,14 @@ def test_final_plan_passes_on_typical_cost_and_is_refused_on_worst() -> None:
     assert not ladder_mod.project(final).refusals
     assert ladder_mod.project(lc.load(EXAMPLES / "ladder-final.toml", {"budget.basis": "worst"})).refusals
     assert final.digest() == lc.load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 200}).digest()
+
+
+def test_watch_prints_halves_and_attacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["ladder", str(FAKE), "--ladder-id", "w1", "--watch", "--boards-max", "1", "--boards-min", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "half 1: fake-1-a vs fake-1-b" in out
+    assert "half done · $" in out
+    assert "verified ✓" in out

@@ -60,6 +60,7 @@ from claude_duel.presentation.card import card_data, card_svg
 from claude_duel.presentation.commentary import Commentary
 from claude_duel.presentation.duplicate import duplicate_lines, duplicate_view
 from claude_duel.presentation.ladder import (
+    LadderTicker,
     comparison_lines,
     comparison_view,
     ladder_lines,
@@ -112,6 +113,7 @@ def _ladder_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
     lad.add_argument("plan", type=Path, help="ladder TOML (examples/ladder-*.toml)")
     lad.add_argument("--dry-run", action="store_true", help="price the ladder (worst and typical) and exit; no calls")
     lad.add_argument("--ladder-id", help="explicit id (re-running an existing id resumes it)")
+    lad.add_argument("--watch", action="store_true", help="print one line per half, build and attack as it happens")
     lad.add_argument("--format", choices=("text", "json"), default="text")
     for flag, key, kind in _LADDER_FLAGS:
         lad.add_argument(flag, dest=key, type=_models if kind == "models" else kind, help=f"overrides {key}")
@@ -497,7 +499,9 @@ def _ladder(settings: Settings, args: argparse.Namespace) -> int:
             print("\n".join(projection_lines(proj, cfg.budget.ladder_max_usd)))
         return 1 if proj.refusals else 0
     ladder_id = args.ladder_id or uuid.uuid4().hex[:12]
-    state = play_ladder(settings, ladder_id, cfg, build_metrics(settings, ladder_id, InMemoryMetrics()))
+    ticker = LadderTicker(sys.stdout) if args.watch and args.format == "text" else None
+    metrics = build_metrics(settings, ladder_id, InMemoryMetrics())
+    state = play_ladder(settings, ladder_id, cfg, metrics, ticker)
     report = verify_ladder(settings, ladder_id)
     if args.format == "json":
         print(json.dumps(ladder_view(state, report.consistent, report.mismatches)))
