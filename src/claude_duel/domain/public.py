@@ -32,6 +32,7 @@ _KEEP: Mapping[str, tuple[str, ...]] = {
     ev.ALLOCATE_STARTED: ("agent", "round"),
     ev.ATTACK_ATTEMPTED: ("key", "attempt"),
     ev.CHALLENGE_ATTACKED: ("key", "attack"),
+    ev.CHALLENGE_TIMEOUT: ("challenge_id", "attacker", "key", "count", "voided"),
     ev.ROUND_SCORED: ("round", "delta"),
     ev.FINDING_FLAGGED: ("finding",),
     ev.NOTE_RECORDED: ("agent", "round"),

@@ -155,3 +155,12 @@ def test_attempt_omits_refused_when_false() -> None:
     refused = AttackAttempt(payload=MALFORMED, output=REFUSED, tokens=1, refused=True)
     assert refused.logged()["refused"] is True
     assert refused.refused
+
+
+def test_attempt_omits_timeout_when_false() -> None:
+    clean = AttackAttempt(payload="x", output="y", tokens=1)
+    assert clean.timeout is False
+    assert "timeout" not in clean.logged()
+    timed = AttackAttempt(payload="x", output="too slow", tokens=1, timeout=True)
+    assert timed.logged()["timeout"] is True
+    assert timed.timeout
