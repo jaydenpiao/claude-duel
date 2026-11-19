@@ -89,6 +89,13 @@ class WalletEmptyError(DuelError):
     """An agent's per-match wallet (``rules.wallet``) is spent; its builds forfeit and its attacks stop."""
 
 
+class HeatBoundError(DuelError):
+    """Host-side heat similarity would exceed its work ceiling (no quadratic LCS is run)."""
+
+    def __init__(self) -> None:
+        super().__init__("heat exceeds the work bound")
+
+
 class HistoryRewrittenError(DuelError):
     """``duel sync`` found an event hash in the results database that its log no longer has; it halts (ADR 0012)."""
 

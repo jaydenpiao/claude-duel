@@ -185,7 +185,7 @@ def _match_row(state: MatchState, chain: list[tuple[str, Event]]) -> MatchRow:
         mode=r.mode,
         challenge_form=r.challenge_form,
         framing=r.framing.kind,
-        rules=r.model_dump(mode="json"),
+        rules=r.dump(),
         limits=state.limits.model_dump(mode="json"),
         failure=None if state.failure is None else public_text(state.failure),
         projection_version=PROJECTION_VERSION,

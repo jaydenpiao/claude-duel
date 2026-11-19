@@ -49,6 +49,8 @@ def _play_series(
     caps: tuple[SpendCap, ...],
 ) -> sr.SeriesState:
     event_log = build_series_log(settings)
+    # settings.rules is config (heat pinned in Settings) or a tournament's logged rules; resume and every child
+    # use the series' logged contract (pinned() below).
     events = open_or_create(
         event_log,
         series_id,
@@ -58,7 +60,7 @@ def _play_series(
             "seed": settings.seed or sr.game_seed(series_id, 0),
             "rule": rule.model_dump(mode="json"),
             "agents": [a.model_dump(mode="json") for a in pin_agents(settings)],
-            "rules": settings.rules.model_dump(mode="json"),
+            "rules": settings.rules.dump(),
             "limits": settings.limits.model_dump(mode="json"),
         },
     )
