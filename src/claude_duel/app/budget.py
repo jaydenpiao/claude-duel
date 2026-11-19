@@ -35,12 +35,21 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     "claude-opus-5-5": (4.00, 20.00),
     "gpt-5.6-sol": (4.00, 20.00),
     "claude-fable-5-1": (10.00, 50.00),
+    "claude-fable-5-2": (8.00, 40.00),  # standard list, 2026-11-13, same Anthropic pricing URL
     "gpt-6-astra": (10.00, 50.00),
 }
 # Top-tier models (#10): priced and allowlisted, but refused unless a config sets ``allow_premium = true``,
 # so a typo or a default can never start a costly match. The spend caps still apply on top.
 PREMIUM: frozenset[str] = frozenset(
-    {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-5.6-sol", "claude-fable-5-1", "gpt-6-astra"}
+    {
+        "claude-sonnet-5-5",
+        "gpt-6.1-sol",
+        "claude-opus-5-5",
+        "gpt-5.6-sol",
+        "claude-fable-5-1",
+        "claude-fable-5-2",
+        "gpt-6-astra",
+    }
 )
 
 
