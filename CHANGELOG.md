@@ -6,7 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- An attack sandbox wall or signal kill refunds the try and logs `challenge_timeout`; after two timeouts the challenge is voided as too slow (author forfeit). `junk_inputs` also tweaks the first character and one per-match seeded index.
+- An attack sandbox wall or signal kill refunds the try and logs `challenge_timeout`; after two timeouts the challenge is voided as too slow (author forfeit). No version bump: this joins the unreleased RULES 2 / SCHEMA 3 from #292 (no v3 log from a real match exists yet), so `challenge_timeout` and `AttackAttempt.timeout` are part of v3. `junk_inputs` also tweaks the first character and one per-match seeded index.
 - Repair hints cover junk-input and too-slow validation rejections; the forge prompt, README and app engine docs now say empty and junk input must fail in bounded time.
 - `junk_inputs` lives in `domain/probes.py`. Sandbox `killed_reason` is a `Literal` with named constants, so a renamed reason cannot silently skip the too-slow check.
 - image: upgrade zlib1g for CVE-2026-76844 / CVE-2026-85091 via https://deb.debian.org with apt SRV records off (official python:3.12-slim is not rebuilt yet; the runner proxy returns 500 for apt SRV lookups).

@@ -353,6 +353,7 @@ class Validation(_Frozen):
 
 
 CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the flag itself is never stored)
+ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
 
 
 class AttackAttempt(_Frozen):
@@ -380,6 +381,16 @@ class AttackAttempt(_Frozen):
         return data
 
 
+def timeouts(history: list[AttackAttempt]) -> int:
+    """Tries killed by the sandbox wall or a signal (refunded)."""
+    return sum(a.timeout for a in history)
+
+
+def spent(history: list[AttackAttempt]) -> int:
+    """Tries that count against ``max_attempts`` (timeouts are refunded)."""
+    return len(history) - timeouts(history)
+
+
 class Attack(_Frozen):
     challenge_id: str
     attacker: str
@@ -398,7 +409,7 @@ class Attack(_Frozen):
             challenge_id=challenge_id,
             attacker=attacker,
             solved=solved,
-            attempts=sum(not a.timeout for a in history),
+            attempts=spent(history),
             tokens_used=sum(a.tokens for a in history),
             usd_micros=sum(a.usd_micros for a in history),
             reason=reason,

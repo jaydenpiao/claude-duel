@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import (
+    ATTACK_TIMEOUT,
     AgentSpec,
     Attack,
     AttackAttempt,
@@ -330,7 +331,7 @@ def _challenge_timeout(state: MatchState, p: ChallengeTimeout) -> None:
         state.validations[p.challenge_id] = Validation(
             challenge_id=p.challenge_id,
             valid=False,
-            reason="too slow: attack timed out or was killed; check must answer every input quickly",
+            reason=ATTACK_TIMEOUT,
         )
 
 

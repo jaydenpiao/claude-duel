@@ -19,6 +19,7 @@ from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redac
 from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
+    ATTACK_TIMEOUT,
     CAPTURED,
     Attack,
     AttackAttempt,
@@ -32,6 +33,8 @@ from claude_duel.domain.models import (
     SandboxLimits,
     Stage,
     Validation,
+    spent,
+    timeouts,
 )
 from claude_duel.domain.probes import junk_inputs
 from claude_duel.domain.scoring import (
@@ -65,7 +68,6 @@ REFUSED = "refused: the model declined to answer"  # engine-authored display / b
 GATE = "gate"  # provider key of the difficulty-gate probe (see Rules.difficulty_gate)
 VALIDATION_TIME_FACTOR = 6  # empty and junk probes share this many wall_seconds
 TIMEOUTS_TO_VOID = 2  # attack sandbox wall/signal kills before the challenge is voided as too slow
-ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
 # Sandbox stdout is rewritten if it would equal one of these, so control flow never keys off run output.
 _ENGINE_SENTINELS = frozenset({CAPTURED, MALFORMED, TRUNCATED, REFUSED})
 
@@ -810,10 +812,10 @@ class MatchEngine:
         while True:
             history = state.attempts.get(key, [])
             tokens = sum(a.tokens for a in history)
-            spent = sum(not a.timeout for a in history)
+            used = spent(history)
             if done := self._attack_outcome(ch.id, attacker, history):
                 return done
-            if spent >= state.max_attempts(attacker):
+            if used >= state.max_attempts(attacker):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="attempts exhausted")
             if stake is not None and tokens >= stake:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
@@ -828,7 +830,7 @@ class MatchEngine:
                 spec.title,
                 _with_terrain(spec.description, state.terrains.get(ch.id)),
                 spec.source,
-                spent + 1,
+                used + 1,
                 pairs,
                 self._memory(state, attacker),
                 self._scratch(state),
@@ -839,14 +841,14 @@ class MatchEngine:
             left = None if stake is None else stake - tokens
             if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
-            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=spent + 1)
+            self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
             if not completion.refused:
                 self._note(state, attacker, completion.text)
             attempt = self._attempt(state, attacker, spec, flag, completion, state.terrains.get(ch.id))
             self._checkpoint(state, ev.ATTACK_ATTEMPTED, key=key, attempt=attempt.logged())
             if attempt.timeout:
-                count = sum(a.timeout for a in state.attempts.get(key, []))
+                count = timeouts(state.attempts.get(key, []))
                 self._checkpoint(
                     state,
                     ev.CHALLENGE_TIMEOUT,
@@ -862,7 +864,7 @@ class MatchEngine:
         """A finished attack from already-logged tries: a capture, or two timeouts (challenge voided)."""
         if history and history[-1].captured:
             return Attack.of(challenge_id, attacker, history, solved=True, reason="flag captured")
-        if sum(a.timeout for a in history) >= TIMEOUTS_TO_VOID:
+        if timeouts(history) >= TIMEOUTS_TO_VOID:
             return Attack.of(challenge_id, attacker, history, solved=False, reason=ATTACK_TIMEOUT)
         return None
 
