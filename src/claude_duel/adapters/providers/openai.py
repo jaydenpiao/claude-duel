@@ -10,6 +10,10 @@ content-filter reason is marked ``refused``.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -17,11 +21,60 @@ from pydantic import SecretStr
 
 from claude_duel.adapters.providers.http import raise_for_status
 from claude_duel.domain.errors import ProviderTimeoutError, TransientProviderError
-from claude_duel.ports import Completion, CompletionRequest
+from claude_duel.ports import RESPONSES_MODELS, Completion, CompletionRequest
 
 HTTP_BAD_REQUEST = 400
-RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
-# nano/mini still accept "minimal". gpt-6-luna does not; the documented migration from minimal is "low".
+
+
+_PROCESS_ID = uuid.uuid4().hex  # fallback when the store dir is not writable (read-only image, odd HOME)
+
+
+def install_id_path() -> Path:
+    """``install-id`` in the store dir (``DUEL_STORE_DIR``, default ``.duel``); never under HOME."""
+    return Path(os.environ.get("DUEL_STORE_DIR") or ".duel") / "install-id"
+
+
+def _read_id(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def _install_id(path: Path) -> str:
+    """Read the id, else create it atomically at 0o600 (written to a private O_EXCL temp, then linked in, so no
+    reader ever sees an empty file). An empty file counts as missing."""
+    if raw := _read_id(path):
+        return raw
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f".install-id.{uuid.uuid4().hex}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(uuid.uuid4().hex)
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            if not _read_id(path):
+                os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return _read_id(path)
+
+
+def default_safety_identifier(path: Path | None = None) -> str:
+    """Stable sha256 of a random per-install id (never a hostname, username, or other personal data); a random
+    per-process id when the store dir cannot be written."""
+    try:
+        raw = _install_id(path or install_id_path())
+    except OSError:
+        raw = ""
+    return hashlib.sha256((raw or _PROCESS_ID).encode()).hexdigest()
+
+
+# Small gpt-5 models default to minimal effort, so reasoning cannot eat a short output cap (design-reasoning-models.md).
+# Exact prefixes on purpose: gpt-5.1+ names (e.g. gpt-5.1-mini) do not accept ``minimal`` (they use ``none``), so do not
+# widen these to match them. nano/mini still accept "minimal"; gpt-6-luna does not (documented migration is "low").
 MINIMAL_EFFORT_MODELS = ("gpt-5-nano", "gpt-5-mini")
 LOW_EFFORT_MODELS = ("gpt-6-luna",)
 
@@ -47,8 +100,10 @@ class OpenAIProvider:
         base_url: str = "https://api.openai.com/v1",
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
+        safety_identifier: str | None = None,
     ) -> None:
         self._model = model
+        self._safety_identifier = safety_identifier if safety_identifier is not None else default_safety_identifier()
         self._summaries = True  # ask for reasoning summaries until the org turns out not to be verified for them
         self._client = httpx.Client(
             base_url=base_url,
@@ -71,7 +126,10 @@ class OpenAIProvider:
         raise_for_status(resp, "openai")
         try:
             data = resp.json()
-            return _parse_responses(data) if responses else _parse_chat(data)
+            if not responses:
+                return _parse_chat(data)
+            effort = default_effort(self._model, request.reasoning_effort)
+            return _parse_responses(data).model_copy(update={"reasoning_effort": effort})
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise TransientProviderError("openai returned an unexpected body") from exc
 
@@ -89,6 +147,7 @@ class OpenAIProvider:
             "max_completion_tokens": request.max_tokens,
             "temperature": request.temperature,
             "response_format": {"type": "json_object"},
+            "safety_identifier": self._safety_identifier,
             "messages": [
                 {"role": "system", "content": request.system},
                 {"role": "user", "content": request.prompt},
@@ -108,6 +167,7 @@ class OpenAIProvider:
             "max_output_tokens": request.max_tokens,
             "text": {"format": fmt},
             "store": False,
+            "safety_identifier": self._safety_identifier,
         }
         effort = default_effort(self._model, request.reasoning_effort)
         reasoning = ({"effort": effort} if effort is not None else {}) | (
