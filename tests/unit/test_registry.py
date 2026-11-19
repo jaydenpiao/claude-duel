@@ -20,6 +20,7 @@ from claude_duel.config import load_settings
 from claude_duel.domain import vendors
 from claude_duel.domain.errors import (
     ConfigError,
+    CyberPolicyError,
     PermanentProviderError,
     QuotaExceededError,
     RateLimitError,
@@ -42,11 +43,26 @@ def _resp(status: int, text: str = "", headers: dict[str, str] | None = None) ->
         (500, "", TransientProviderError),
         (408, "", TransientProviderError),
         (400, "", PermanentProviderError),
+        (400, "cyber_policy", PermanentProviderError),  # substring only: never the cyber_policy abort
+        (503, "upstream says cyber_policy", TransientProviderError),
+        (429, "cyber_policy slow down", RateLimitError),
+        (400, '{"error":{"code":"invalid_value","message":"echo: cyber_policy"}}', PermanentProviderError),
+        (403, '{"error":{"code":"cyber_policy"}}', PermanentProviderError),  # not openai: parsed code ignored
     ],
 )
 def test_raise_for_status_maps_errors(status: int, text: str, error: type[Exception]) -> None:
-    with pytest.raises(error):
+    with pytest.raises(error) as got:
         raise_for_status(_resp(status, text), "acme")
+    assert not isinstance(got.value, CyberPolicyError)
+
+
+def test_cyber_policy_only_from_openai_parsed_code() -> None:
+    with pytest.raises(CyberPolicyError):
+        raise_for_status(_resp(403, '{"error":{"code":"cyber_policy"}}'), "openai")
+    for status, text in ((503, "cyber_policy"), (429, '{"error":{"message":"cyber_policy"}}')):
+        with pytest.raises((TransientProviderError, RateLimitError)) as got:
+            raise_for_status(_resp(status, text), "openai")
+        assert not isinstance(got.value, CyberPolicyError)
 
 
 def test_raise_for_status_passes_success_and_names_vendor_on_quota() -> None:
