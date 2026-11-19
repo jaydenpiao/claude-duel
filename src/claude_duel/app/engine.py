@@ -82,6 +82,7 @@ SUMMARY_CHARS = 240  # reasoning summary kept per call in call_charged
 SOLVER_TIME_FACTOR = 4  # an author's solver may search; it gets 4x the wall and CPU of a challenge run
 GATE_REJECTION = "too easy: a cheap probe model solved it on its first try; make the attacker reason through more steps"
 CONTROL_SOURCE = "import sys\nsys.stdin.read()\nprint('control: there is no flag here')\n"  # Rules.integrity_control
+REF_RUNS = 3  # SV-4: the reference must print the same thing on every run, or attackers lose to luck
 REF_OUTPUT_CHARS = 200  # program output echoed back to the author when the reference run fails
 
 
@@ -584,6 +585,9 @@ class MatchEngine:
                 + (f" (exit {ref.exit_code}: it crashed or raised)" if ref.exit_code else "")
                 + (f"; it printed {seen!r}" if seen else "; it printed nothing")
             )
+        for _ in range(REF_RUNS - 1):
+            if self._run_challenge(spec.source, spec.reference_payload, flag, state, "validate").stdout != ref.stdout:
+                return "nondeterministic: the reference payload printed different output on repeat runs"
         second = _decoy(state, cid, "second")
         if second not in self._run_challenge(spec.source, spec.reference_payload, second, state, "validate").stdout:
             return "flag-dependent: the reference payload only works for one flag (it must not depend on FLAG)"
