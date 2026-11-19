@@ -103,7 +103,8 @@ def check_rules(rules: Rules, round_no: int) -> list[str]:
         "2. FLAG is already a global and the arena handles it: it reads stdin and prints FLAG when check(s) is "
         "True. Never use FLAG, sys or stdin yourself; never print anything. check('') must be False.",
         f"3. Allowed imports: {', '.join(sorted(PURE_MODULES - CHECK_FORM_BANNED))}. Nothing else (no random, "
-        "no hashes or CRCs: an answer only brute force can find is rejected).",
+        "no hashes or CRCs; for seeded scrambling call the arena's mix(x), a published 32-bit integer "
+        "mixer, inside your functions: an answer only brute force can find is rejected).",
         "4. No name (except a bare _) or attribute may start with _ (no dunders, no __dict__, no globals()).",
         f"5. Banned names, not even as variable names: {', '.join(sorted(BANNED_NAMES))}.",
         f"6. Source at most {budget} bytes; check must finish in well under a second.",

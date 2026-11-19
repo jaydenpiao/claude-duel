@@ -13,7 +13,7 @@ import hashlib
 import math
 import string
 
-from claude_duel.domain.contract import definitions
+from claude_duel.domain.contract import with_mix
 
 DENSITY_MAX_LENGTH = 64  # longer payloads have a huge space; sampling them says nothing useful
 _ALPHABETS = (
@@ -33,7 +33,7 @@ def nonce(secret: str, cid: str, purpose: str) -> str:
 
 def counted(source: str, solver: str, tag: str) -> str:
     """The solver program with ``check`` counted; the count is written last, after ``tag``."""
-    defs = definitions(source).rstrip()
+    defs = with_mix(source).rstrip()
     hook = (
         "\n\n_arena_calls = [0]\n_arena_check = check\n"
         "def check(s):\n    _arena_calls[0] += 1\n    return _arena_check(s)\n"
@@ -78,7 +78,7 @@ def samples(seed: str, cid: str, payload: str, n: int) -> list[str]:
 def density_program(source: str, inputs: list[str], tag: str) -> str:
     """Runs ``check`` on every input; a raise or a non-True result counts as a miss."""
     return (
-        definitions(source).rstrip()
+        with_mix(source).rstrip()
         + f"\n\n_arena_inputs = {inputs!r}\n_arena_hits = 0\n"
         + "for _arena_s in _arena_inputs:\n"
         + "    try:\n        _arena_hits += check(_arena_s) is True\n"
