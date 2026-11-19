@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import math
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +25,8 @@ from claude_duel.domain.models import (
 
 A, B = AgentSpec(name="gpt-x"), AgentSpec(name="claude-y")
 RULE = dp.DuplicateRule()
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def _half(match_id: str, agents: tuple[AgentSpec, AgentSpec], scores: dict[str, int], **kw: object) -> MatchState:
@@ -169,3 +173,16 @@ def test_capped_ends_the_match_on_played_boards() -> None:
     st.boards[0] = st.boards[0].model_copy(update={"usd": 0.4})
     assert dp.next_board_usd(st) == 0.4
     assert dp.next_board_usd(_state()) == 0.0
+
+
+def test_void_scope_matches_the_labeled_failures() -> None:
+    """The 140 labeled failures (failure-labels-2026-11-05): exactly the 8 harness faults void, the rest score."""
+    rows = list(csv.DictReader((FIXTURES / "failure-labels-2026-11-05.csv").open(encoding="utf-8")))
+    assert len(rows) == 140
+    for row in rows:
+        voids = (dp.build_fault if row["event_type"] == "challenge_validated_invalid" else dp.attack_fault)(
+            row["reason"]
+        )
+        assert voids == (row["category"] == "harness_fault_or_truncation"), row
+    assert sum(r["category"] == "harness_fault_or_truncation" for r in rows) == 8
+    assert not dp.build_fault("malformed: no JSON object found")  # format failures after retries stay scored

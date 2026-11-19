@@ -1,0 +1,141 @@
+event_type,reason,category
+challenge_validated_invalid,malformed: truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+attack_attempt_failed,truncated: the reply hit max_output_tokens twice,harness_fault_or_truncation
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,check returned False ,near_miss
+attack_attempt_failed,check returned False ,near_miss
+attack_attempt_failed,check returned False ,near_miss
+attack_attempt_failed,check returned False ,near_miss
+attack_attempt_failed,check returned False ,near_miss
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,check returned False ,near_miss
+challenge_validated_invalid,reference payload does not reveal flag; it printed nothing,no_approach_or_other
+challenge_validated_invalid,the accepting input appears in the source as shifted or XORed char codes; derive it with logic,no_approach_or_other
+challenge_validated_invalid,the accepting input (or an obvious encoding of it) appears in the source; derive it with logic,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,reference payload does not reveal flag; it printed nothing,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,the accepting input (or an obvious encoding of it) appears in the source; derive it with logic,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,reference payload does not reveal flag; it printed nothing,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+challenge_validated_invalid,no reference input: the solver never printed one,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
+attack_attempt_failed,,no_approach_or_other
