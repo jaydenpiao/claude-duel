@@ -294,7 +294,8 @@ class TestModes:
 
     def test_unknown_mode_lists_known(self) -> None:
         with pytest.raises(
-            ConfigError, match="known: blitz, capped, checked, classic, efficiency, gated, ledger, ledger_deep, quick"
+            ConfigError,
+            match="known: blitz, capped, checked, classic, efficiency, gated, ladder, ledger, ledger_deep, quick",
         ):
             load_settings(None, env={"DUEL_MODE": "nope"})
 

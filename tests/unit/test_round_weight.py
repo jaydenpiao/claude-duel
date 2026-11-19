@@ -1,6 +1,7 @@
 """No-fluke ladder: ``round_weight="flat"`` scores every round at weight 1; linear (default) is unchanged."""
 
 from claude_duel.domain.models import ChallengeSpec, Rules, ScoringRule
+from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import defense_award, solve_award, weight
 
 SPEC = ChallengeSpec(title="t", description="d", source="print(1)", reference_payload="x" * 12, difficulty=3)
@@ -25,3 +26,13 @@ def test_old_rules_without_the_field_load_linear() -> None:
     data = Rules().dump()
     data["scoring"].pop("round_weight")
     assert Rules.model_validate(data).scoring.round_weight == "linear"
+
+
+def test_ladder_preset_is_flat_short_and_terrain_free() -> None:
+    rules = preset("ladder")
+    assert rules.scoring.kind == "ledger"
+    assert rules.scoring.round_weight == "flat"
+    assert (rules.rounds, rules.challenges_per_round, rules.max_attempts) == (1, 1, 3)
+    assert rules.ledger is not None
+    assert rules.ledger.terrain == "none"
+    assert rules.ledger.keystone

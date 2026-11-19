@@ -3,6 +3,17 @@
 from claude_duel.domain.heat_tokens import HISTORY_MATCHES, REF_CAP
 from claude_duel.domain.models import ClockRule, DeepRule, LedgerRule, MemoryRule, Rules, ScoringRule, WalletRule
 
+_SEALED = LedgerRule(
+    keystone=True,
+    terrain="seeded",
+    heat_window=2,
+    heat_vs_opponent=True,
+    heat_ref_cap=REF_CAP,
+    heat_compare="full",
+    heat_metric="lcs-v1",
+    heat_history_matches=HISTORY_MATCHES,
+)
+
 MODES: dict[str, Rules] = {
     "classic": Rules(),
     "quick": Rules(mode="quick", rounds=1, challenges_per_round=1),
@@ -33,22 +44,27 @@ MODES: dict[str, Rules] = {
         challenges_per_round=3,
         max_attempts=3,
         scoring=ScoringRule(kind="ledger"),
-        ledger=LedgerRule(
-            keystone=True,
-            terrain="seeded",
-            heat_window=2,
-            heat_vs_opponent=True,
-            heat_ref_cap=REF_CAP,
-            heat_compare="full",
-            heat_metric="lcs-v1",
-            heat_history_matches=HISTORY_MATCHES,
-        ),
+        ledger=_SEALED,
         clock=ClockRule(bank_tokens=60_000, increment_tokens=500),  # scored modes run on a token clock (#67)
         memory=MemoryRule(kind="summary"),
     ),
 }
 # Deep layer phase 1 (design-deep-layer.md): ledger plus the Ghost Codex.
 MODES["ledger_deep"] = MODES["ledger"].model_copy(update={"mode": "ledger_deep", "deep": DeepRule(ghosts=True)})
+# No-fluke ladder (design-no-fluke): short flat-weight rounds, one challenge a side, no seeded terrain luck.
+# Played as duplicate boards (`duel duplicate`); keystone and heat stay, since they reward skill.
+_LEDGER = MODES["ledger"]
+assert _LEDGER.ledger is not None
+MODES["ladder"] = _LEDGER.model_copy(
+    update={
+        "mode": "ladder",
+        "rounds": 1,
+        "challenges_per_round": 1,
+        "max_attempts": 3,
+        "scoring": ScoringRule(kind="ledger", round_weight="flat"),
+        "ledger": _SEALED.model_copy(update={"terrain": "none"}),
+    }
+)
 
 
 def preset(name: str) -> Rules:
