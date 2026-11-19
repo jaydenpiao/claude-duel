@@ -116,5 +116,6 @@ def _no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _isolated_install_id(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the per-install OpenAI safety identifier out of the developer's real data dir."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg-data")))
+    """Keep the per-install OpenAI safety identifier out of the developer's real store dir."""
+    path = tmp_path_factory.mktemp("install") / "install-id"
+    monkeypatch.setattr("claude_duel.adapters.providers.openai.install_id_path", lambda: path)

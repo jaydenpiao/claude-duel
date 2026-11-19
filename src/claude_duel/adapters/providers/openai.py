@@ -27,20 +27,50 @@ HTTP_BAD_REQUEST = 400
 RESPONSES_MODELS = ("gpt-6", "gpt-5")  # reasoning families (gpt-5, -nano, -mini, gpt-5.x) served via /responses
 
 
+_PROCESS_ID = uuid.uuid4().hex  # fallback when the store dir is not writable (read-only image, odd HOME)
+
+
 def install_id_path() -> Path:
-    """Per-install id file under ``$XDG_DATA_HOME`` or ``~/.local/share``, in ``claude-duel/install-id``."""
-    root = Path(os.environ["XDG_DATA_HOME"]) if os.environ.get("XDG_DATA_HOME") else Path.home() / ".local/share"
-    return root / "claude-duel" / "install-id"
+    """``install-id`` in the store dir (``DUEL_STORE_DIR``, default ``.duel``); never under HOME."""
+    return Path(os.environ.get("DUEL_STORE_DIR") or ".duel") / "install-id"
+
+
+def _read_id(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def _install_id(path: Path) -> str:
+    """Read the id, else create it atomically at 0o600 (written to a private O_EXCL temp, then linked in, so no
+    reader ever sees an empty file). An empty file counts as missing."""
+    if raw := _read_id(path):
+        return raw
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f".install-id.{uuid.uuid4().hex}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(uuid.uuid4().hex)
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            if not _read_id(path):
+                os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return _read_id(path)
 
 
 def default_safety_identifier(path: Path | None = None) -> str:
-    """Stable sha256 of a random per-install id (never a hostname, username, or other personal data)."""
-    path = path or install_id_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.is_file() or not path.read_text().strip():
-        path.write_text(uuid.uuid4().hex)
-        path.chmod(0o600)
-    return hashlib.sha256(path.read_text().strip().encode()).hexdigest()
+    """Stable sha256 of a random per-install id (never a hostname, username, or other personal data); a random
+    per-process id when the store dir cannot be written."""
+    try:
+        raw = _install_id(path or install_id_path())
+    except OSError:
+        raw = ""
+    return hashlib.sha256((raw or _PROCESS_ID).encode()).hexdigest()
 
 
 # nano/mini still accept "minimal". gpt-6-luna does not; the documented migration from minimal is "low".

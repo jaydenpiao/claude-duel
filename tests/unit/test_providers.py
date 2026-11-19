@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -11,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import SecretStr
 
+from claude_duel.adapters.providers import openai as openai_mod
 from claude_duel.adapters.providers.fake import TEMPLATES, FakeProvider
 from claude_duel.adapters.providers.openai import OpenAIProvider, default_safety_identifier
 from claude_duel.adapters.providers.retry import RetryingProvider, backoff_delay
@@ -24,6 +27,9 @@ from claude_duel.domain.errors import (
 )
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
+
+_REAL_INSTALL_PATH = openai_mod.install_id_path  # captured before the conftest fixture patches it
+AS_ROOT = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores dir modes")
 
 REQ = CompletionRequest(system="s", prompt="TASK: BUILD\nAGENT: a\nROUND: 1\nINDEX: 0", purpose="build")
 
@@ -162,6 +168,48 @@ class TestOpenAI:
         ).complete(REQ)
         assert all(s["safety_identifier"] == "id-for-tests" for s in seen)
         assert len(seen) == 2
+
+    def test_install_id_is_stable_private_and_never_empty(self, tmp_path: Path) -> None:
+        path = tmp_path / "store" / "install-id"
+        first = default_safety_identifier(path)
+        assert first == default_safety_identifier(path)
+        assert path.read_text().strip()
+        assert path.stat().st_mode & 0o777 == 0o600
+        path.write_text("")  # an empty file counts as missing
+        assert default_safety_identifier(path) not in {first, hashlib.sha256(b"").hexdigest()}
+
+    def test_concurrent_creation_yields_one_id(self, tmp_path: Path) -> None:
+        path = tmp_path / "install-id"
+        with ThreadPoolExecutor(8) as pool:
+            ids = set(pool.map(lambda _: default_safety_identifier(path), range(16)))
+        assert len(ids) == 1
+        assert hashlib.sha256(b"").hexdigest() not in ids
+
+    @AS_ROOT
+    def test_unwritable_store_falls_back_without_raising(self, tmp_path: Path) -> None:
+        locked = tmp_path / "ro"
+        locked.mkdir(mode=0o500)
+        try:
+            sid = default_safety_identifier(locked / "sub" / "install-id")
+            assert sid == default_safety_identifier(locked / "sub" / "install-id")  # per-process fallback
+            assert sid != hashlib.sha256(b"").hexdigest()
+        finally:
+            locked.chmod(0o700)
+
+    @AS_ROOT
+    def test_unwritable_home_does_not_raise(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(openai_mod, "install_id_path", _REAL_INSTALL_PATH)
+        home = tmp_path / "home"
+        home.mkdir(mode=0o500)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        monkeypatch.setenv("DUEL_STORE_DIR", str(tmp_path / "store"))
+        try:
+            OpenAIProvider(SecretStr("sk-test-0000000000"), "gpt-6-luna")
+            assert (tmp_path / "store" / "install-id").is_file()
+            assert not any(home.iterdir())
+        finally:
+            home.chmod(0o700)
 
     def test_timeout_and_transport(self) -> None:
         def timeout(r: httpx.Request) -> httpx.Response:

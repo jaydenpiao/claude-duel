@@ -35,7 +35,7 @@ def _error_code(resp: httpx.Response) -> str | None:
 
 def raise_for_status(resp: httpx.Response, vendor: str) -> None:
     """Map HTTP status to the provider error taxonomy."""
-    if resp.status_code >= 400 and (_error_code(resp) == "cyber_policy" or "cyber_policy" in resp.text):
+    if vendor == "openai" and resp.status_code >= 400 and _error_code(resp) == "cyber_policy":
         raise CyberPolicyError(
             f"{vendor} cyber_policy: access limited for this safety identifier or organization; not retried"
         )
