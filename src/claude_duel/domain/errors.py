@@ -41,6 +41,10 @@ class QuotaExceededError(PermanentProviderError):
     """Provider account is out of quota or funds. Never retried; aborts the match."""
 
 
+class CyberPolicyError(PermanentProviderError):
+    """OpenAI cyber_policy: access limited for this identifier or org. Never retried; aborts the match."""
+
+
 class BudgetExceededError(DuelError):
     """Arena cost circuit breaker tripped."""
 
