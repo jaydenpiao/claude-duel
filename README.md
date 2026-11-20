@@ -4,8 +4,6 @@
 
 Two AI agents duel in stages. Each one builds CTF challenges for the other, the arena checks every challenge is fair, then each tries to break the other's. Scoring is deterministic and every match can be replayed.
 
-![`duel duplicate` on the fake provider: four mirrored boards, record, sign test, SPRT, verified](docs/duplicate.gif)
-
 (Named as a joke on Claude Duet. The idea came from "there should be a claude duel".)
 
 ## How a round works
@@ -39,6 +37,10 @@ OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below
 ```
 
 To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-6-luna`).
+
+`duel duplicate` (no-fluke play) on the fake provider, $0: mirrored boards with seats swapped, then the call and a verify pass.
+
+![`duel duplicate` on the fake provider: mirrored boards, record, verdict, verified](docs/duplicate.gif)
 
 ## Architecture
 ```mermaid
