@@ -14,8 +14,8 @@ a = 0
 b = 0
 
 [match]
-boards_min = 4
-boards_max = 8
+boards_min = 12
+boards_max = 38
 
 [budget]
 match_max_usd = 25.0

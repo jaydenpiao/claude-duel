@@ -36,8 +36,8 @@ from claude_duel.presentation.ladder import (
 def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     dup = sub.add_parser("duplicate", help="play or resume a duplicate match (mirrored boards), then verify it")
     dup.add_argument("--duplicate-id", help="explicit id (re-running an existing id resumes it)")
-    dup.add_argument("--boards-min", type=int, default=4)
-    dup.add_argument("--boards-max", type=int, default=8)
+    dup.add_argument("--boards-min", type=int, default=12)
+    dup.add_argument("--boards-max", type=int, default=48)
     dup.add_argument("--match-max-usd", type=float, default=2.0, help="no board starts that could pass this")
     dup.add_argument("--format", choices=("text", "json"), default="text")
     _ladder_parser(sub)
@@ -100,8 +100,8 @@ def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     har.add_argument("--pct-a", type=int, default=80, help="first bot's capture chance per try (percent)")
     har.add_argument("--pct-b", type=int, default=50)
     har.add_argument("--matches", type=int, default=50)
-    har.add_argument("--boards-min", type=int, default=4)
-    har.add_argument("--boards-max", type=int, default=8)
+    har.add_argument("--boards-min", type=int, default=12)
+    har.add_argument("--boards-max", type=int, default=48)
     har.add_argument("--seed", default="harness")
     rep = har.add_argument_group("--repro: two-run agreement under the real stop rule (board model stated, no play)")
     rep.add_argument("--repro", action="store_true", help="simulate run pairs instead of playing scripted bots")
@@ -109,13 +109,25 @@ def _harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     rep.add_argument("--p-tie", type=float, default=0.25, help="share of boards that score 0")
     rep.add_argument("--runs", type=int, default=2000, help="matches (or ladder run pairs with --plan)")
     rep.add_argument("--sprt-p1", type=float, default=0.75)
+    rep.add_argument(
+        "--stop", choices=("margin", "sprt"), default="margin", help="stop rule (sprt: the older win count)"
+    )
+    rep.add_argument(
+        "--boards-from", type=Path, help="JSON list of measured board margins to draw from (--save-margins)"
+    )
+    rep.add_argument(
+        "--symmetric", action="store_true", help="flip --boards-from signs at random: the equal-strength null"
+    )
+    har.add_argument("--save-margins", type=Path, help="write every played board margin (first bot's) as JSON")
     rep.add_argument("--plan", type=Path, help="ladder TOML: simulate whole ladders (needs --strengths)")
     rep.add_argument("--strengths", help="model=logit,... Bradley-Terry strengths for --plan")
 
 
 def harness(settings: Settings, args: argparse.Namespace) -> int:
     try:
-        rule = DuplicateRule(boards_min=args.boards_min, boards_max=args.boards_max, sprt_p1=args.sprt_p1)
+        rule = DuplicateRule(
+            boards_min=args.boards_min, boards_max=args.boards_max, sprt_p1=args.sprt_p1, stop=args.stop
+        )
     except ValueError as exc:
         raise ConfigError(f"bad harness: {exc}") from exc
     if args.repro:
@@ -128,16 +140,24 @@ def harness(settings: Settings, args: argparse.Namespace) -> int:
         f" · undecided {res.undecided} · first wins {res.first_rate():.1%}"
         f" · first-seat share {res.first_seat_share:.1%} · first ahead on margin {res.margin_first}"
     )
+    if args.save_margins:
+        args.save_margins.write_text(json.dumps(list(res.margins)))
     return 0
 
 
 def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
     if args.plan is None:
-        m = repro.matchup(rule, args.p_win, args.p_tie, args.runs, args.seed)
+        if args.boards_from:
+            margins = [int(x) for x in json.loads(args.boards_from.read_text())]
+            draw, model = repro.resample(margins, symmetric=args.symmetric), f"{len(margins)} measured boards"
+            model += " (signs flipped: equal-strength null)" if args.symmetric else ""
+        else:
+            draw, model = repro.coin(args.p_win, args.p_tie), f"{args.p_win:.0%} board edge, {args.p_tie:.0%} ties"
+        m = repro.matchup(rule, draw, args.runs, args.seed)
         print(
-            f"{args.p_win:.0%} board edge, {args.p_tie:.0%} ties, boards {rule.boards_min}-{rule.boards_max},"
-            f" sprt_p1 {rule.sprt_p1}: stronger backed {m.first:.1%} · weaker backed {m.wrong:.2%}"
-            f" · two runs agree {m.repeat_agree:.1%} · mean boards {m.mean_boards:.1f} ({args.runs} runs)"
+            f"{model}, {rule.stop} rule, boards {rule.boards_min}-{rule.boards_max}: first backed {m.first:.1%}"
+            f" · second backed {m.wrong:.2%} · two runs agree {m.repeat_agree:.1%} · mean boards {m.mean_boards:.1f}"
+            f" ({args.runs} runs)"
         )
         return 0
     try:
@@ -145,7 +165,7 @@ def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
     except ValueError as exc:
         raise ConfigError("--strengths is model=logit,model=logit,...") from exc
     overrides = {"match.boards_min": rule.boards_min, "match.boards_max": rule.boards_max}
-    cfg = ladder_config.load(args.plan, overrides)
+    cfg = ladder_config.load(args.plan, overrides, allow_premium=True)  # a $0 simulation: no model is called
     missing = [m for m in (*cfg.sides.a, *cfg.sides.b) if m not in strength]
     if missing:
         raise ConfigError(f"--strengths lacks {', '.join(missing)}")
@@ -167,7 +187,7 @@ def ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
 
 def ladder(settings: Settings, args: argparse.Namespace) -> int:
     overrides = {key: getattr(args, key) for _, key, _ in _LADDER_FLAGS if getattr(args, key) is not None}
-    cfg = ladder_config.load(args.plan, overrides)
+    cfg = ladder_config.load(args.plan, overrides, allow_premium=settings.allow_premium)
     proj = project(cfg)
     if args.dry_run or proj.refusals:
         if args.format == "json":

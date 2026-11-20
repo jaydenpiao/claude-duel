@@ -24,7 +24,8 @@ from claude_duel.domain.models import (
 )
 
 A, B = AgentSpec(name="gpt-x"), AgentSpec(name="claude-y")
-RULE = dp.DuplicateRule()
+RULE = dp.DuplicateRule(boards_min=4, boards_max=8, stop="sprt")  # the older win-count rule; margin tests below
+MARGIN = dp.DuplicateRule()
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -120,6 +121,34 @@ def test_stop_rule_and_result() -> None:
         _state([10]).result()
     fixed = _state([10] * 4, dp.DuplicateRule(stop="none", boards_min=4, boards_max=6))
     assert not fixed.done()
+
+
+def test_sign_flip_p_is_exact() -> None:
+    assert ms.sign_flip_p([10] * 6) == pytest.approx(2 / 64)  # only the two all-same-sign flips are as extreme
+    assert ms.sign_flip_p([]) == 1.0
+    assert ms.sign_flip_p([0, 0]) == 1.0
+    assert ms.sign_flip_p([30, -10]) == 1.0  # every flip sums to |20| or |40|: nothing is unusual
+    assert ms.sign_flip_p([30, 10]) == pytest.approx(0.5)  # +-40 is as extreme as observed, +-20 is not
+    xs = [12, -3, 7, 20, -5, 9]
+    brute = sum(abs(sum(x if (m >> i) & 1 else -x for i, x in enumerate(xs))) >= sum(xs) for m in range(64)) / 64
+    assert ms.sign_flip_p(xs) == pytest.approx(brute)
+
+
+def test_margin_rule_calls_on_summed_margin_not_win_count() -> None:
+    assert (MARGIN.stop, MARGIN.boards_min, MARGIN.boards_max) == ("margin", 12, 48)
+    assert not _state([60] * 11, MARGIN).done()  # below boards_min
+    rout = _state([60] * 12, MARGIN)
+    assert rout.done()
+    assert rout.result() == "first"  # p = 2 / 4096, under early_alpha
+    assert dp.stop_now(MARGIN, 13, [60] * 13) is False  # looks are every 2 boards past boards_min
+    # fewer wins but bigger margins: the sign test sees 6-6, the margin test sees the gap
+    big_small = [40, 40, 40, 40, 40, 40, -5, -5, -5, -5, -5, -5] * 4
+    st = _state(big_small, MARGIN)
+    assert st.done()
+    assert st.result() == "first"
+    close = _state([10, -10] * 24, MARGIN)
+    assert close.done()
+    assert close.result() == "inconclusive"  # too close to call: no winner at boards_max
 
 
 def test_too_many_void_boards_is_void() -> None:

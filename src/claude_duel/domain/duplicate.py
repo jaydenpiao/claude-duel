@@ -32,15 +32,21 @@ SIGN_TEST_ALPHA = 0.05
 
 class DuplicateRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    boards_min: int = Field(default=4, ge=1, le=MAX_BOARDS)
-    boards_max: int = Field(default=8, ge=1, le=MAX_BOARDS)
+    boards_min: int = Field(default=12, ge=1, le=MAX_BOARDS)
+    boards_max: int = Field(default=48, ge=1, le=MAX_BOARDS)
     board_cap_mult: int = Field(default=2, ge=1, le=10, description="board clip = mult x max defense award")
     fault_replays: int = Field(default=2, ge=0, le=2)
     void_share_max_pct: int = Field(default=25, ge=0, le=100, description="more void boards => inconclusive")
-    stop: Literal["none", "sprt"] = "sprt"
+    # "margin" (default): exact sign-flip test on the seat-paired board margins; stop early past boards_min only at
+    # p <= early_alpha (checked every look_every boards), else call at boards_max with p <= margin_alpha. "sprt" is the
+    # older win-count rule (sign test or SPRT), kept so logs that pinned it replay unchanged.
+    stop: Literal["none", "sprt", "margin"] = "margin"
     sprt_p1: float = Field(default=0.75, gt=0.5, lt=1)
     alpha: float = Field(default=0.05, gt=0, lt=0.5)
     beta: float = Field(default=0.05, gt=0, lt=0.5)
+    margin_alpha: float = Field(default=0.035, gt=0, lt=0.5)
+    early_alpha: float = Field(default=0.005, gt=0, lt=0.5)
+    look_every: int = Field(default=2, ge=1, le=MAX_BOARDS)
     match_max_usd: float = Field(default=2.0, gt=0, description="checked against played boards before each board")
 
     @model_validator(mode="after")
@@ -88,13 +94,19 @@ class DuplicateState(BaseModel):
         r = self.record()
         return ms.sprt(r.wins, r.losses, self.rule.sprt_p1, self.rule.alpha, self.rule.beta)
 
+    def scored(self) -> list[int]:
+        return [b.diff for b in self.boards if not b.void]
+
     def done(self) -> bool:
-        r = self.record()
-        return self.capped or stop_now(self.rule, len(self.boards), r.wins, r.losses)
+        return self.capped or stop_now(self.rule, len(self.boards), self.scored())
 
     def p_value(self) -> float:
         r = self.record()
         return ms.sign_test_p(r.wins, r.losses)
+
+    def margin_p(self) -> float:
+        """Exact seat-paired sign-flip p on the summed board margin (what the margin rule calls on)."""
+        return ms.sign_flip_p(self.scored())
 
     def ci(self) -> tuple[float, float]:
         return ms.bootstrap_ci(self.diffs(), self.seed)
@@ -105,8 +117,7 @@ class DuplicateState(BaseModel):
             raise ValueError("duplicate match is not finished")
         if self.void_share_exceeded():
             return "void"
-        r = self.record()
-        return verdict(self.rule, r.wins, r.losses)
+        return verdict(self.rule, self.scored(), final=len(self.boards) >= self.rule.boards_max or self.capped)
 
     def winner(self) -> str | None:
         res = self.result()
@@ -122,20 +133,31 @@ class DuplicateState(BaseModel):
         return f"{self.duplicate_id}-b{board_no}{'ab'[half]}" + (f"-r{replay}" if replay else "")
 
 
-def stop_now(rule: DuplicateRule, boards: int, wins: int, losses: int) -> bool:
-    """The stop rule after ``boards`` boards: boards_max, or the SPRT past boards_min."""
+def stop_now(rule: DuplicateRule, boards: int, scored: list[int]) -> bool:
+    """The stop rule after ``boards`` boards (``scored``: the non-void margins): boards_max, or an early call."""
     if boards >= rule.boards_max:
         return True
-    sprt = ms.sprt(wins, losses, rule.sprt_p1, rule.alpha, rule.beta)
-    return boards >= rule.boards_min and rule.stop == "sprt" and sprt != "continue"
+    if boards < rule.boards_min or rule.stop == "none":
+        return False
+    if rule.stop == "margin":
+        return (boards - rule.boards_min) % rule.look_every == 0 and ms.sign_flip_p(scored) <= rule.early_alpha
+    r = ms.record(scored)
+    return ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta) != "continue"
 
 
-def verdict(rule: DuplicateRule, wins: int, losses: int) -> Result:
-    """A side wins only when the sign test (p <= 0.05) or the SPRT backs it; void handling is the caller's."""
-    p, test = ms.sign_test_p(wins, losses), ms.sprt(wins, losses, rule.sprt_p1, rule.alpha, rule.beta)
-    if wins > losses and (p <= SIGN_TEST_ALPHA or test == "first"):
+def verdict(rule: DuplicateRule, scored: list[int], *, final: bool = True) -> Result:
+    """A side wins only when the test backs it; otherwise the match is too close to call ("inconclusive"). Margin:
+    p <= margin_alpha at boards_max (or a cap), p <= early_alpha before. Void handling is the caller's."""
+    if rule.stop == "margin":
+        total = sum(scored)
+        if total and ms.sign_flip_p(scored) <= (rule.margin_alpha if final else rule.early_alpha):
+            return "first" if total > 0 else "second"
+        return "inconclusive"
+    r = ms.record(scored)
+    p, test = ms.sign_test_p(r.wins, r.losses), ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta)
+    if r.wins > r.losses and (p <= SIGN_TEST_ALPHA or test == "first"):
         return "first"
-    if losses > wins and (p <= SIGN_TEST_ALPHA or test == "second"):
+    if r.losses > r.wins and (p <= SIGN_TEST_ALPHA or test == "second"):
         return "second"
     return "inconclusive"
 

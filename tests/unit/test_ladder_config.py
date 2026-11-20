@@ -11,6 +11,15 @@ from claude_duel.app import ladder_config as lc
 from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import Rules
 
+
+def _load(*a: Any, **k: Any) -> lc.LadderConfig:  # premium plans validate; the premium gate is tested apart
+    return lc.load(*a, allow_premium=True, **k)
+
+
+def _parse(*a: Any, **k: Any) -> lc.LadderConfig:
+    return lc.parse(*a, allow_premium=True, **k)
+
+
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 PLANS = ("a", "b", "c", "fake")
 
@@ -27,14 +36,14 @@ def _plan(**over: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("name", PLANS)
 def test_examples_validate(name: str) -> None:
-    cfg = lc.load(EXAMPLES / f"ladder-{name}.toml", {"run_date": "2026-11-20"})
+    cfg = _load(EXAMPLES / f"ladder-{name}.toml", {"run_date": "2026-11-20"})
     assert cfg.run_date.isoformat() == "2026-11-20"
 
 
 @pytest.mark.parametrize(
     ("plan", "overrides", "error"),
     [
-        (_plan(sides={"a": ["claude-nope"], "b": ["gpt-5-mini"]}), {}, "unknown model 'claude-nope'"),
+        (_plan(sides={"a": ["claude-nope"], "b": ["gpt-5-mini"]}), {}, "'claude-nope' is not in the allowlist"),
         (_plan(sides={"a": ["claude-opus-5-5", "gpt-5-mini"], "b": ["gpt-5-nano"]}), {}, "but side a is anthropic"),
         (_plan(), {"start_tier.b": 2}, r"start_tier.b=2 is out of range"),
         (_plan(), {"start_tier.a": -1}, r"start_tier.a=-1 is out of range"),
@@ -54,21 +63,27 @@ def test_examples_validate(name: str) -> None:
 )
 def test_validator_names_each_failure(plan: dict[str, Any], overrides: dict[str, Any], error: str) -> None:
     with pytest.raises(ConfigError, match=error):
-        lc.parse(plan, overrides)
+        _parse(plan, overrides)
+
+
+def test_premium_models_need_allow_premium_like_a_real_run() -> None:
+    with pytest.raises(ConfigError, match="premium"):
+        lc.load(EXAMPLES / "ladder-final.toml")  # the container would refuse claude-fable-5-2 at its first step
+    assert lc.load(EXAMPLES / "ladder-final.toml", allow_premium=True).sides.a[0] == "claude-fable-5-2"
 
 
 def test_nano_cutoff_follows_run_date_not_the_clock() -> None:
-    assert lc.parse(_plan(run_date="2026-12-10")).run_date.isoformat() == "2026-12-10"
+    assert _parse(_plan(run_date="2026-12-10")).run_date.isoformat() == "2026-12-10"
     with pytest.raises(
         ConfigError, match=r"gpt-5-nano is retired from 2026-12-11 \(run_date=2026-12-11\); use gpt-5-mini"
     ):
-        lc.parse(_plan(run_date="2026-12-11"))
+        _parse(_plan(run_date="2026-12-11"))
     with pytest.raises(ConfigError, match="retired"):
-        lc.load(EXAMPLES / "ladder-a.toml", {"run_date": "2027-01-01"})
+        _load(EXAMPLES / "ladder-a.toml", {"run_date": "2027-01-01"})
 
 
 def test_flags_override_the_file() -> None:
-    cfg = lc.load(
+    cfg = _load(
         EXAMPLES / "ladder-a.toml",
         {"sides.b": ["gpt-5-mini"], "start_tier.a": 2, "match.boards_max": 6, "caps.max_attempts": 2},
     )
@@ -77,7 +92,7 @@ def test_flags_override_the_file() -> None:
 
 
 def test_plan_maps_to_ladder_rules_agents_and_a_stable_digest() -> None:
-    cfg = lc.parse(_plan())
+    cfg = _parse(_plan())
     rules = cfg.rules()
     assert rules.mode == "ladder"
     assert rules.output_cap(purpose="build") == 2000
@@ -85,7 +100,7 @@ def test_plan_maps_to_ladder_rules_agents_and_a_stable_digest() -> None:
     assert rules.output_cap(purpose="attack") == 1000
     assert rules.output_cap(own=700, purpose="build") == 700  # an agent's own cap still wins
     assert cfg.duplicate_rule().match_max_usd == 5.0
-    assert cfg.digest() == lc.parse(_plan()).digest() != lc.parse(_plan(run_date="2026-11-21")).digest()
+    assert cfg.digest() == _parse(_plan()).digest() != _parse(_plan(run_date="2026-11-21")).digest()
     a, b = lc.agents("claude-opus-5-5", "gpt-5.6-sol")
     assert (a.name, a.provider, b.name, b.provider) == ("claude-opus-5-5", "anthropic", "gpt-5-6-sol", "openai")
     assert [x.name for x in lc.agents("fake-1", "fake-1")] == ["fake-1-a", "fake-1-b"]
@@ -93,4 +108,4 @@ def test_plan_maps_to_ladder_rules_agents_and_a_stable_digest() -> None:
 
 def test_call_caps_stay_out_of_logs_unless_set() -> None:
     assert "call_caps" not in Rules().dump()
-    assert lc.parse(_plan()).rules().dump()["call_caps"] == {"build": 2000, "allocate": 500, "attack": 1000}
+    assert _parse(_plan()).rules().dump()["call_caps"] == {"build": 2000, "allocate": 500, "attack": 1000}

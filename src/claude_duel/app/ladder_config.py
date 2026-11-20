@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, vendor_of
+from claude_duel.app.budget import FAKE_MODEL, check_model_allowed, vendor_of
 from claude_duel.config import read_toml
 from claude_duel.domain.duplicate import MAX_BOARDS, DuplicateRule
 from claude_duel.domain.errors import ConfigError
@@ -41,8 +41,8 @@ class Tier(_Plan):
 
 
 class MatchPlan(_Plan):
-    boards_min: int = 4
-    boards_max: int = 8
+    boards_min: int = 12
+    boards_max: int = 48
 
 
 class BudgetPlan(_Plan):
@@ -101,13 +101,15 @@ def agents(a: str, b: str) -> tuple[AgentSpec, AgentSpec]:
     )
 
 
-def load(path: Path, overrides: dict[str, Any] | None = None) -> LadderConfig:
+def load(path: Path, overrides: dict[str, Any] | None = None, *, allow_premium: bool = False) -> LadderConfig:
     """Read ``path``, apply ``overrides`` (dotted keys such as ``budget.match_max_usd``; flags beat the file)
     and validate. Every failure is a ``ConfigError`` naming the rule it broke."""
-    return parse(read_toml(path), overrides)
+    return parse(read_toml(path), overrides, allow_premium=allow_premium)
 
 
-def parse(data: dict[str, Any], overrides: dict[str, Any] | None = None) -> LadderConfig:
+def parse(
+    data: dict[str, Any], overrides: dict[str, Any] | None = None, *, allow_premium: bool = False
+) -> LadderConfig:
     raw = json.loads(json.dumps(data, default=str))  # a deep copy; TOML dates become ISO strings
     if any(isinstance(v, dict) for v in raw.get("caps", {}).values()):
         raise ConfigError("per-call caps must be the same for both sides: use one flat [caps] table")
@@ -126,21 +128,21 @@ def parse(data: dict[str, Any], overrides: dict[str, Any] | None = None) -> Ladd
     except ValidationError as exc:
         err = exc.errors()[0]
         raise ConfigError(f"bad ladder config: {'.'.join(map(str, err['loc']))}: {err['msg']}") from exc
-    check(cfg)
+    check(cfg, allow_premium)
     return cfg
 
 
-def check(cfg: LadderConfig) -> None:
-    """The §4.1 validator: models, vendors, tiers, boards, money, caps and retirement."""
-    _check_models(cfg)
+def check(cfg: LadderConfig, allow_premium: bool = False) -> None:
+    """The §4.1 validator: models (the same allowlist, premium and route gates as a real run), vendors, tiers,
+    boards, money, caps and retirement."""
+    _check_models(cfg, allow_premium)
     _check_numbers(cfg)
 
 
-def _check_models(cfg: LadderConfig) -> None:
+def _check_models(cfg: LadderConfig, allow_premium: bool) -> None:
     models = [m for s in SIDES for m in cfg.side(s)]
     for m in models:
-        if m not in DEFAULT_PRICES:
-            raise ConfigError(f"unknown model {m!r}: not in the price table (app/budget.py)")
+        check_model_allowed(m, allow_premium)  # the container's gate, so the dry run and the real run agree
     fake = [m == FAKE_MODEL for m in models]
     if any(fake) and not all(fake):
         raise ConfigError(f"{FAKE_MODEL} cannot be mixed with real models")
