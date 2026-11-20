@@ -52,7 +52,7 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     key = settings.api_keys.get(vendor.name)
     if key is None:
         raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
-    inner = FACTORIES[vendor.name](key, model, timeout)
+    inner = FACTORIES[vendor.name](key, model, timeout, settings.store_dir)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
