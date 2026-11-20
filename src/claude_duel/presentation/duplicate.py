@@ -23,11 +23,21 @@ def duplicate_view(state: DuplicateState, verified: bool, mismatches: list[str])
         "spent_usd": round(state.spent_usd(), 4),
         "cap_usd": state.rule.match_max_usd,
         "capped": state.capped,
+        "truncated": truncated(state),
         "result": state.result() if done else "unfinished",
         "winner": state.winner() if done else None,
         "verified": verified,
         "mismatches": mismatches,
     }
+
+
+def truncated(state: DuplicateState) -> dict[str, int]:
+    """Per agent: twice-truncated builds and attack tries over all boards (scored like refusals, never voided)."""
+    out = {a.name: 0 for a in state.agents}
+    for b in state.boards:
+        for name, n in b.truncated.items():
+            out[name] = out.get(name, 0) + n
+    return out
 
 
 def duplicate_lines(state: DuplicateState, verified: bool, mismatches: list[str]) -> list[str]:
@@ -43,6 +53,9 @@ def duplicate_lines(state: DuplicateState, verified: bool, mismatches: list[str]
         f" · 95% CI [{lo:.2f}, {hi:.2f}] · SPRT {state.sprt()}"
         f" · ${state.spent_usd():.4f}/${state.rule.match_max_usd}" + (" · CAPPED" if state.capped else "")
     )
+    cut = truncated(state)
+    if any(cut.values()):
+        lines.append("truncated (scored): " + ", ".join(f"{name} {n}" for name, n in cut.items()))
     if state.done():
         winner = state.winner()
         lines.append(f"result: {state.result()}" + (f" · winner {winner}" if winner else ""))

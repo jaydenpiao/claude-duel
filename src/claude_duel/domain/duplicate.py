@@ -1,8 +1,10 @@
 """Duplicate play (no-fluke ladder): a pure fold over ``<id>.duplicate.jsonl``.
 
 A board is one seed played twice as two normal matches with the agent order swapped. Its difference is the first
-agent's net points summed over both halves, clipped to +-``board_cap``. A harness fault (a reply truncated twice)
-voids the board, which is replayed on ``replay_seed`` up to ``fault_replays`` times and then counts 0. The result is
+agent's net points summed over both halves, clipped to +-``board_cap``. A reply truncated twice is the model's own
+outcome and is scored like a refusal (a build forfeit, a spent attack try); it is counted per agent on the board but
+never voids it. A harness fault would void the board, replayed on ``replay_seed`` up to ``fault_replays`` times and
+then counted 0. The result is
 decided on boards only (never on spend): the sign test or the SPRT must back the winner, else it is inconclusive.
 """
 
@@ -65,6 +67,7 @@ class Board(BaseModel):
     diff: int  # raw clipped to +-board_cap; 0 when void
     void: bool = False
     fault: str = ""  # why the last try was voided (empty when scored)
+    truncated: dict[str, int] = Field(default_factory=dict)  # agent -> twice-truncated builds and tries (scored)
     replays: int = 0
     usd: float = 0.0
 
@@ -189,24 +192,37 @@ def board_cap(rule: DuplicateRule, rules: Rules) -> int:
 
 
 def build_fault(state: MatchState, challenge_id: str) -> bool:
-    """A build forfeited on a twice-truncated reply is a harness fault; every other forfeit is scored. Reads the
-    engine-set ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
+    """A build forfeited on a twice-truncated reply (scored as a forfeit, counted per agent). Reads the engine-set
+    ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
     ch = state.challenges.get(challenge_id)
     return ch is not None and ch.spec is None and challenge_id in state.build_truncated
 
 
 def attack_fault(attempt: AttackAttempt) -> bool:
-    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored. Reads
-    the engine-set ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
+    """An attack try whose reply was truncated twice (a spent try, counted per agent). Reads the engine-set
+    ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
     return attempt.truncated
 
 
+def truncations(state: MatchState) -> dict[str, int]:
+    """Per agent: builds forfeited and attack tries spent on a twice-truncated reply in one half."""
+    out: dict[str, int] = {}
+    for cid in state.validations:
+        if build_fault(state, cid):
+            author = state.challenges[cid].author
+            out[author] = out.get(author, 0) + 1
+    for key, tries in state.attempts.items():
+        attacker = key.rsplit(":", 1)[-1]
+        if n := sum(attack_fault(a) for a in tries):
+            out[attacker] = out.get(attacker, 0) + n
+    return out
+
+
 def fault(state: MatchState) -> str:
-    """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
-    if any(build_fault(state, cid) for cid in state.validations):
-        return "build truncated"
-    if any(attack_fault(a) for tries in state.attempts.values() for a in tries):
-        return "attack truncated"
+    """The harness fault that voids a board, or "". A model's own failure, truncation included, is scored like a
+    refusal: truncation correlates with a vendor's verbosity and its tokenizer, so voiding it would hand that side a
+    re-roll of boards it was likely losing. Harness failures today fail the half instead, so none reach here."""
+    del state
     return ""
 
 
@@ -221,6 +237,10 @@ def board_of(
     """A board's record from its two finished halves; a faulted pair is void (diff 0)."""
     why = next((f for f in map(fault, halves) if f), "")
     raw = sum(net(h, state.agents[0].name) for h in halves)
+    cut: dict[str, int] = {}
+    for h in halves:
+        for name, n in truncations(h).items():
+            cut[name] = cut.get(name, 0) + n
     cap = board_cap(state.rule, state.rules)
     return Board(
         board_no=board_no,
@@ -230,6 +250,7 @@ def board_of(
         diff=0 if why else max(-cap, min(cap, raw)),
         void=bool(why),
         fault=why,
+        truncated=cut,
         replays=replays,
         usd=sum(h.usage.usd for h in halves),
     )

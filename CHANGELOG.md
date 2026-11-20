@@ -26,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Duplicate play scores a twice-truncated reply like a refusal (a build forfeit, a spent attack try) instead of voiding and replaying the board. Truncation rates differ by vendor (verbosity and tokenizer), so a void handed the truncating side a re-roll of boards it was likely losing. Each board records `truncated` per agent (typed flags only, so challenge stdout still cannot add to it) and `duel duplicate` reports the totals. The void and replay path stays for harness faults; none reaches a finished half today.
 - Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
   for imports of escape modules such as `os` or `subprocess`.
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
