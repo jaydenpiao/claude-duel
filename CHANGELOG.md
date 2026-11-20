@@ -21,6 +21,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
+  for imports of escape modules such as `os` or `subprocess`.
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
 - Combined `RULES_VERSION` 1→2 and `SCHEMA_VERSION` 2→3 (#258). New heat-on logs require `heat_compare=full`, an explicit `heat_vs_opponent`, `heat_ref_cap`, `heat_metric=lcs-v1` and `heat_history_matches`, and omit `heat_token_cap` (prefix-only; v1 logs that carry it still replay). This also records earlier rule-meaning changes that stayed on version 1: the ledger preset, SV-1, H6 ledger defaults (keystone/terrain/heat off unless the preset), the #247 system prompt, the #267 program-form prompt, and the #266 per-agent output cap. Logs written between #238 and #279 may omit `heat_vs_opponent` (I15-1 found likely zero of those); replay of such a log is a reported heat mismatch, not a silent rescoring. Refusal (ADR 0016) needed no bump.
 - Default OpenAI model and difficulty-gate probe are `gpt-6-luna` (cheaper active alternative to the named `gpt-5-nano` replacement `gpt-5.6-luna`; nano shutdown 2026-12-11). Unset effort is `low` on luna; pinned nano and mini stay `minimal`. Standard price stays $0.10/$0.50.
@@ -65,6 +67,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `duel duplicate`: no-fluke duplicate play. Each board is one seed played twice with seats swapped; the board difference is clipped, a twice-truncated reply replays the board on a derived seed (then void), and the result needs the sign test (p <= 0.05) or the SPRT, never spend. Prints the board table, margin, p, bootstrap CI, SPRT state and spend vs `--match-max-usd`; `verify` recomputes every board. $0 with fake agents.
+- Allowlist `gpt-6.1-terra` ($1/$5), `gpt-6.2-sol` ($2/$10) and `gpt-6.2-astra` ($8/$40) per 1M input/output tokens, standard short-context list prices from the OpenAI pricing page on 2026-11-19. All three are premium (need `allow_premium = true`).
 - `ladder` mode preset (no-fluke): ledger scoring with flat round weights, 1 challenge a side, 3 tries, 1 round, terrain off; keystone and heat stay.
 - `ScoringRule.round_weight`: `linear` (default, unchanged) or `flat`, which scores every round at weight 1 for the no-fluke ladder.
 - `call_charged` logs the reasoning effort actually sent, including defaults (#191).
