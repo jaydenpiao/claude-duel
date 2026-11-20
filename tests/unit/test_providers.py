@@ -16,7 +16,10 @@ from pydantic import SecretStr
 from claude_duel.adapters.providers import openai as openai_mod
 from claude_duel.adapters.providers.fake import TEMPLATES, FakeProvider
 from claude_duel.adapters.providers.openai import OpenAIProvider, default_safety_identifier
+from claude_duel.adapters.providers.registry import FACTORIES
 from claude_duel.adapters.providers.retry import RetryingProvider, backoff_delay
+from claude_duel.app.container import make_provider
+from claude_duel.config import load_settings
 from claude_duel.domain.errors import (
     CyberPolicyError,
     PermanentProviderError,
@@ -25,6 +28,7 @@ from claude_duel.domain.errors import (
     RateLimitError,
     TransientProviderError,
 )
+from claude_duel.domain.models import AgentSpec
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -203,13 +207,22 @@ class TestOpenAI:
         home.mkdir(mode=0o500)
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-        monkeypatch.setenv("DUEL_STORE_DIR", str(tmp_path / "store"))
         try:
-            OpenAIProvider(SecretStr("sk-test-0000000000"), "gpt-6-luna")
+            FACTORIES["openai"](SecretStr("sk-test-0000000000"), "gpt-6-luna", 60.0, tmp_path / "store")
             assert (tmp_path / "store" / "install-id").is_file()
             assert not any(home.iterdir())
         finally:
             home.chmod(0o700)
+
+    def test_install_id_follows_a_toml_store_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(openai_mod, "install_id_path", _REAL_INSTALL_PATH)
+        monkeypatch.chdir(tmp_path)
+        cfg = tmp_path / "duel.toml"
+        cfg.write_text(f'store_dir = "{tmp_path / "toml-store"}"\n')
+        settings = load_settings(cfg, env={"OPENAI_API_KEY": "sk-test-0000000000"})
+        make_provider(AgentSpec(name="a", provider="openai"), settings, InMemoryMetrics())
+        assert (tmp_path / "toml-store" / "install-id").is_file()
+        assert not (tmp_path / ".duel").exists()  # not the cwd default
 
     def test_timeout_and_transport(self) -> None:
         def timeout(r: httpx.Request) -> httpx.Response:

@@ -25,7 +25,8 @@ class Slow:
     def complete(self, request: CompletionRequest) -> Completion:
         self.calls += 1
         out = self.fake.complete(request)
-        return out.model_copy(update={"output_tokens": out.output_tokens + self.pad})
+        padded = min(out.output_tokens + self.pad, request.max_tokens)  # a vendor never bills past the cap
+        return out.model_copy(update={"output_tokens": padded})
 
 
 BLITZ = {"clock": {"bank_tokens": 3000, "increment_tokens": 0}, "scoring": {"kind": "timed"}}

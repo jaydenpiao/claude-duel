@@ -18,7 +18,7 @@ from claude_duel.domain import match_stats as ms
 from claude_duel.domain.driver import fold_created
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
-from claude_duel.domain.models import TRUNCATED, AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.models import AgentSpec, AttackAttempt, Event, MatchState, Rules, SandboxLimits
 
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
@@ -182,25 +182,30 @@ def half_agents(agents: tuple[AgentSpec, AgentSpec], half: int) -> tuple[AgentSp
 
 
 def board_cap(rule: DuplicateRule, rules: Rules) -> int:
-    """Clip = mult x the largest one-challenge defense award (difficulty 3, weight 1)."""
-    return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY
+    """Clip = mult x the largest one-challenge defense award (difficulty 3, at the largest round weight: the last
+    round's number under linear weights, 1 under flat ones), so a multi-round mode is not clipped flat."""
+    weight = rules.rounds if rules.scoring.round_weight == "linear" else 1
+    return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY * weight
 
 
-def build_fault(reason: str | None) -> bool:
-    """A build forfeited on a twice-truncated reply is a harness fault; every other invalid reason is scored."""
-    return (reason or "").startswith(f"malformed: {TRUNCATED}")
+def build_fault(state: MatchState, challenge_id: str) -> bool:
+    """A build forfeited on a twice-truncated reply is a harness fault; every other forfeit is scored. Reads the
+    engine-set ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
+    ch = state.challenges.get(challenge_id)
+    return ch is not None and ch.spec is None and challenge_id in state.build_truncated
 
 
-def attack_fault(output: str) -> bool:
-    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored."""
-    return output.startswith(TRUNCATED)
+def attack_fault(attempt: AttackAttempt) -> bool:
+    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored. Reads
+    the engine-set ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
+    return attempt.truncated
 
 
 def fault(state: MatchState) -> str:
     """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
-    if any(build_fault(v.reason) for v in state.validations.values()):
+    if any(build_fault(state, cid) for cid in state.validations):
         return "build truncated"
-    if any(attack_fault(a.output) for tries in state.attempts.values() for a in tries):
+    if any(attack_fault(a) for tries in state.attempts.values() for a in tries):
         return "attack truncated"
     return ""
 

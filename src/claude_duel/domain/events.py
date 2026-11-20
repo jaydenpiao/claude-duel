@@ -133,6 +133,7 @@ class CallCharged(_Payload):
 class BuildRejected(_Payload):
     challenge_id: str
     error: str
+    truncated: bool = False  # engine-set from Completion.truncated; present in the log only when true
 
 
 class ChallengeBuilt(_Payload):
@@ -295,6 +296,11 @@ def _charged(state: MatchState, p: CallCharged) -> None:
 
 def _rejected(state: MatchState, p: BuildRejected) -> None:
     state.build_errors.setdefault(p.challenge_id, []).append(p.error)
+    cut = state.build_truncated
+    if p.truncated and p.challenge_id not in cut:
+        cut.append(p.challenge_id)
+    elif not p.truncated and p.challenge_id in cut:
+        cut.remove(p.challenge_id)  # only the last rejection decides
 
 
 def _built(state: MatchState, p: ChallengeBuilt) -> None:

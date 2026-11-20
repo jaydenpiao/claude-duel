@@ -109,9 +109,38 @@ class SpendLedger(Protocol):
 
     def spent_usd(self, prefix: str) -> float: ...
 
-    def reserve(self, match_id: str, model: str, usd: float) -> str: ...
+    def reserve(
+        self,
+        match_id: str,
+        model: str,
+        usd: float,
+        caps: Sequence[tuple[str, str, float]] = (),
+        key: str | None = None,
+    ) -> str:
+        """Append a worst-case entry. Under one exclusive lock: refuse if any ``(label, prefix, max_usd)`` cap would
+        pass, and replace an open reservation already holding ``key`` (one attempt, one reservation)."""
+        ...
 
-    def record(self, match_id: str, model: str, tokens: int, usd: float, settles: str | None = None) -> None: ...
+    def record(
+        self,
+        match_id: str,
+        model: str,
+        tokens: int,
+        usd: float,
+        settles: str | None = None,
+        key: str | None = None,
+        reply: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a charge; with ``key`` and ``reply``, the reply is kept durably first so a resume reuses it."""
+        ...
+
+    def settled(self, key: str) -> dict[str, Any] | None:
+        """The kept reply of an attempt already charged under ``key``, or None."""
+        ...
+
+    def forget(self, key: str) -> None:
+        """Drop the kept reply once the attempt's own event is durable."""
+        ...
 
 
 class EventLog(Protocol):
