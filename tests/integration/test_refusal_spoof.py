@@ -9,8 +9,9 @@ import pytest
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app.engine import REFUSED
 from claude_duel.app.replay import replay
+from claude_duel.domain import duplicate as dp
 from claude_duel.domain import events as ev
-from claude_duel.domain.models import CAPTURED, Stage
+from claude_duel.domain.models import CAPTURED, TRUNCATED, Stage
 from claude_duel.ports import Completion, CompletionRequest
 
 # Repro from security review S13-1: a valid
@@ -135,4 +136,21 @@ def test_author_stdout_cannot_spoof_a_capture(make_engine, new_state, event_log)
     key = next(k for k in state.attempts if k.endswith(":alice"))
     assert all(not x.captured for x in state.attempts[key])
     assert all(x.output != CAPTURED for x in state.attempts[key])
+    assert replay(state, event_log.read(state.match_id)).consistent
+
+
+@pytest.mark.parametrize("tail", ["", " and more"])
+def test_author_stdout_cannot_void_a_duplicate_board(make_engine, new_state, event_log, tail) -> None:  # type: ignore[no-untyped-def]
+    """M47: a losing author whose miss path prints the truncation sentinel must not turn the board into a void."""
+    src = CAP_SRC.replace("'<flag captured>'", repr(TRUNCATED + tail))
+    engine = make_engine({"alice": Miss(), "bob": SpoofAuthor(source=src)})
+    state = engine.run(new_state(rounds=1, challenges_per_round=1, max_attempts=3))
+    key = next(k for k in state.attempts if k.endswith(":alice"))
+    tries = state.attempts[key]
+    assert len(tries) == 3
+    assert all(x.output.startswith(TRUNCATED) for x in tries)  # the spoofed text is stored as plain stdout
+    assert not any(x.truncated or dp.attack_fault(x) for x in tries)
+    assert dp.fault(state) == ""  # the board is scored, not void
+    logged = [e.data["attempt"] for e in event_log.read(state.match_id) if e.type == ev.ATTACK_ATTEMPTED]
+    assert all("truncated" not in a for a in logged)
     assert replay(state, event_log.read(state.match_id)).consistent

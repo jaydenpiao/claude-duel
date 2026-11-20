@@ -881,11 +881,15 @@ class MatchEngine:
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         tokens = completion.total_tokens
-        if completion.refused:
-            return AttackAttempt(payload=MALFORMED, output=REFUSED, tokens=tokens, usd_micros=micros, refused=True)
+        if completion.refused or completion.truncated:  # typed flags: challenge stdout can never claim either
+            cut = not completion.refused
+            if cut:
+                self._metrics.incr("model.malformed", purpose="attack")
+            out = TRUNCATED if cut else REFUSED
+            return AttackAttempt(
+                payload=MALFORMED, output=out, tokens=tokens, usd_micros=micros, refused=not cut, truncated=cut
+            )
         try:
-            if completion.truncated:
-                raise MalformedOutputError(TRUNCATED)
             move = agents.parse_attack(completion.text)
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")

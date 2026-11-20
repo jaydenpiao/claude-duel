@@ -34,6 +34,9 @@ sentinel; challenge stdout that would equal one is rewritten before it is stored
 - Allocate (ledger): even-split fallback, same as an invalid or truncated allocation.
 - Difficulty gate: a refused probe is inconclusive, not held and not solved. The
   challenge stays valid and is not marked `probe_solved`.
+- Truncation uses the same pattern: `AttackAttempt.truncated` is set only by the engine
+  for a twice-truncated attack reply, and duplicate play voids a board on that field,
+  never on output text (a challenge could print the sentinel).
 - Replay, the match card, the arena, and the public event projection label a refusal
   when the field is present; matches with none look as they did before.
 

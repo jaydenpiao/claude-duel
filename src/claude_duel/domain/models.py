@@ -388,6 +388,7 @@ class AttackAttempt(_Frozen):
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
     refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
     timeout: bool = False  # sandbox wall/signal kill; try is refunded; omitted from the log when false
+    truncated: bool = False  # the attacker's reply hit max_output_tokens twice (engine-set, never read from stdout)
 
     @property
     def captured(self) -> bool:
@@ -395,12 +396,12 @@ class AttackAttempt(_Frozen):
         return self.output == CAPTURED
 
     def logged(self) -> dict[str, object]:
-        """Event payload: ``refused`` and ``timeout`` are present only when true, so older logs stay byte-identical."""
+        """Event payload: the typed flags (``refused``, ``timeout``, ``truncated``) are present only when true, so
+        older logs stay byte-identical."""
         data = self.model_dump(mode="json")
-        if not data.get("refused"):
-            data.pop("refused", None)
-        if not data.get("timeout"):
-            data.pop("timeout", None)
+        for flag in ("refused", "timeout", "truncated"):
+            if not data.get(flag):
+                data.pop(flag, None)
         return data
 
 
