@@ -112,3 +112,10 @@ def _no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
     """A developer's real results-db URLs must never reach a test; tests use DUEL_TEST_DATABASE_URL."""
     for var in _REAL_DB_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_install_id(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the per-install OpenAI safety identifier out of the developer's real store dir."""
+    path = tmp_path_factory.mktemp("install") / "install-id"
+    monkeypatch.setattr("claude_duel.adapters.providers.openai.install_id_path", lambda: path)

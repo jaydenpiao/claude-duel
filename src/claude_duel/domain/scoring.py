@@ -6,7 +6,16 @@ from dataclasses import dataclass, field
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.ghosts import ghost_award
 from claude_duel.domain.heat import HeatScorer
-from claude_duel.domain.models import Attack, Challenge, ChallengeSpec, MatchState, Rules, ScoringRule, Validation
+from claude_duel.domain.models import (
+    ATTACK_TIMEOUT,
+    Attack,
+    Challenge,
+    ChallengeSpec,
+    MatchState,
+    Rules,
+    ScoringRule,
+    Validation,
+)
 
 
 @dataclass(frozen=True)
@@ -131,12 +140,14 @@ def heat_unchecked_of_state(state: MatchState, round_no: int, scorer: HeatScorer
 
 
 def classic(facts: RoundFacts, rule: ScoringRule) -> dict[str, int]:
-    """ADR 0006 scoring: invalid costs the author, a capture pays the attacker, a defense pays the author."""
+    """ADR 0006 scoring: invalid costs the author, a capture pays the attacker, a defense pays the author.
+    A challenge voided as too slow at attack time (``ATTACK_TIMEOUT``) is neutral: no penalty, no award."""
     scores = dict.fromkeys(facts.agents, 0)
     for ch in facts.challenges:
         v = facts.validations.get(ch.id)
         if ch.spec is None or v is None or not v.valid:
-            scores[ch.author] -= rule.invalid_penalty * facts.round_no
+            if v is None or v.reason != ATTACK_TIMEOUT:  # an attack-time too-slow void scores 0 for both sides
+                scores[ch.author] -= rule.invalid_penalty * weight(facts.round_no, rule)
             continue
         atk = facts.attacks.get(ch.id)
         if atk is not None and atk.solved:
@@ -273,14 +284,19 @@ def stake_award(full: int, used: int, stake: int) -> int:
 SCORERS: dict[str, Scorer] = {"classic": classic, "efficiency": efficiency, "timed": timed, "ledger": ledger}
 
 
+def weight(round_no: int, rule: ScoringRule) -> int:
+    """Round multiplier: the round number (linear) or 1 (flat, no-fluke ladder)."""
+    return round_no if rule.round_weight == "linear" else 1
+
+
 def solve_award(spec: ChallengeSpec, round_no: int, attempts: int, rule: ScoringRule) -> int:
     """Points for capturing a flag: weighted by difficulty and round, minus one per extra try."""
-    return max(1, rule.solve_points * spec.difficulty * round_no - (attempts - 1))
+    return max(1, rule.solve_points * spec.difficulty * weight(round_no, rule) - (attempts - 1))
 
 
 def defense_award(spec: ChallengeSpec, round_no: int, rule: ScoringRule) -> int:
     """Points for an author whose valid challenge survived the attack."""
-    return rule.defense_points * spec.difficulty * round_no
+    return rule.defense_points * spec.difficulty * weight(round_no, rule)
 
 
 def add_scores(total: Mapping[str, int], delta: Mapping[str, int]) -> dict[str, int]:
