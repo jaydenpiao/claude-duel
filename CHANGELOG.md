@@ -66,6 +66,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- Allowlist `gpt-6.1-terra` ($1/$5), `gpt-6.2-sol` ($2/$10) and `gpt-6.2-astra` ($8/$40) per 1M input/output tokens, standard short-context list prices from the OpenAI pricing page on 2026-11-19. All three are premium (need `allow_premium = true`).
 - `ladder` mode preset (no-fluke): ledger scoring with flat round weights, 1 challenge a side, 3 tries, 1 round, terrain off; keystone and heat stay.
 - `ScoringRule.round_weight`: `linear` (default, unchanged) or `flat`, which scores every round at weight 1 for the no-fluke ladder.
 - `call_charged` logs the reasoning effort actually sent, including defaults (#191).
