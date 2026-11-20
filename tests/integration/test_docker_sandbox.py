@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
 import pytest
 
-from claude_duel.adapters.sandbox.common import execute
-from claude_duel.adapters.sandbox.docker_sandbox import DockerSandbox, docker_runtimes
+from claude_duel.adapters.sandbox.common import REAP_SECONDS, execute
+from claude_duel.adapters.sandbox.docker_sandbox import (
+    DENIED_SYSCALLS,
+    SECCOMP_PROFILE,
+    DockerSandbox,
+    docker_runtimes,
+)
 from claude_duel.adapters.sandbox.runner import frame
 from claude_duel.app.container import make_sandbox
 from claude_duel.config import Settings
@@ -160,3 +167,54 @@ def test_runsc_runtime_runs_hardened(docker_cmd: tuple[str, ...]) -> None:
     bomb = "import os\nwhile True:\n    os.fork()"
     assert FLAG not in gv.run(bomb, "", FLAG, lim).stdout
     assert _leftover(docker_cmd) == ""
+
+
+# A same-uid ptrace of the in-container `timeout` watchdog stops it (state T), so its wall kill never fires.
+PTRACE = r"""
+import ctypes, os
+print("attach", ctypes.CDLL(None).ptrace(16, os.getppid(), 0, 0), flush=True)
+os._exit(0)
+"""
+HOST_DEADLINE = LIM.wall_seconds + 5  # _raw's host wall
+REAP_MARGIN = 2 * REAP_SECONDS + 10  # bounded reaps plus `docker rm -f`
+
+
+def test_seccomp_denies_ptrace_and_returns_promptly(sb: DockerSandbox, docker_cmd: tuple[str, ...]) -> None:
+    started = time.monotonic()
+    r = _raw(sb, docker_cmd, PTRACE)
+    assert time.monotonic() - started < HOST_DEADLINE + REAP_MARGIN
+    assert r.stdout.split() == ["attach", "-1"]  # EPERM from the custom profile
+    assert _leftover(docker_cmd) == ""
+
+
+def test_host_deadline_removes_a_container_whose_watchdog_is_stopped(
+    sb: DockerSandbox, docker_cmd: tuple[str, ...]
+) -> None:
+    """Without the profile, the ptrace stops `timeout`; the host kill deadline must still end the run and remove
+    the container, also when the docker client is privileged (sudo) and survives the process-group kill."""
+    name = f"{PREFIX}{uuid.uuid4().hex[:8]}"
+    argv = sb.argv(name, LIM)
+    at = argv.index(f"seccomp={SECCOMP_PROFILE}")
+    del argv[at - 1 : at + 1]  # Docker's default profile: ptrace allowed
+    argv[-1] = PTRACE
+    rm = [*docker_cmd, "rm", "-f", name]
+    started = time.monotonic()
+    r = execute(
+        argv,
+        "",
+        LIM,
+        env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+        wall_seconds=HOST_DEADLINE,
+        cleanup=lambda: subprocess.run(rm, capture_output=True, check=False),
+    )
+    assert time.monotonic() - started < HOST_DEADLINE + REAP_MARGIN
+    assert r.timed_out
+    assert _leftover(docker_cmd) == ""
+
+
+def test_profile_is_dockers_default_minus_the_tracing_calls() -> None:
+    profile = json.loads(SECCOMP_PROFILE.read_text())
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO"
+    allowed = {n for rule in profile["syscalls"] if rule["action"] == "SCMP_ACT_ALLOW" for n in rule["names"]}
+    assert not allowed & DENIED_SYSCALLS
+    assert {"read", "write", "execve", "clone", "mmap"} <= allowed
