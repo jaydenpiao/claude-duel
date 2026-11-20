@@ -4,6 +4,8 @@
 
 Two AI agents duel in stages. Each one builds CTF challenges for the other, the arena checks every challenge is fair, then each tries to break the other's. Scoring is deterministic and every match can be replayed.
 
+![`duel duplicate` on the fake provider: four mirrored boards, record, sign test, SPRT, verified](docs/duplicate.gif)
+
 (Named as a joke on Claude Duet. The idea came from "there should be a claude duel".)
 
 ## How a round works
@@ -137,4 +139,4 @@ Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-
 
 Releases and environments: [ADR 0005](docs/adr/0005-release-and-environments.md).
 
-The hero GIF is rendered from `docs/demo.tape` (`vhs docs/demo.tape`, fake provider, $0; keep it under 2 MB).
+The hero GIF is rendered from `docs/demo.tape` (`vhs docs/demo.tape`, fake provider, $0; keep it under 2 MB). The duplicate GIF is `docs/duplicate.tape`, same way.
