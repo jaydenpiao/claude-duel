@@ -141,7 +141,7 @@ def test_author_stdout_cannot_spoof_a_capture(make_engine, new_state, event_log)
 
 @pytest.mark.parametrize("tail", ["", " and more"])
 def test_author_stdout_cannot_void_a_duplicate_board(make_engine, new_state, event_log, tail) -> None:  # type: ignore[no-untyped-def]
-    """M47: a losing author whose miss path prints the truncation sentinel must not turn the board into a void."""
+    """a losing author whose miss path prints the truncation sentinel must not turn the board into a void."""
     src = CAP_SRC.replace("'<flag captured>'", repr(TRUNCATED + tail))
     engine = make_engine({"alice": Miss(), "bob": SpoofAuthor(source=src)})
     state = engine.run(new_state(rounds=1, challenges_per_round=1, max_attempts=3))

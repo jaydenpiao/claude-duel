@@ -18,7 +18,7 @@ from claude_duel.domain import match_stats as ms
 from claude_duel.domain.driver import fold_created
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
-from claude_duel.domain.models import TRUNCATED, AgentSpec, AttackAttempt, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.models import AgentSpec, AttackAttempt, Event, MatchState, Rules, SandboxLimits
 
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
@@ -188,9 +188,11 @@ def board_cap(rule: DuplicateRule, rules: Rules) -> int:
     return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY * weight
 
 
-def build_fault(reason: str | None) -> bool:
-    """A build forfeited on a twice-truncated reply is a harness fault; every other invalid reason is scored."""
-    return (reason or "").startswith(f"malformed: {TRUNCATED}")
+def build_fault(state: MatchState, challenge_id: str) -> bool:
+    """A build forfeited on a twice-truncated reply is a harness fault; every other forfeit is scored. Reads the
+    engine-set ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
+    ch = state.challenges.get(challenge_id)
+    return ch is not None and ch.spec is None and challenge_id in state.build_truncated
 
 
 def attack_fault(attempt: AttackAttempt) -> bool:
@@ -201,7 +203,7 @@ def attack_fault(attempt: AttackAttempt) -> bool:
 
 def fault(state: MatchState) -> str:
     """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
-    if any(build_fault(v.reason) for v in state.validations.values()):
+    if any(build_fault(state, cid) for cid in state.validations):
         return "build truncated"
     if any(attack_fault(a) for tries in state.attempts.values() for a in tries):
         return "attack truncated"

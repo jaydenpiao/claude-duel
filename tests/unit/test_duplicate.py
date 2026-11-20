@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import math
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,6 +17,7 @@ from claude_duel.domain.models import (
     TRUNCATED,
     AgentSpec,
     AttackAttempt,
+    Challenge,
     Event,
     MatchState,
     Rules,
@@ -71,19 +73,30 @@ def test_identical_play_in_both_seats_scores_zero_and_big_swings_clip() -> None:
     assert (board.raw, board.diff) == (900, cap)
 
 
+def _forfeit(reason: str, truncated: bool) -> dict[str, Any]:
+    """A half whose challenge "c" was forfeited at build time with ``reason``; ``truncated`` is the typed flag."""
+    return {
+        "challenges": {"c": Challenge(id="c", round=1, author="gpt-x", spec=None, forfeit_reason=reason)},
+        "validations": {"c": Validation(challenge_id="c", valid=False, reason=reason)},
+        "build_truncated": ["c"] if truncated else [],
+    }
+
+
 def test_harness_faults_void_and_model_failures_score() -> None:
-    truncated = Validation(challenge_id="c", valid=False, reason=f"malformed: {TRUNCATED}")
-    near_miss = Validation(challenge_id="c", valid=False, reason="reference payload does not reveal flag")
-    junk = Validation(challenge_id="c", valid=False, reason="malformed: no JSON object found")
-    assert dp.fault(_half("h", (A, B), {}, validations={"c": truncated})) == "build truncated"
-    assert dp.fault(_half("h", (A, B), {}, validations={"c": near_miss})) == ""
-    assert dp.fault(_half("h", (A, B), {}, validations={"c": junk})) == ""  # format failures are the model's loss
+    cut = _forfeit(f"malformed: {TRUNCATED}", truncated=True)
+    assert dp.fault(_half("h", (A, B), {}, **cut)) == "build truncated"
+    quoted = _forfeit(f"malformed: {TRUNCATED}", truncated=False)  # the text alone never voids
+    assert dp.fault(_half("h", (A, B), {}, **quoted)) == ""
+    near_miss = _forfeit("reference payload does not reveal flag", truncated=False)
+    assert dp.fault(_half("h", (A, B), {}, **near_miss)) == ""
+    junk = _forfeit("malformed: no JSON object found", truncated=False)
+    assert dp.fault(_half("h", (A, B), {}, **junk)) == ""  # format failures are the model's loss
     tries = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1, truncated=True)]}
     assert dp.fault(_half("h", (A, B), {}, attempts=tries)) == "attack truncated"
     spoof = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1)]}  # challenge stdout, not the engine
     assert dp.fault(_half("h", (A, B), {}, attempts=spoof)) == ""
     st = _state()
-    halves = (_half("h1", (A, B), {"gpt-x": 60}, validations={"c": truncated}), _half("h2", (B, A), {}))
+    halves = (_half("h1", (A, B), {"gpt-x": 60}, **cut), _half("h2", (B, A), {}))
     board = dp.board_of(st, 1, "x", halves, 2)
     assert (board.void, board.diff, board.fault, board.replays) == (True, 0, "build truncated", 2)
 
@@ -215,11 +228,11 @@ def test_void_scope_matches_the_labeled_failures() -> None:
     rows = list(csv.DictReader((FIXTURES / "failure-labels-2026-11-05.csv").open(encoding="utf-8")))
     assert len(rows) == 140
     for row in rows:
-        reason = row["reason"]
+        reason = row["reason"]  # the engine sets the typed flag exactly when it wrote the sentinel itself
         if row["event_type"] == "challenge_validated_invalid":
-            voids = dp.build_fault(reason)
-        else:  # the engine sets ``truncated`` exactly when it writes the sentinel itself
+            half = _half("h", (A, B), {}, **_forfeit(reason, truncated=reason == f"malformed: {TRUNCATED}"))
+            voids = dp.build_fault(half, "c")
+        else:
             voids = dp.attack_fault(AttackAttempt(payload="?", output=reason, tokens=1, truncated=reason == TRUNCATED))
         assert voids == (row["category"] == "harness_fault_or_truncation"), row
     assert sum(r["category"] == "harness_fault_or_truncation" for r in rows) == 8
-    assert not dp.build_fault("malformed: no JSON object found")  # format failures after retries stay scored

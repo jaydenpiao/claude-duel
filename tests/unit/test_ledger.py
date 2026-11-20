@@ -10,7 +10,7 @@ import pytest
 
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL, BudgetLimits, CostBudget
-from claude_duel.domain.errors import BudgetExceededError
+from claude_duel.domain.errors import BudgetExceededError, SpendLedgerCorruptError
 from claude_duel.ports import Completion
 
 
@@ -52,15 +52,16 @@ def test_lifetime_cap_sees_another_process(tmp_path: Path) -> None:
         budget.check_lifetime()
 
 
-def test_torn_line_is_not_glued_to_next_entry(tmp_path: Path) -> None:
+def test_torn_line_stops_spend_instead_of_being_skipped(tmp_path: Path) -> None:
     path = tmp_path / "l.jsonl"
     ledger = FileSpendLedger(path)
     ledger.record("m", "x", 1, 1.0)
     with path.open("a") as fh:
         fh.write('{"torn": ')
-    ledger.record("m", "x", 1, 2.0)
-    assert FileSpendLedger(path).total_usd() == 3.0
-    assert json.loads(path.read_text().splitlines()[-1])["usd"] == 2.0
+    with pytest.raises(SpendLedgerCorruptError, match="torn"):
+        ledger.record("m", "x", 1, 2.0)
+    with pytest.raises(SpendLedgerCorruptError):
+        FileSpendLedger(path).total_usd()
 
 
 def test_replaced_file_is_refolded(tmp_path: Path) -> None:

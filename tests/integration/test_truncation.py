@@ -5,6 +5,7 @@ from __future__ import annotations
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import agents
 from claude_duel.app.engine import TRUNCATED
+from claude_duel.domain import duplicate as dp
 from claude_duel.domain import events as ev
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -42,6 +43,20 @@ def test_two_truncations_are_their_own_failure_reason(make_engine, new_state) ->
     mine = next(c for c in state.challenges.values() if c.author == "alice")
     assert state.build_errors[mine.id][0] == f"malformed: {TRUNCATED}"
     assert state.validations[mine.id].valid  # the next format retry succeeded
+    assert not dp.build_fault(state, mine.id)  # repaired: a later valid build is never a harness fault
+
+
+def test_a_build_forfeited_on_truncation_is_a_typed_harness_fault(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
+    alice = Cut(100)  # every build reply is cut off
+    state = make_engine({"alice": alice, "bob": FakeProvider()}).run(new_state(rounds=1, challenges_per_round=1))
+    mine = next(c for c in state.challenges.values() if c.author == "alice")
+    assert mine.spec is None
+    rejected = [e.data for e in event_log.read(state.match_id) if e.type == ev.BUILD_REJECTED]
+    assert rejected
+    assert all(r["truncated"] is True for r in rejected)
+    assert mine.id in state.build_truncated
+    assert dp.build_fault(state, mine.id)
+    assert dp.fault(state) == "build truncated"
 
 
 def test_output_cap_and_schema_are_the_same_for_every_agent(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]

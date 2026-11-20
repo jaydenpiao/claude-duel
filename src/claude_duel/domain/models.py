@@ -525,6 +525,7 @@ class MatchState(BaseModel):
     attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
     ghost_runs: dict[str, bool] = Field(default_factory=dict)  # "<round>:<ghost id>><challenge id>" -> hit
     build_errors: dict[str, list[str]] = Field(default_factory=dict)
+    build_truncated: list[str] = Field(default_factory=list)  # challenges whose last rejected build reply was cut off
     last_seq: int = -1
     failure: str | None = None
     failed_stage: Stage | None = None
