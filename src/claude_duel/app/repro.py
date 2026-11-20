@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from claude_duel.app.ladder import compare_ladders
@@ -17,32 +17,52 @@ from claude_duel.app.ladder_config import LadderConfig
 from claude_duel.domain import duplicate as dp
 from claude_duel.domain import ladder as ld
 
+Draw = Callable[[random.Random], int]
 
-def play_match(rule: dp.DuplicateRule, p_win: float, p_tie: float, rng: random.Random) -> tuple[dp.Result, int]:
-    """One duplicate match: first's chance to win a decided board is ``p_win``; ``p_tie`` of boards score 0."""
-    wins = losses = boards = 0
-    while not dp.stop_now(rule, boards, wins, losses):
-        boards += 1
-        if rng.random() >= p_tie:
-            wins, losses = (wins + 1, losses) if rng.random() < p_win else (wins, losses + 1)
-    return dp.verdict(rule, wins, losses), boards
+
+def coin(p_win: float, p_tie: float) -> Draw:
+    """A unit-margin board: +1 with p_win of the decided boards, 0 for ``p_tie`` of boards."""
+
+    def draw(rng: random.Random) -> int:
+        if rng.random() < p_tie:
+            return 0
+        return 1 if rng.random() < p_win else -1
+
+    return draw
+
+
+def resample(margins: Sequence[int], *, symmetric: bool = False) -> Draw:
+    """Boards drawn from measured margins; ``symmetric`` flips each sign at random (the equal-strength null)."""
+
+    def draw(rng: random.Random) -> int:
+        d = rng.choice(margins)
+        return -d if symmetric and rng.random() < 0.5 else d
+
+    return draw
+
+
+def play_match(rule: dp.DuplicateRule, draw: Draw, rng: random.Random) -> tuple[dp.Result, int]:
+    """One duplicate match under the real stop rule and verdict, boards from ``draw`` (first's margin)."""
+    scored: list[int] = []
+    while not dp.stop_now(rule, len(scored), scored):
+        scored.append(draw(rng))
+    return dp.verdict(rule, scored, final=len(scored) >= rule.boards_max), len(scored)
 
 
 @dataclass(frozen=True)
 class MatchupRepro:
-    p_win: float
     first: float  # share of runs backing the stronger side
     wrong: float  # share backing the weaker side
     repeat_agree: float  # two independent runs back the same side
     mean_boards: float
 
 
-def matchup(rule: dp.DuplicateRule, p_win: float, p_tie: float, runs: int, seed: str) -> MatchupRepro:
+def matchup(rule: dp.DuplicateRule, draw: Draw, runs: int, seed: str) -> MatchupRepro:
     rng = random.Random(seed)  # noqa: S311 (simulation, not security)
-    played = [play_match(rule, p_win, p_tie, rng) for _ in range(runs)]
+    played = [play_match(rule, draw, rng) for _ in range(runs)]
     first = sum(r == "first" for r, _ in played) / runs
     wrong = sum(r == "second" for r, _ in played) / runs
-    return MatchupRepro(p_win, first, wrong, first**2 + wrong**2, sum(n for _, n in played) / runs)
+    return MatchupRepro(first, wrong, first**2 + wrong**2, sum(n for _, n in played) / runs)
 
 
 def board_p(strength: Mapping[str, float], a: str, b: str) -> float:
@@ -66,7 +86,7 @@ def play_ladder_sim(
     boards = 0
     while not state.done():
         a, b = state.next_pair()
-        result, n = play_match(rule, board_p(strength, a, b), p_tie, rng)
+        result, n = play_match(rule, coin(board_p(strength, a, b), p_tie), rng)
         boards += n
         no = len(state.steps) + 1
         state.steps.append(ld.Step(step_no=no, a=a, b=b, duplicate_id=f"{run_id}-s{no}", result=result, usd=0))

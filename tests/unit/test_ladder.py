@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +12,11 @@ from claude_duel.app.ladder import match_usd, project
 from claude_duel.domain import ladder as ld
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.models import Event
+
+
+def _load(*a: Any, **k: Any) -> lc.LadderConfig:  # premium plans validate; the premium gate is tested apart
+    return lc.load(*a, allow_premium=True, **k)
+
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
@@ -45,18 +51,18 @@ def test_fold_rejects_a_step_off_the_ladder() -> None:
 
 def test_dry_run_refuses_over_the_ladder_cap_and_passes_above_it() -> None:
     plan = EXAMPLES / "ladder-a.toml"
-    refused = project(lc.load(plan, {"budget.ladder_max_usd": 30.0, "budget.match_max_usd": 30.0}))
+    refused = project(_load(plan, {"budget.ladder_max_usd": 30.0, "budget.match_max_usd": 30.0}))
     assert any("ladder worst case" in r for r in refused.refusals)
     worst = refused.total_usd
     assert worst >= 57  # at least the design's §4 worst-case figure
     biggest = max(r.worst_usd for r in refused.rows)
-    fits = project(lc.load(plan, {"budget.ladder_max_usd": worst + 1, "budget.match_max_usd": biggest + 1}))
+    fits = project(_load(plan, {"budget.ladder_max_usd": worst + 1, "budget.match_max_usd": biggest + 1}))
     assert fits.refusals == []
     assert fits.total_usd == pytest.approx(worst)
 
 
 def test_one_dear_match_is_refused_even_when_the_total_fits() -> None:
-    cfg = lc.load(EXAMPLES / "ladder-c.toml", {"budget.ladder_max_usd": 10_000.0, "budget.match_max_usd": 100.0})
+    cfg = _load(EXAMPLES / "ladder-c.toml", {"budget.ladder_max_usd": 10_000.0, "budget.match_max_usd": 100.0})
     refusals = project(cfg).refusals
     assert refusals
     assert all("match_max_usd" in r for r in refusals)
@@ -68,7 +74,7 @@ def test_one_dear_match_is_refused_even_when_the_total_fits() -> None:
     [("a", 1743.21, 9), ("b", 606.24, 7), ("c", 770.08, 9), ("fake", 0.0, 3)],
 )
 def test_projection_golden(name: str, total: float, rows: int) -> None:
-    proj = project(lc.load(EXAMPLES / f"ladder-{name}.toml"))
+    proj = project(_load(EXAMPLES / f"ladder-{name}.toml"))
     assert round(proj.total_usd, 2) == total
     assert len(proj.rows) == rows
     assert all(r.typical_usd <= r.worst_usd for r in proj.rows)
@@ -76,8 +82,8 @@ def test_projection_golden(name: str, total: float, rows: int) -> None:
 
 
 def test_match_cost_scales_with_boards_and_replays() -> None:
-    cfg = lc.load(EXAMPLES / "ladder-b.toml")
-    half = lc.load(EXAMPLES / "ladder-b.toml", {"match.boards_max": 4})
+    cfg = _load(EXAMPLES / "ladder-b.toml")
+    half = _load(EXAMPLES / "ladder-b.toml", {"match.boards_max": 4})
     assert match_usd(half, "claude-opus-5-5", "gpt-5-mini") == pytest.approx(
         match_usd(cfg, "claude-opus-5-5", "gpt-5-mini") / 2
     )

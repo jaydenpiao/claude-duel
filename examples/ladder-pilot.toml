@@ -8,8 +8,8 @@ a = ["claude-haiku-5-5"]
 b = ["gpt-6-luna"]
 
 [match]
-boards_min = 4
-boards_max = 8
+boards_min = 12
+boards_max = 48
 
 [budget]
 match_max_usd = 4.5
