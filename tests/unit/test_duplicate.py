@@ -82,23 +82,26 @@ def _forfeit(reason: str, truncated: bool) -> dict[str, Any]:
     }
 
 
-def test_harness_faults_void_and_model_failures_score() -> None:
+def test_truncation_is_scored_like_a_refusal_and_counted_never_voided() -> None:
     cut = _forfeit(f"malformed: {TRUNCATED}", truncated=True)
-    assert dp.fault(_half("h", (A, B), {}, **cut)) == "build truncated"
-    quoted = _forfeit(f"malformed: {TRUNCATED}", truncated=False)  # the text alone never voids
-    assert dp.fault(_half("h", (A, B), {}, **quoted)) == ""
+    assert dp.fault(_half("h", (A, B), {}, **cut)) == ""
+    assert dp.truncations(_half("h", (A, B), {}, **cut)) == {"gpt-x": 1}
+    quoted = _forfeit(f"malformed: {TRUNCATED}", truncated=False)  # the text alone is never counted
+    assert dp.truncations(_half("h", (A, B), {}, **quoted)) == {}
     near_miss = _forfeit("reference payload does not reveal flag", truncated=False)
     assert dp.fault(_half("h", (A, B), {}, **near_miss)) == ""
     junk = _forfeit("malformed: no JSON object found", truncated=False)
     assert dp.fault(_half("h", (A, B), {}, **junk)) == ""  # format failures are the model's loss
-    tries = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1, truncated=True)]}
-    assert dp.fault(_half("h", (A, B), {}, attempts=tries)) == "attack truncated"
-    spoof = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1)]}  # challenge stdout, not the engine
-    assert dp.fault(_half("h", (A, B), {}, attempts=spoof)) == ""
+    tries = {"c:claude-y": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1, truncated=True)]}
+    assert dp.fault(_half("h", (A, B), {}, attempts=tries)) == ""
+    assert dp.truncations(_half("h", (A, B), {}, attempts=tries)) == {"claude-y": 1}
+    spoof = {"c:claude-y": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1)]}  # challenge stdout
+    assert dp.truncations(_half("h", (A, B), {}, attempts=spoof)) == {}
     st = _state()
     halves = (_half("h1", (A, B), {"gpt-x": 60}, **cut), _half("h2", (B, A), {}))
-    board = dp.board_of(st, 1, "x", halves, 2)
-    assert (board.void, board.diff, board.fault, board.replays) == (True, 0, "build truncated", 2)
+    board = dp.board_of(st, 1, "x", halves, 0)
+    assert (board.void, board.diff, board.fault, board.replays) == (False, 60, "", 0)  # scored: no re-roll
+    assert board.truncated == {"gpt-x": 1}
 
 
 def test_board_usd_sums_both_halves() -> None:
@@ -224,7 +227,8 @@ def test_capped_ends_the_match_on_played_boards() -> None:
 
 
 def test_void_scope_matches_the_labeled_failures() -> None:
-    """The 140 labeled failures (failure-labels-2026-11-05): exactly the 8 harness faults void, the rest score."""
+    """The 140 labeled failures (failure-labels-2026-11-05): exactly the 8 truncations are flagged (and counted), and
+    none of the 140 voids a board: all are scored."""
     rows = list(csv.DictReader((FIXTURES / "failure-labels-2026-11-05.csv").open(encoding="utf-8")))
     assert len(rows) == 140
     for row in rows:
@@ -232,6 +236,7 @@ def test_void_scope_matches_the_labeled_failures() -> None:
         if row["event_type"] == "challenge_validated_invalid":
             half = _half("h", (A, B), {}, **_forfeit(reason, truncated=reason == f"malformed: {TRUNCATED}"))
             voids = dp.build_fault(half, "c")
+            assert dp.fault(half) == ""
         else:
             voids = dp.attack_fault(AttackAttempt(payload="?", output=reason, tokens=1, truncated=reason == TRUNCATED))
         assert voids == (row["category"] == "harness_fault_or_truncation"), row
