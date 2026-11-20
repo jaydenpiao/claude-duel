@@ -24,7 +24,7 @@ DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
 MAX_BOARDS = 64  # money caps bind first; this only stops a typo
-Result = Literal["first", "second", "inconclusive", "void"]
+Result = Literal["first", "second", "inconclusive", "void", "capped"]
 
 
 SIGN_TEST_ALPHA = 0.05
@@ -78,7 +78,7 @@ class DuplicateState(BaseModel):
     rules: Rules
     limits: SandboxLimits
     boards: list[Board] = Field(default_factory=list)
-    capped: bool = False  # the next board could pass match_max_usd: scored on the boards played (ADR 0014)
+    capped: bool = False  # the next board could pass match_max_usd: result "capped" (no verdict) before boards_max
 
     def diffs(self) -> list[int]:
         return [b.diff for b in self.boards]
@@ -112,12 +112,15 @@ class DuplicateState(BaseModel):
         return ms.bootstrap_ci(self.diffs(), self.seed)
 
     def result(self) -> Result:
-        """``first``/``second`` only when the sign test (p <= 0.05) or the SPRT backs it; spend never decides."""
+        """``first``/``second`` only when the test backs it; spend never decides. A match the money cap stopped
+        before ``boards_max`` is ``capped``: no verdict, excluded from claims (price never ends a match early)."""
         if not self.done():
             raise ValueError("duplicate match is not finished")
+        if self.capped and len(self.boards) < self.rule.boards_max:
+            return "capped"
         if self.void_share_exceeded():
             return "void"
-        return verdict(self.rule, self.scored(), final=len(self.boards) >= self.rule.boards_max or self.capped)
+        return verdict(self.rule, self.scored(), final=len(self.boards) >= self.rule.boards_max)
 
     def winner(self) -> str | None:
         res = self.result()

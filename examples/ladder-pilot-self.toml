@@ -12,7 +12,7 @@ boards_max = 4
 [budget]
 match_max_usd = 1.0
 ladder_max_usd = 1.0
-basis = "typical"
+basis = "calibrated"
 
 [caps]
 build = 24000

@@ -57,6 +57,7 @@ _LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on t
     ("--start-tier-b", "start_tier.b", int),
     ("--boards-min", "match.boards_min", int),
     ("--boards-max", "match.boards_max", int),
+    ("--boards", "match.boards", int),
     ("--match-max-usd", "budget.match_max_usd", float),
     ("--ladder-max-usd", "budget.ladder_max_usd", float),
     ("--basis", "budget.basis", str),
