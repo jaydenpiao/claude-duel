@@ -23,6 +23,7 @@ duel replay demo --transcript       # refold the event log and verify scores
 duel replay demo --view arena       # re-watch a finished match in the arena view from its log ($0, no API calls)
 duel replay demo --verify           # also re-run logged ghost runs in the sandbox ($0 API)
 duel series --games 3                # best-of-3: one normal match per game, sides alternate, then verified
+duel duplicate --boards-max 8         # no-fluke: mirrored boards (seats swap), clipped, sign test/SPRT, verified
 duel tournament                     # round robin (<= 6) or Swiss over the config's [[tournament.entrants]];
                                     # [tournament] pool = true adds a shared, CTFd-decayed challenge pool
 duel ratings                        # offline Elo + Bradley-Terry (95% CI) over every completed match

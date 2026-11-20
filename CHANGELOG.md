@@ -66,6 +66,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - SECURITY.md: contact and branch-protection note (#215, #227).
 
 ### Added
+- `duel duplicate`: no-fluke duplicate play. Each board is one seed played twice with seats swapped; the board difference is clipped, a twice-truncated reply replays the board on a derived seed (then void), and the result needs the sign test (p <= 0.05) or the SPRT, never spend. Prints the board table, margin, p, bootstrap CI, SPRT state and spend vs `--match-max-usd`; `verify` recomputes every board. $0 with fake agents.
 - Allowlist `gpt-6.1-terra` ($1/$5), `gpt-6.2-sol` ($2/$10) and `gpt-6.2-astra` ($8/$40) per 1M input/output tokens, standard short-context list prices from the OpenAI pricing page on 2026-11-19. All three are premium (need `allow_premium = true`).
 - `ladder` mode preset (no-fluke): ledger scoring with flat round weights, 1 challenge a side, 3 tries, 1 round, terrain off; keystone and heat stay.
 - `ScoringRule.round_weight`: `linear` (default, unchanged) or `flat`, which scores every round at weight 1 for the no-fluke ladder.
