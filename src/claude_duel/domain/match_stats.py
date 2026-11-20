@@ -5,6 +5,7 @@ Board differences are from the first agent's side: > 0 a board win, < 0 a loss, 
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import math
 import random
@@ -34,6 +35,26 @@ def sign_test_p(wins: int, losses: int) -> float:
         return 1.0
     tail: float = sum(math.comb(n, i) for i in range(min(wins, losses) + 1)) / 2**n
     return min(1.0, 2 * tail)
+
+
+def sign_flip_p(diffs: Sequence[int]) -> float:
+    """Exact two-sided sign-flip (paired randomization) test on board margins: under equal strength each seat-swapped
+    board's margin is as likely negative as positive, so p is the share of the 2^n sign patterns whose |sum| reaches
+    the observed |sum|. Counted by dynamic programming over sums, exact for any n. 1.0 when every board is 0."""
+    xs = [abs(d) for d in diffs if d]
+    if not xs:
+        return 1.0
+    g = functools.reduce(math.gcd, xs)
+    xs = [x // g for x in xs]
+    observed = abs(sum(diffs)) // g
+    counts: dict[int, int] = {0: 1}
+    for x in xs:
+        nxt: dict[int, int] = {}
+        for total, c in counts.items():
+            nxt[total + x] = nxt.get(total + x, 0) + c
+            nxt[total - x] = nxt.get(total - x, 0) + c
+        counts = nxt
+    return sum(c for total, c in counts.items() if abs(total) >= observed) / (1 << len(xs))
 
 
 def bootstrap_ci(diffs: Sequence[int], seed: str, draws: int = BOOTSTRAP_DRAWS) -> tuple[float, float]:
