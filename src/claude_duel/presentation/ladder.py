@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
@@ -16,15 +17,18 @@ _WINNER = {"first": "a", "second": "b"}
 
 
 def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
-    lines = [f"{'side a':<20}{'side b':<20}{'worst $':>10}{'typical $':>11}"]
-    lines += [f"{r.a:<20}{r.b:<20}{r.worst_usd:>10.2f}{r.typical_usd:>11.2f}" for r in proj.rows]
+    lines = [f"{'side a':<20}{'side b':<20}{'worst $':>10}{'typical $':>11}{'calibrated $':>14}"]
+    lines += [
+        f"{r.a:<20}{r.b:<20}{r.worst_usd:>10.2f}{r.typical_usd:>11.2f}{r.calibrated_usd:>14.2f}" for r in proj.rows
+    ]
     lines.append(f"worst-case ladder ${proj.total_usd:.2f} / ladder_max_usd ${ladder_max_usd:.2f}")
     dearest = max((r.typical_usd for r in proj.rows), default=0.0)
     lines.append(
         f"typical ladder ${proj.typical_usd():.2f} (dearest match ${dearest:.2f}): expected, no retries or replays,"
         f" assumed reply sizes; caps are checked against the {proj.basis} case"
     )
-    if proj.basis == "typical":
+    lines.append(f"calibrated ladder ${proj.calibrated_usd():.2f}: each model at its measured mean tokens per call")
+    if proj.basis in ("typical", "calibrated"):
         lines.append("hard stop: no call is made whose worst case could pass match_max_usd or ladder_max_usd")
     lines += [f"refused: {r}" for r in proj.refusals] or ["dry run ok: within every cap"]
     return lines
@@ -33,15 +37,27 @@ def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
 def projection_view(proj: Projection, ladder_max_usd: float) -> dict[str, object]:
     return {
         "rows": [
-            {"a": r.a, "b": r.b, "worst_usd": round(r.worst_usd, 4), "typical_usd": round(r.typical_usd, 4)}
+            {
+                "a": r.a,
+                "b": r.b,
+                "worst_usd": round(r.worst_usd, 4),
+                "typical_usd": round(r.typical_usd, 4),
+                "calibrated_usd": _usd(r.calibrated_usd),
+            }
             for r in proj.rows
         ],
         "total_usd": round(proj.total_usd, 4),
         "typical_usd": round(proj.typical_usd(), 4),
+        "calibrated_usd": _usd(proj.calibrated_usd()),
         "ladder_max_usd": ladder_max_usd,
         "basis": proj.basis,
         "refusals": proj.refusals,
     }
+
+
+def _usd(value: float) -> float | None:
+    """Rounded dollars; ``None`` for a model with no calibrated token use (shown as nan in text)."""
+    return None if math.isnan(value) else round(value, 4)
 
 
 def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> dict[str, object]:

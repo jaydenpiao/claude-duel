@@ -1,0 +1,67 @@
+"""Calibrated cost basis: per-model token use measured on real matches, so a plan is priced from what each model
+actually writes instead of one assumed reply size for every model.
+
+``MEASURED`` is pinned from the real match logs of 2026-10-30 to 2026-11-19 by ``scripts/calibrate_usage.py`` (calls
+whose agent ran with an output cap of at least 8000 tokens). Models with no logged calls borrow a measured model's
+row (``PROXY``) and say so; a model with neither is refused, never guessed. No API calls.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from claude_duel.app.budget import DEFAULT_PRICES, FAKE_MODEL
+from claude_duel.domain.errors import ConfigError
+from claude_duel.domain.models import Rules
+
+
+@dataclass(frozen=True)
+class Usage:
+    input_tokens: int  # mean per call
+    output_tokens: int  # mean per call
+    calls: int  # calls measured
+    source: str  # the model the numbers were measured on
+
+
+# mean tokens per call: (input, output, calls measured)
+MEASURED: dict[str, tuple[int, int, int]] = {
+    "claude-fable-5-1": (1378, 8996, 18),
+    "claude-haiku-5-5": (1307, 2861, 97),
+    "claude-opus-5-5": (1410, 3384, 10),
+    "gpt-6-astra": (988, 3433, 26),
+    "gpt-6-luna": (916, 705, 105),
+}
+# no logged calls of their own: priced as the nearest measured model of the same vendor and tier or above
+PROXY: dict[str, str] = {
+    "claude-fable-5-2": "claude-fable-5-1",
+    "claude-sonnet-5-5": "claude-opus-5-5",
+    "gpt-6.2-astra": "gpt-6-astra",
+    "gpt-6.2-sol": "gpt-6-astra",
+    "gpt-6.1-terra": "gpt-6-astra",
+}
+# paid calls per agent per challenge (build, format retries, attack tries): the largest per-model mean measured
+# (gpt-6-astra 3.33; haiku 2.59, luna 2.79, fable 2.17), the same for every model so no side is priced lighter
+CALLS_PER_CHALLENGE = 3.33
+
+
+def usage(model: str) -> Usage:
+    """The measured row for ``model`` (or its proxy); ``ConfigError`` when neither exists."""
+    if model == FAKE_MODEL:
+        return Usage(0, 0, 0, FAKE_MODEL)
+    source = model if model in MEASURED else PROXY.get(model, "")
+    if source not in MEASURED:
+        raise ConfigError(f"no calibrated token use for {model!r}: add it to calibration.MEASURED or PROXY")
+    tin, tout, calls = MEASURED[source]
+    return Usage(tin, tout, calls, source)
+
+
+def agent_usd(rules: Rules, model: str) -> float:
+    """One agent's expected cost for one match (one half of a board) on the calibrated basis: measured mean tokens per
+    call at ``DEFAULT_PRICES[model]``, ``CALLS_PER_CHALLENGE`` calls per challenge plus one allocation per round in
+    ledger modes. Replies are capped at the rules' largest per-purpose output cap."""
+    use = usage(model)
+    pin, pout = DEFAULT_PRICES[model]
+    out = min(use.output_tokens, max(rules.output_cap(purpose=p) for p in ("build", "attack", "allocate")))
+    calls = rules.rounds * rules.challenges_per_round * CALLS_PER_CHALLENGE
+    calls += rules.rounds if rules.ledger is not None else 0
+    return calls * (use.input_tokens * pin + out * pout) / 1_000_000

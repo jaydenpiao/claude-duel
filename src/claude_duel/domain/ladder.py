@@ -33,7 +33,7 @@ class Step(BaseModel):
 
 
 def advance(tiers: tuple[int, int], result: Result) -> tuple[int, int]:
-    """The loser steps down; no backed winner moves both sides down."""
+    """The loser steps down; no backed winner moves both sides down (a ``capped`` step also ends the ladder)."""
     i, j = tiers
     if result == "first":
         return i, j + 1

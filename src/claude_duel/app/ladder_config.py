@@ -43,6 +43,9 @@ class Tier(_Plan):
 class MatchPlan(_Plan):
     boards_min: int = 12
     boards_max: int = 48
+    # A fixed board count for every pairing: no early stop, and money never ends a match early (the dry run refuses a
+    # plan whose boards cannot fit the caps; a hard stop before N leaves the match "capped", with no verdict).
+    boards: int | None = None
 
 
 class BudgetPlan(_Plan):
@@ -50,7 +53,8 @@ class BudgetPlan(_Plan):
     ladder_max_usd: float
     # What the dry run checks the caps against. "typical" admits plans whose worst case is over a cap; the per-call
     # hard stop then keeps actual spend under both caps (the run stops cleanly, resumable after raising a cap).
-    basis: Literal["worst", "typical"] = "worst"
+    # "calibrated" prices each model from its measured token use (app/calibration.py) instead of one assumed size.
+    basis: Literal["worst", "typical", "calibrated"] = "worst"
 
 
 class CapsPlan(_Plan):
@@ -84,9 +88,12 @@ class LadderConfig(_Plan):
         return Rules.model_validate(base | {"max_attempts": self.caps.max_attempts, "call_caps": caps.model_dump()})
 
     def duplicate_rule(self) -> DuplicateRule:
+        """``match.boards`` fixes every pairing at that many boards (no early stop); else the margin rule's range."""
+        n = self.match.boards
         return DuplicateRule(
-            boards_min=self.match.boards_min,
-            boards_max=self.match.boards_max,
+            boards_min=self.match.boards_min if n is None else n,
+            boards_max=self.match.boards_max if n is None else n,
+            stop="margin" if n is None else "none",
             match_max_usd=self.budget.match_max_usd,
         )
 
@@ -162,7 +169,12 @@ def _check_models(cfg: LadderConfig, allow_premium: bool) -> None:
 
 def _check_numbers(cfg: LadderConfig) -> None:
     boards = cfg.match
-    if not 1 <= boards.boards_min <= boards.boards_max <= MAX_BOARDS:
+    if boards.boards is not None:
+        if {"boards_min", "boards_max"} & boards.model_fields_set:
+            raise ConfigError("set either match.boards (fixed) or match.boards_min/boards_max (early stop), not both")
+        if not 1 <= boards.boards <= MAX_BOARDS:
+            raise ConfigError(f"match.boards must be >= 1 and <= {MAX_BOARDS}")
+    elif not 1 <= boards.boards_min <= boards.boards_max <= MAX_BOARDS:
         raise ConfigError(f"boards_min must be >= 1 and <= boards_max, and boards_max <= {MAX_BOARDS}")
     positive = {**cfg.budget.model_dump(exclude={"basis"}), **cfg.caps.model_dump()}
     for key, value in positive.items():
