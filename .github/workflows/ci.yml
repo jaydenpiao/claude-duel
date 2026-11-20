@@ -16,7 +16,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: [self-hosted, box]
-    timeout-minutes: 30  # a lost runner fails fast instead of holding the queue for 6h
+    timeout-minutes: 60  # the full suite on 4 workers can pass 30 min when 4 runners share the VM; a lost runner still fails
     permissions:
       contents: read
     strategy:
