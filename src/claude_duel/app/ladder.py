@@ -21,7 +21,7 @@ from claude_duel.app.ladder_config import LadderConfig, agents
 from claude_duel.config import Settings
 from claude_duel.domain import duplicate as dp
 from claude_duel.domain import ladder as ld
-from claude_duel.domain.errors import BudgetExceededError, ConfigError
+from claude_duel.domain.errors import BudgetExceededError, ConfigError, CyberPolicyError
 from claude_duel.ports import EventObserver, Metrics
 
 
@@ -160,10 +160,16 @@ def play_ladder(
                 SpendCap("ladder", f"{ladder_id}-", cfg.budget.ladder_max_usd),
                 SpendCap(f"match {state.step_id(n)}", f"{state.step_id(n)}-", cfg.budget.match_max_usd),
             )
-            dup = play_duplicate(step_settings, state.step_id(n), cfg.duplicate_rule(), metrics, observer, budget)
-            if not dup.done():
-                return state  # a half failed: `duel ladder` again resumes it
-            step = ld.Step(step_no=n, a=a, b=b, duplicate_id=dup.duplicate_id, result=dup.result(), usd=dup.spent_usd())
+            try:
+                dup = play_duplicate(step_settings, state.step_id(n), cfg.duplicate_rule(), metrics, observer, budget)
+            except CyberPolicyError:  # a vendor policy block is an outcome of this pairing, not a pause
+                usd = spent.spent_usd(f"{state.step_id(n)}-")
+                step = ld.Step(step_no=n, a=a, b=b, duplicate_id=state.step_id(n), result="blocked", usd=usd)
+            else:
+                if not dup.done():
+                    return state  # a half failed: `duel ladder` again resumes it
+                result, usd = dup.result(), dup.spent_usd()
+                step = ld.Step(step_no=n, a=a, b=b, duplicate_id=dup.duplicate_id, result=result, usd=usd)
             append(
                 log,
                 ladder_id,
@@ -187,17 +193,24 @@ def read_ladder(settings: Settings, ladder_id: str) -> ld.LadderState:
 
 
 def verify_ladder(settings: Settings, ladder_id: str) -> LadderReport:
-    """The plan digest recomputes, and every step's duplicate match verifies and gives the recorded result."""
+    """The plan digest recomputes, and every step's duplicate match verifies and gives the recorded result (a
+    blocked step's duplicate match must be unfinished)."""
     state = read_ladder(settings, ladder_id)
     bad: list[str] = []
     if LadderConfig.model_validate(state.config).digest() != state.digest:
         bad.append("plan digest")
     for s in state.steps:
+        events = build_duplicate_log(settings).read(s.duplicate_id)
+        if s.result == "blocked" and not events:
+            continue  # blocked before its first board was logged: nothing to verify
         report = verify_duplicate(settings, s.duplicate_id)
         if not report.consistent:
             bad.append(f"step {s.step_no}: " + ", ".join(report.mismatches))
-        dup = dp.fold(s.duplicate_id, build_duplicate_log(settings).read(s.duplicate_id))
-        if dup.result() != s.result:
+        dup = dp.fold(s.duplicate_id, events)
+        if s.result == "blocked":
+            if dup.done():
+                bad.append(f"step {s.step_no}: blocked, but its duplicate match finished")
+        elif dup.result() != s.result:
             bad.append(f"step {s.step_no}: result")
     return LadderReport(not bad, bad)
 

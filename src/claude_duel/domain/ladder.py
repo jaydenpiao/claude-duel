@@ -8,7 +8,7 @@ worst case could pass ``ladder_max_usd`` (capped).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,6 +20,8 @@ from claude_duel.domain.models import Event
 
 LADDER_CREATED, STEP_FINISHED, LADDER_CAPPED = "ladder_created", "step_finished", "ladder_capped"
 LADDER_SCHEMA_VERSION = 1  # Event.v of ladder events, versioned apart from match events
+# A pairing a vendor policy block (OpenAI cyber_policy) stopped: no verdict, excluded from claims; the ladder goes on.
+StepResult = Result | Literal["blocked"]
 
 
 class Step(BaseModel):
@@ -28,12 +30,12 @@ class Step(BaseModel):
     a: str
     b: str
     duplicate_id: str
-    result: Result  # "first" = side a won
+    result: StepResult  # "first" = side a won
     usd: float = Field(ge=0)
 
 
-def advance(tiers: tuple[int, int], result: Result) -> tuple[int, int]:
-    """The loser steps down; no backed winner moves both sides down."""
+def advance(tiers: tuple[int, int], result: StepResult) -> tuple[int, int]:
+    """The loser steps down; no backed winner (inconclusive, void, blocked) moves both sides down."""
     i, j = tiers
     if result == "first":
         return i, j + 1

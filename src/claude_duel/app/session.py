@@ -31,9 +31,11 @@ def open_match(
     agents: tuple[AgentSpec, ...] | None = None,
     seed: str | None = None,
     warn_drift: bool = True,
+    history_prefix: str = "",
 ) -> MatchState:
     """Load or create a match. New matches pin ``framing_text`` from the current framing rule and store
-    ``settings.rules`` as given (heat is pinned in config; a driver child gets the driver's logged rules)."""
+    ``settings.rules`` as given (heat is pinned in config; a driver child gets the driver's logged rules).
+    ``history_prefix`` limits heat history to match ids under it (a duplicate match scopes it to its own pairing)."""
     try:
         state = store.load(match_id)
     except MatchNotFoundError:
@@ -50,7 +52,7 @@ def open_match(
         if rules.ledger is not None and rules.ledger.heat_window:
             history = rules.ledger.heat_history_matches
             state.heat_refs = heat.history_refs(
-                _history(settings, match_id),
+                _history(settings, match_id, history_prefix),
                 state.agents,
                 HISTORY_MATCHES if history is None else history,
                 source_limit=rules.ledger.heat_ref_cap,
@@ -71,6 +73,7 @@ def play(
     metrics: Metrics,
     observer: EventObserver | None = None,
     budget: CostBudget | None = None,
+    history_prefix: str = "",
 ) -> MatchState:
     """Run or resume a match. A resumed match keeps its saved agents, models, rules and limits.
 
@@ -79,18 +82,19 @@ def play(
     """
     store = build_store(settings)
     with store.lock(match_id):
-        state = open_match(store, settings, match_id)
+        state = open_match(store, settings, match_id, history_prefix=history_prefix)
         engine = build_engine(settings, metrics, store, state.agents, observer, budget)
         engine.replay_to_observer(state)
         return engine.run(state)
 
 
-def _history(settings: Settings, match_id: str) -> list[MatchState]:
-    """Other matches in this store, folded from their logs (no secrets); unreadable logs are skipped."""
+def _history(settings: Settings, match_id: str, prefix: str = "") -> list[MatchState]:
+    """Other matches in this store whose ids start with ``prefix``, folded from their logs (no secrets); unreadable
+    logs are skipped."""
     log_ = build_event_log(settings)
     out = []
     for other in log_.ids():
-        if other == match_id:
+        if other == match_id or not other.startswith(prefix):
             continue
         try:
             out.append(ev.fold(other, log_.read(other)))

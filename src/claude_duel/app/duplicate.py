@@ -110,7 +110,9 @@ def _half(
     budget: CostBudget,
 ) -> MatchState:
     half_settings = settings.model_copy(update={"agents": dp.half_agents(state.agents, half), "seed": seed})
-    return play(half_settings, state.half_id(k, half, replay_no), metrics, observer, budget)
+    # heat history is this pairing's own earlier halves only: never another pairing, step or run in the store
+    scope = f"{state.duplicate_id}-"
+    return play(half_settings, state.half_id(k, half, replay_no), metrics, observer, budget, history_prefix=scope)
 
 
 @dataclass(frozen=True)
