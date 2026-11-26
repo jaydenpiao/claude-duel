@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import signal
 import sys
 import threading
 import time
@@ -11,7 +13,8 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.providers.fake import TEMPLATES, is_template
-from claude_duel.adapters.sandbox.common import execute
+from claude_duel.adapters.sandbox import common
+from claude_duel.adapters.sandbox.common import REAP_SECONDS, execute
 from claude_duel.adapters.sandbox.runner import frame
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.domain import policy
@@ -183,3 +186,43 @@ def test_frame_header_round_trips() -> None:
     head, _, rest = frame("print(1)", FLAG, "in\nput", {"RLIMIT_NPROC": 1}).partition("\n")
     assert FLAG in head
     assert rest == "in\nput"
+
+
+def test_cleanup_runs_before_any_unbounded_wait_on_a_surviving_client(tmp_path: Path) -> None:
+    """A client that survives the group kill (as a root `docker run` under `sudo -n` does) keeps stdout open; the
+    cleanup (`docker rm -f` in production) must run before the reader join, and every wait stays bounded."""
+    pidfile = tmp_path / "pid"
+    # The setsid'd grandchild is outside the process group, so killpg cannot reach it; it holds the stdout pipe.
+    script = f"setsid sh -c 'echo $$ > {pidfile}; exec sleep 60' & sleep 60"
+    order: list[str] = []
+
+    def cleanup() -> None:
+        order.append("cleanup")
+        deadline = time.monotonic() + 5
+        while not pidfile.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+
+    lim = SandboxLimits(wall_seconds=1, max_output_bytes=64)
+    started = time.monotonic()
+    r = execute(["sh", "-c", script], "", lim, env={"PATH": "/usr/bin:/bin"}, wall_seconds=1, cleanup=cleanup)
+    assert r.timed_out
+    assert order == ["cleanup"]
+    assert time.monotonic() - started < 1 + REAP_SECONDS
+
+
+def test_reaping_is_bounded_even_if_cleanup_cannot_stop_the_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(common, "REAP_SECONDS", 0.5)
+    pidfile = tmp_path / "pid"
+    script = f"setsid sh -c 'echo $$ > {pidfile}; exec sleep 30' & sleep 30"
+    lim = SandboxLimits(wall_seconds=1, max_output_bytes=64)
+    started = time.monotonic()
+    try:
+        r = execute(["sh", "-c", script], "", lim, env={"PATH": "/usr/bin:/bin"}, wall_seconds=1)
+        assert r.timed_out
+        assert time.monotonic() - started < 1 + 2 * 0.5 + 1
+    finally:
+        if pidfile.exists():
+            os.kill(int(pidfile.read_text()), signal.SIGKILL)
