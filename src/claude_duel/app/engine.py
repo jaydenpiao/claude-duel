@@ -305,7 +305,7 @@ class MatchEngine:
     def _build(self, state: MatchState) -> None:
         for agent in state.agents:
             for index in range(state.rules.challenges_per_round):
-                cid = challenge_id(state.match_id, state.round, agent.name, index)
+                cid = challenge_id(state.match_id, state.round, state.seat(agent.name), index)
                 if cid in state.challenges:
                     continue  # idempotent resume
                 try:
@@ -339,7 +339,7 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
-                agent,
+                state.seat(agent),
                 state.round,
                 index,
                 state.rules,
@@ -745,7 +745,7 @@ class MatchEngine:
         if key in state.allocate_started:
             return None, None  # already paid or started; settle without a second call
         prompt = agents.allocate_prompt(
-            attacker,
+            state.seat(attacker),
             state.round,
             rule.attack_tokens,
             rule.min_alloc,
@@ -842,7 +842,7 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=False, reason=empty)
             pairs = [(a.payload, a.output) for a in history]
             prompt = agents.attack_prompt(
-                attacker,
+                state.seat(attacker),
                 ch.id,
                 spec.title,
                 _with_terrain(spec.description, state.terrains.get(ch.id)),

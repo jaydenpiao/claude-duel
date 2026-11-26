@@ -63,6 +63,7 @@ MODES["ladder"] = _LEDGER.model_copy(
         "max_attempts": 3,
         "scoring": ScoringRule(kind="ledger", round_weight="flat"),
         "ledger": _SEALED.model_copy(update={"terrain": "none"}),
+        "neutral_ids": True,  # models see seats (p1/p2), never model or vendor names
     }
 )
 

@@ -30,6 +30,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Ladder plans send one reasoning effort to every model: `[caps] effort = "low" | "medium" | "high"` (default `medium`, or `--effort`) sets `Rules.reasoning_effort`, so gpt-6-luna no longer runs on its small-model `low` default while Claude and the larger GPT models run on vendor defaults. The final and pilot plans pin `medium`. Effort is part of the plan digest.
+- Ladder matches name agents by seat in everything a model sees: `Rules.neutral_ids` (on in the `ladder` preset) makes prompts (`AGENT: p1` / `p2`, where p1 leads that half), the memory scoreboard and challenge ids (`r1-p1-0-…`) carry no agent, model or vendor name. Logs, display and challenge authors keep the real names. Other presets keep name-based ids, so older logs replay unchanged.
 - Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
   for imports of escape modules such as `os` or `subprocess`.
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
