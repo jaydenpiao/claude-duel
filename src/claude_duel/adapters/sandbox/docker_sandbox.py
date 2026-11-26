@@ -20,8 +20,10 @@ TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires
 SIGNAL_EXIT_BASE = 128  # container exit status 128+N means killed by signal N
 _PROBE_SECONDS = 10.0
 _SELF_TEST_FLAG = "DUEL{" + "0" * 32 + "}"
-# Docker's default seccomp profile (moby v26.1.5) minus ptrace, process_vm_readv/writev and personality. A same-uid
-# ptrace could stop the in-container `timeout` watchdog; the host-side kill deadline in `execute` is the backstop.
+# Docker's default seccomp profile (moby v26.1.5, profiles/seccomp/default.json) minus ptrace, process_vm_readv/writev
+# and personality. A same-uid ptrace could stop the in-container `timeout` watchdog; the host-side kill deadline in
+# `execute` is the backstop. Refresh: copy default.json from a newer moby tag, drop the DENIED_SYSCALLS names from its
+# allow rules, and run test_profile_is_dockers_default_minus_the_tracing_calls.
 SECCOMP_PROFILE = Path(__file__).with_name("seccomp.json")
 DENIED_SYSCALLS = frozenset({"ptrace", "process_vm_readv", "process_vm_writev", "personality"})
 
