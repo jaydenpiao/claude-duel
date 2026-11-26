@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits
+from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, vendor_of
 from claude_duel.domain.models import TIMEOUTS_TO_VOID, AgentSpec, Purpose, Rules
 
 REFUNDED = TIMEOUTS_TO_VOID - 1  # paid attack calls past max_attempts: the refunded timeouts before a void
@@ -65,14 +66,16 @@ def agent_usd(rules: Rules, model: str, *, worst: bool = True) -> float:
     pin, pout = DEFAULT_PRICES[model]
     challenges = rules.rounds * rules.challenges_per_round
 
-    def usd(calls: int, purpose: Purpose) -> float:
-        out = rules.output_cap(purpose=purpose) if worst else OUT_TOKENS
+    ratio = rules.arena_ratio.get(vendor_of(model), 1.0) if rules.accounting == "arena" else 1.0
+
+    def usd(calls: int, purpose: Purpose) -> float:  # an arena-unit cap is sent as cap / ratio vendor tokens
+        out = math.ceil(rules.output_cap(purpose=purpose) / ratio) if worst else OUT_TOKENS
         return calls * (IN_TOKENS * pin + out * pout) / 1_000_000
 
     tries = rules.max_attempts + rules.early_bonus_attempts + (REFUNDED if worst else 0)
     attacks = usd(challenges * tries, "attack")
     if rules.ledger is not None:  # attack replies are bounded by the stakes, priced at the dearer rate
-        attacks = min(attacks, rules.rounds * rules.ledger.attack_tokens * max(pin, pout) / 1_000_000)
+        attacks = min(attacks, rules.rounds * rules.ledger.attack_tokens / ratio * max(pin, pout) / 1_000_000)
     builds = usd(challenges * (_builds(rules) if worst else 1), "build")
     allocs = usd(rules.rounds, "allocate") if rules.ledger is not None else 0.0
     return builds + attacks + allocs

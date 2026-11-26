@@ -12,7 +12,7 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
+from claude_duel.domain import arena_units, contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import (
     DeadlineExceededError,
@@ -278,10 +278,16 @@ class MatchEngine:
             usd = self._budget.charge(state.match_id, model, completion, reservation, key)
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
+        arena: dict[str, object] = {}
+        if state.rules.accounting == "arena":
+            nbytes = arena_units.request_bytes(request.system, request.prompt, request.json_schema)
+            unit_in, unit_out = arena_units.units(nbytes, completion.input_tokens, completion.output_tokens)
+            completion = completion.model_copy(update={"units": unit_in + unit_out})
+            arena = {"input_bytes": nbytes, "units_in": unit_in, "units_out": unit_out}
         charged: dict[str, object] = {
             "agent": agent,
             "model": model,
-            "tokens": completion.total_tokens,
+            "tokens": completion.spent_tokens,
             "usd": usd,
             "elapsed_ms": round(elapsed * 1000),
             "input_tokens": completion.input_tokens,
@@ -292,6 +298,7 @@ class MatchEngine:
             "summary": self._summary(state, completion.reasoning_summary),
         }
         charged["reasoning_effort"] = completion.reasoning_effort
+        charged.update(arena)  # present only in arena units, so vendor-token logs stay byte-identical
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
@@ -493,7 +500,7 @@ class MatchEngine:
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
             repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
-            rest = None if left is None else left - completion.total_tokens
+            rest = None if left is None else left - completion.spent_tokens
             if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
                 return completion
             completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
@@ -517,6 +524,9 @@ class MatchEngine:
         tokens = self._output_cap(state, agent, purpose)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
+        if state.rules.accounting == "arena":  # the cap is in arena units: send the vendor's equivalent
+            provider = next((a.provider for a in state.agents if a.name == agent), "")
+            tokens = arena_units.vendor_tokens(tokens, state.rules.arena_ratio.get(provider, 1.0))
         return CompletionRequest(
             system=agents.system_prompt(state.framing_text),
             prompt=prompt,
@@ -904,7 +914,7 @@ class MatchEngine:
         ground: str | None = None,
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
-        tokens = completion.total_tokens
+        tokens = completion.spent_tokens
         if completion.refused or completion.truncated:  # typed flags: challenge stdout can never claim either
             cut = not completion.refused
             if cut:
@@ -917,7 +927,7 @@ class MatchEngine:
             move = agents.parse_attack(completion.text)
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
-            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
+            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=tokens, usd_micros=micros)
         payload = move.payload
         if state.rules.attacker_solver and move.solver.strip():
             self._metrics.incr("attack.solver")
@@ -936,7 +946,7 @@ class MatchEngine:
         output = CAPTURED if flag in run.stdout else _sandbox_output(redact(run.stdout, (flag,))[:500])
         if state.rules.integrity_control:
             self._control(state, agent, payload, flag)
-        return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
+        return AttackAttempt(payload=payload, output=output, tokens=tokens, usd_micros=micros)
 
     def _control(self, state: MatchState, agent: str, payload: str, flag: str) -> None:
         """Integrity control: the same payload and flag on a program that never prints it. A capture there means

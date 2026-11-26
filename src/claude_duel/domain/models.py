@@ -210,6 +210,14 @@ class Rules(_Frozen):
         default=False,
         description="prompts, memory and challenge ids name agents by seat (p1, p2), never by name, model or vendor",
     )
+    accounting: Literal["vendor", "arena"] = Field(
+        default="vendor",
+        description="stakes, clock, wallet and output caps in vendor tokens, or vendor-neutral arena units",
+    )
+    arena_ratio: dict[str, float] = Field(
+        default_factory=dict,
+        description="arena units per vendor output token by provider (1.0 when absent); sets max_tokens in arena units",
+    )
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
