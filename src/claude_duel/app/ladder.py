@@ -30,8 +30,8 @@ from claude_duel.ports import EventObserver, Metrics
 class Row:
     a: str
     b: str
-    worst_usd: float  # boards_max boards, every board replayed fault_replays times, every reply at its cap
-    typical_usd: float  # boards_max boards, no retries or replays, assumed reply sizes
+    worst_usd: float  # boards_max boards, every reply at its cap
+    typical_usd: float  # boards_max boards, no retries, assumed reply sizes
     calibrated_usd: float = 0.0  # boards_max boards at each model's measured token use (app/calibration.py)
 
 
@@ -60,9 +60,8 @@ def match_usd(cfg: LadderConfig, a: str, b: str, *, basis: Basis = "worst") -> f
         half = calibration.calibrated_agent_usd(rules, a) + calibration.calibrated_agent_usd(rules, b)
         return rule.boards_max * 2 * half
     worst = basis == "worst"
-    tries = 1 + rule.fault_replays if worst else 1
     half = agent_usd(rules, a, worst=worst) + agent_usd(rules, b, worst=worst)
-    return rule.boards_max * tries * 2 * half
+    return rule.boards_max * 2 * half
 
 
 def basis_usd(cfg: LadderConfig, a: str, b: str) -> float:

@@ -1,7 +1,7 @@
 """No-fluke ladder (design-no-fluke §4.1): a pure fold over ``<id>.ladder.jsonl``.
 
 Each step is one duplicate match between side a's and side b's current models. The loser steps down its list; an
-inconclusive or void step moves both sides down. The ladder ends when either list runs out, or when the next step's
+step with no backed winner moves both sides down. The ladder ends when either list runs out, or when the next step's
 worst case could pass ``ladder_max_usd`` (capped).
 """
 
@@ -35,7 +35,7 @@ class Step(BaseModel):
 
 
 def advance(tiers: tuple[int, int], result: StepResult) -> tuple[int, int]:
-    """The loser steps down; no backed winner (inconclusive, void, blocked, capped) moves both sides down (a
+    """The loser steps down; no backed winner (inconclusive, blocked, capped) moves both sides down (a
     ``capped`` step also ends the ladder)."""
     i, j = tiers
     if result == "first":

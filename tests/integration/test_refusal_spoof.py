@@ -149,8 +149,8 @@ def test_author_stdout_cannot_void_a_duplicate_board(make_engine, new_state, eve
     tries = state.attempts[key]
     assert len(tries) == 3
     assert all(x.output.startswith(TRUNCATED) for x in tries)  # the spoofed text is stored as plain stdout
-    assert not any(x.truncated or dp.attack_fault(x) for x in tries)
-    assert dp.fault(state) == ""  # the board is scored, not void
+    assert not any(x.truncated or dp.attack_truncated(x) for x in tries)
+    assert dp.truncations(state) == {}  # stdout cannot add to the per-agent truncation count either
     logged = [e.data["attempt"] for e in event_log.read(state.match_id) if e.type == ev.ATTACK_ATTEMPTED]
     assert all("truncated" not in a for a in logged)
     assert replay(state, event_log.read(state.match_id)).consistent

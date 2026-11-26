@@ -53,23 +53,22 @@ def _state(diffs: tuple[int, ...] | list[int] = (), rule: dp.DuplicateRule = RUL
 
 def test_seeds_and_halves_are_deterministic_and_mirrored() -> None:
     assert dp.board_seed("s", 1) == dp.board_seed("s", 1) != dp.board_seed("s", 2)
-    assert dp.replay_seed("b", 0) == "b" != dp.replay_seed("b", 1) != dp.replay_seed("b", 2)
     assert dp.half_agents((A, B), 0) == (A, B)
     assert dp.half_agents((A, B), 1) == (B, A)
-    assert _state().half_id(3, 1, 2) == "d-b3b-r2"
+    assert _state().half_id(3, 1) == "d-b3b"
 
 
 def test_identical_play_in_both_seats_scores_zero_and_big_swings_clip() -> None:
     st = _state()
     seat_edge = (_half("h1", (A, B), {"gpt-x": 30, "claude-y": 0}), _half("h2", (B, A), {"claude-y": 30, "gpt-x": 0}))
-    assert dp.board_of(st, 1, "x", seat_edge, 0).diff == 0  # first-seat advantage cancels across the board
+    assert dp.board_of(st, 1, "x", seat_edge).diff == 0  # first-seat advantage cancels across the board
     cap = dp.board_cap(RULE, Rules())
     assert cap == 2 * Rules().scoring.defense_points * 3 * Rules().rounds  # linear: the last round weighs most
     flat = Rules().model_copy(update={"scoring": Rules().scoring.model_copy(update={"round_weight": "flat"})})
     assert dp.board_cap(RULE, flat) == 2 * Rules().scoring.defense_points * 3
     assert dp.board_cap(RULE, modes.preset("ladder")) == 2 * Rules().scoring.defense_points * 3
     blowout = (_half("h1", (A, B), {"gpt-x": 500}), _half("h2", (B, A), {"gpt-x": 400}))
-    board = dp.board_of(st, 1, "x", blowout, 0)
+    board = dp.board_of(st, 1, "x", blowout)
     assert (board.raw, board.diff) == (900, cap)
 
 
@@ -82,28 +81,29 @@ def _forfeit(reason: str, truncated: bool) -> dict[str, Any]:
     }
 
 
-def test_harness_faults_void_and_model_failures_score() -> None:
+def test_truncation_is_scored_like_a_refusal_and_counted() -> None:
     cut = _forfeit(f"malformed: {TRUNCATED}", truncated=True)
-    assert dp.fault(_half("h", (A, B), {}, **cut)) == "build truncated"
-    quoted = _forfeit(f"malformed: {TRUNCATED}", truncated=False)  # the text alone never voids
-    assert dp.fault(_half("h", (A, B), {}, **quoted)) == ""
+    assert dp.truncations(_half("h", (A, B), {}, **cut)) == {"gpt-x": 1}
+    quoted = _forfeit(f"malformed: {TRUNCATED}", truncated=False)  # the text alone is never counted
+    assert dp.truncations(_half("h", (A, B), {}, **quoted)) == {}
     near_miss = _forfeit("reference payload does not reveal flag", truncated=False)
-    assert dp.fault(_half("h", (A, B), {}, **near_miss)) == ""
+    assert dp.truncations(_half("h", (A, B), {}, **near_miss)) == {}
     junk = _forfeit("malformed: no JSON object found", truncated=False)
-    assert dp.fault(_half("h", (A, B), {}, **junk)) == ""  # format failures are the model's loss
-    tries = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1, truncated=True)]}
-    assert dp.fault(_half("h", (A, B), {}, attempts=tries)) == "attack truncated"
-    spoof = {"k": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1)]}  # challenge stdout, not the engine
-    assert dp.fault(_half("h", (A, B), {}, attempts=spoof)) == ""
+    assert dp.truncations(_half("h", (A, B), {}, **junk)) == {}  # format failures are the model's loss, not counted
+    tries = {"c:claude-y": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1, truncated=True)]}
+    assert dp.truncations(_half("h", (A, B), {}, attempts=tries)) == {"claude-y": 1}
+    spoof = {"c:claude-y": [AttackAttempt(payload="?", output=TRUNCATED, tokens=1)]}  # challenge stdout
+    assert dp.truncations(_half("h", (A, B), {}, attempts=spoof)) == {}
     st = _state()
     halves = (_half("h1", (A, B), {"gpt-x": 60}, **cut), _half("h2", (B, A), {}))
-    board = dp.board_of(st, 1, "x", halves, 2)
-    assert (board.void, board.diff, board.fault, board.replays) == (True, 0, "build truncated", 2)
+    board = dp.board_of(st, 1, "x", halves)
+    assert board.diff == 60  # scored: no re-roll, no void
+    assert board.truncated == {"gpt-x": 1}
 
 
 def test_board_usd_sums_both_halves() -> None:
     halves = (_half("h1", (A, B), {}, usage=Usage(usd=0.25)), _half("h2", (B, A), {}, usage=Usage(usd=0.5)))
-    assert dp.board_of(_state(), 1, "x", halves, 0).usd == pytest.approx(0.75)
+    assert dp.board_of(_state(), 1, "x", halves).usd == pytest.approx(0.75)
 
 
 def test_sign_test_and_bootstrap() -> None:
@@ -170,16 +170,6 @@ def test_margin_rule_calls_on_summed_margin_not_win_count() -> None:
     assert close.result() == "inconclusive"  # too close to call: no winner at boards_max
 
 
-def test_too_many_void_boards_is_void() -> None:
-    st = _state([10] * 5)
-    for i in range(3):
-        st.boards.append(dp.Board(board_no=6 + i, seed="x", halves=("a", "b"), raw=0, diff=0, void=True))
-    assert st.void_share_exceeded()  # 3 of 8 > 25%
-    assert st.result() == "void"
-    st.boards[5] = dp.Board(board_no=6, seed="x", halves=("a", "b"), raw=1, diff=1)
-    assert not st.void_share_exceeded()  # 2 of 8 is not over 25%
-
-
 def test_rule_validates_its_range() -> None:
     with pytest.raises(ValueError, match="boards_min"):
         dp.DuplicateRule(boards_min=9, boards_max=8)
@@ -223,16 +213,19 @@ def test_capped_ends_the_match_on_played_boards() -> None:
     assert dp.next_board_usd(_state()) == 0.0
 
 
-def test_void_scope_matches_the_labeled_failures() -> None:
-    """The 140 labeled failures (failure-labels-2026-11-05): exactly the 8 harness faults void, the rest score."""
+def test_truncation_flags_match_the_labeled_failures() -> None:
+    """The 140 labeled failures (failure-labels-2026-11-05): exactly the 8 truncations are flagged (and counted), and
+    all 140 are scored."""
     rows = list(csv.DictReader((FIXTURES / "failure-labels-2026-11-05.csv").open(encoding="utf-8")))
     assert len(rows) == 140
     for row in rows:
         reason = row["reason"]  # the engine sets the typed flag exactly when it wrote the sentinel itself
         if row["event_type"] == "challenge_validated_invalid":
             half = _half("h", (A, B), {}, **_forfeit(reason, truncated=reason == f"malformed: {TRUNCATED}"))
-            voids = dp.build_fault(half, "c")
+            cut = dp.build_truncated(half, "c")
         else:
-            voids = dp.attack_fault(AttackAttempt(payload="?", output=reason, tokens=1, truncated=reason == TRUNCATED))
-        assert voids == (row["category"] == "harness_fault_or_truncation"), row
+            cut = dp.attack_truncated(
+                AttackAttempt(payload="?", output=reason, tokens=1, truncated=reason == TRUNCATED)
+            )
+        assert cut == (row["category"] == "harness_fault_or_truncation"), row
     assert sum(r["category"] == "harness_fault_or_truncation" for r in rows) == 8

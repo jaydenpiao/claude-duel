@@ -85,17 +85,13 @@ def _board(
     observer: EventObserver | None,
     budget: CostBudget,
 ) -> dp.Board | None:
-    """Both halves on the board seed; a harness fault replays the board on a derived seed, then counts it void."""
+    """Both halves on the board seed; ``None`` when a half did not complete (failed or capped: resumable)."""
     k = state.next_board()
-    for replay_no in range(state.rule.fault_replays + 1):
-        seed = dp.replay_seed(dp.board_seed(state.seed, k), replay_no)
-        halves = tuple(_half(settings, state, k, h, replay_no, seed, metrics, observer, budget) for h in (0, 1))
-        if any(m.stage is not Stage.COMPLETE for m in halves):
-            return None
-        board = dp.board_of(state, k, seed, (halves[0], halves[1]), replay_no)
-        if not board.void:
-            return board
-    return board
+    seed = dp.board_seed(state.seed, k)
+    halves = tuple(_half(settings, state, k, h, seed, metrics, observer, budget) for h in (0, 1))
+    if any(m.stage is not Stage.COMPLETE for m in halves):
+        return None
+    return dp.board_of(state, k, seed, (halves[0], halves[1]))
 
 
 def _half(
@@ -103,7 +99,6 @@ def _half(
     state: dp.DuplicateState,
     k: int,
     half: int,
-    replay_no: int,
     seed: str,
     metrics: Metrics,
     observer: EventObserver | None,
@@ -112,7 +107,7 @@ def _half(
     half_settings = settings.model_copy(update={"agents": dp.half_agents(state.agents, half), "seed": seed})
     # heat history is this pairing's own earlier halves only: never another pairing, step or run in the store
     scope = f"{state.duplicate_id}-"
-    return play(half_settings, state.half_id(k, half, replay_no), metrics, observer, budget, history_prefix=scope)
+    return play(half_settings, state.half_id(k, half), metrics, observer, budget, history_prefix=scope)
 
 
 @dataclass(frozen=True)
@@ -133,6 +128,6 @@ def verify_duplicate(settings: Settings, duplicate_id: str) -> DuplicateReport:
                 bad.append(f"board {b.board_no}: {m.match_id} replay")
             if (m.rules, m.limits) != (state.rules, state.limits):
                 bad.append(f"board {b.board_no}: {m.match_id} rules differ from the pinned rules")
-        if dp.board_of(state, b.board_no, b.seed, halves, b.replays) != b:
+        if dp.board_of(state, b.board_no, b.seed, halves) != b:
             bad.append(f"board {b.board_no}: result")
     return DuplicateReport(not bad, bad)
