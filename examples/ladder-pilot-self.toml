@@ -19,3 +19,4 @@ build = 24000
 allocate = 2000
 attack = 8000
 max_attempts = 3
+effort = "medium"  # one reasoning effort sent to every model (default medium; pending confirmation)

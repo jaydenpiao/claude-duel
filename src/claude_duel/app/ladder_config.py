@@ -58,6 +58,9 @@ class CapsPlan(_Plan):
     allocate: int
     attack: int
     max_attempts: int = 3
+    # One reasoning effort sent to every model in the plan (Claude output_config.effort, OpenAI reasoning.effort), so
+    # no model runs on its vendor's default or on a small-model default such as gpt-6-luna's "low".
+    effort: Literal["low", "medium", "high"] = "medium"
 
 
 class LadderConfig(_Plan):
@@ -78,10 +81,11 @@ class LadderConfig(_Plan):
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     def rules(self) -> Rules:
-        """The ``ladder`` preset with this plan's per-call caps and tries."""
+        """The ``ladder`` preset with this plan's per-call caps, tries and the one effort every model is sent."""
         caps = CallCaps(build=self.caps.build, allocate=self.caps.allocate, attack=self.caps.attack)
         base = preset("ladder").model_dump()
-        return Rules.model_validate(base | {"max_attempts": self.caps.max_attempts, "call_caps": caps.model_dump()})
+        plan = {"max_attempts": self.caps.max_attempts, "call_caps": caps.model_dump()}
+        return Rules.model_validate(base | plan | {"reasoning_effort": self.caps.effort})
 
     def duplicate_rule(self) -> DuplicateRule:
         return DuplicateRule(
@@ -164,7 +168,7 @@ def _check_numbers(cfg: LadderConfig) -> None:
     boards = cfg.match
     if not 1 <= boards.boards_min <= boards.boards_max <= MAX_BOARDS:
         raise ConfigError(f"boards_min must be >= 1 and <= boards_max, and boards_max <= {MAX_BOARDS}")
-    positive = {**cfg.budget.model_dump(exclude={"basis"}), **cfg.caps.model_dump()}
+    positive = {**cfg.budget.model_dump(exclude={"basis"}), **cfg.caps.model_dump(exclude={"effort"})}
     for key, value in positive.items():
         if value <= 0:
             raise ConfigError(f"{key} must be > 0")

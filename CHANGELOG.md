@@ -29,6 +29,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Replay no longer flags ledger logs written before #199 (no round points) as tampered.
 
 ### Changed
+- Ladder plans send one reasoning effort to every model: `[caps] effort = "low" | "medium" | "high"` (default `medium`, or `--effort`) sets `Rules.reasoning_effort`, so gpt-6-luna no longer runs on its small-model `low` default while Claude and the larger GPT models run on vendor defaults. The final and pilot plans pin `medium`. Effort is part of the plan digest.
 - Findings: policy rejections are a separate, lower-severity `policy-reject` category; `sandbox-escape` (high) is kept
   for imports of escape modules such as `os` or `subprocess`.
 - `duel replay` prints recomputed/recorded scores keyed by model label instead of internal agent names.
