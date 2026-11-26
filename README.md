@@ -40,6 +40,10 @@ OPENAI_API_KEY=... duel --config configs/dev.toml run   # real models (see below
 
 To use OpenAI, set `provider = "openai"` on the agents in a config file, as in `tests/e2e/test_cli.py`. Only low-cost models from the price table are allowed (default `gpt-6-luna`).
 
+`duel duplicate` (no-fluke play) on the fake provider, $0: mirrored boards with seats swapped, then the call and a verify pass.
+
+![`duel duplicate` on the fake provider: mirrored boards, record, verdict, verified](docs/duplicate.gif)
+
 ## Architecture
 ```mermaid
 flowchart LR
@@ -139,4 +143,4 @@ Premium (refused unless the config sets `allow_premium = true`): `claude-sonnet-
 
 Releases and environments: [ADR 0005](docs/adr/0005-release-and-environments.md).
 
-The hero GIF is rendered from `docs/demo.tape` (`vhs docs/demo.tape`, fake provider, $0; keep it under 2 MB).
+The hero GIF is rendered from `docs/demo.tape` (`vhs docs/demo.tape`, fake provider, $0; keep it under 2 MB). The duplicate GIF is `docs/duplicate.tape`, same way.

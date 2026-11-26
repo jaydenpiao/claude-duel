@@ -41,7 +41,7 @@ SAFE_BUILTINS = frozenset(
     }
 )  # fmt: skip
 # CPython introspection attributes without a leading underscore (generator/coroutine/frame/code/traceback).
-_INTROSPECTION_ATTR = re.compile(r"^(gi|cr|ag|f|co|tb)_|^(mro|modules|builtins)$")
+INTROSPECTION_ATTR = re.compile(r"^(gi|cr|ag|f|co|tb)_|^(mro|modules|builtins)$")
 # str.format/format_map/string.Formatter do getattr on fields built at runtime (red-team F1).
 FORMAT_ATTRS = frozenset({"format", "format_map", "vformat", "Formatter"})
 _FORMAT_ATTR = re.compile(r"\{[^{}]*[.\[]")
@@ -216,7 +216,7 @@ def _check_name(node: ast.Name, parent: ast.AST | None) -> str | None:
 
 
 def _check_attribute(node: ast.Attribute) -> str | None:
-    if node.attr.startswith("_") or _INTROSPECTION_ATTR.search(node.attr):
+    if node.attr.startswith("_") or INTROSPECTION_ATTR.search(node.attr):
         return f"banned attribute: {node.attr}"
     if node.attr in FORMAT_ATTRS:
         return f"banned attribute: {node.attr} (use an f-string or %)"
