@@ -1,0 +1,25 @@
+# No-fluke ladder, option (c): cut per-call caps, 4-6 boards. Expect more truncation voids (untested). Dollar figures are estimates.
+# SUPERSEDED (2026-11-26): jayden picked ladder-final.toml; kept only as a dry-run and test fixture. Do not run.
+run_date = "2026-11-20"  # required; drives the model cutoffs (gpt-5-nano retires 2026-12-11), never the wall clock
+
+[sides]  # strongest first
+a = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+b = ["gpt-6-astra", "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6-luna", "gpt-5-mini", "gpt-5-nano"]
+
+[start_tier]
+a = 0
+b = 0
+
+[match]
+boards_min = 4
+boards_max = 6
+
+[budget]
+match_max_usd = 14.0
+ladder_max_usd = 55.0
+
+[caps]  # per-call output tokens, the same for both sides
+build = 12000
+allocate = 2000
+attack = 4000
+max_attempts = 2

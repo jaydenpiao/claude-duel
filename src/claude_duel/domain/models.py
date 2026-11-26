@@ -178,6 +178,17 @@ class DeepRule(_Frozen):
 RULES_VERSION = 2  # bump when a Rules default changes meaning; logged with every match
 
 
+Purpose = Literal["build", "attack", "allocate"]
+
+
+class CallCaps(_Frozen):
+    """Per-purpose output caps (the no-fluke ladder's ``[caps]``); same for both sides by construction."""
+
+    build: int = Field(ge=64, le=64_000)
+    allocate: int = Field(ge=64, le=64_000)
+    attack: int = Field(ge=64, le=64_000)
+
+
 class Rules(_Frozen):
     mode: str = Field(default="classic", description="preset name (domain/modes.py) this match started from")
     rules_version: int = RULES_VERSION
@@ -195,9 +206,22 @@ class Rules(_Frozen):
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
     )
+    neutral_ids: bool = Field(
+        default=False,
+        description="prompts, memory and challenge ids name agents by seat (p1, p2), never by name, model or vendor",
+    )
+    accounting: Literal["vendor", "arena"] = Field(
+        default="vendor",
+        description="stakes, clock, wallet and output caps in vendor tokens, or vendor-neutral arena units",
+    )
+    arena_ratio: dict[str, float] = Field(
+        default_factory=dict,
+        description="arena units per vendor output token by provider (1.0 when absent); sets max_tokens in arena units",
+    )
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
+    call_caps: CallCaps | None = Field(default=None, description="per-purpose output caps; None: max_output_tokens")
     match_deadline_s: int = Field(default=900, ge=1, description="match fails when recorded provider time passes it")
     challenge_form: Literal["program", "check"] = Field(
         default="program", description="program: authors write all I/O; check: authors write def check(s) only"
@@ -269,9 +293,13 @@ class Rules(_Frozen):
             return min(cap, PARSE_BYTES, admit_bytes(self))
         return cap
 
-    def output_cap(self, own: int | None = None) -> int:
-        """Per-reply output tokens: an agent's own cap, else the rules'; the wallet cap only lowers it."""
-        tokens = self.max_output_tokens if own is None else own
+    def output_cap(self, own: int | None = None, purpose: Purpose | None = None) -> int:
+        """Per-reply output tokens: an agent's own cap, else the rules' (per purpose when ``call_caps`` is set);
+        the wallet cap only lowers it."""
+        rule = self.max_output_tokens
+        if self.call_caps is not None and purpose is not None:
+            rule = getattr(self.call_caps, purpose)
+        tokens = rule if own is None else own
         cap = self.wallet.max_output_tokens
         return tokens if cap is None else min(tokens, cap)
 
@@ -302,6 +330,8 @@ class Rules(_Frozen):
         ledger = data.get("ledger")
         if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
             ledger.pop("heat_token_cap", None)
+        if data.get("call_caps") is None:
+            data.pop("call_caps", None)  # absent unless set, so logs without it stay byte-identical
         return data
 
 
@@ -370,6 +400,7 @@ class AttackAttempt(_Frozen):
     usd_micros: int = 0  # round(usd * 1e6) charged at call time; the recorded price pin (0 in pre-#35 logs)
     refused: bool = False  # vendor declined this try; omitted from the log when false (ADR 0016)
     timeout: bool = False  # sandbox wall/signal kill; try is refunded; omitted from the log when false
+    truncated: bool = False  # the attacker's reply hit max_output_tokens twice (engine-set, never read from stdout)
 
     @property
     def captured(self) -> bool:
@@ -377,12 +408,12 @@ class AttackAttempt(_Frozen):
         return self.output == CAPTURED
 
     def logged(self) -> dict[str, object]:
-        """Event payload: ``refused`` and ``timeout`` are present only when true, so older logs stay byte-identical."""
+        """Event payload: the typed flags (``refused``, ``timeout``, ``truncated``) are present only when true, so
+        older logs stay byte-identical."""
         data = self.model_dump(mode="json")
-        if not data.get("refused"):
-            data.pop("refused", None)
-        if not data.get("timeout"):
-            data.pop("timeout", None)
+        for flag in ("refused", "timeout", "truncated"):
+            if not data.get(flag):
+                data.pop(flag, None)
         return data
 
 
@@ -506,6 +537,7 @@ class MatchState(BaseModel):
     attempts: dict[str, list[AttackAttempt]] = Field(default_factory=dict)
     ghost_runs: dict[str, bool] = Field(default_factory=dict)  # "<round>:<ghost id>><challenge id>" -> hit
     build_errors: dict[str, list[str]] = Field(default_factory=dict)
+    build_truncated: list[str] = Field(default_factory=list)  # challenges whose last rejected build reply was cut off
     last_seq: int = -1
     failure: str | None = None
     failed_stage: Stage | None = None
@@ -533,6 +565,13 @@ class MatchState(BaseModel):
     def opponent(self, name: str) -> str:
         a, b = self.agents
         return b.name if name == a.name else a.name
+
+    def seat(self, name: str) -> str:
+        """How models see ``name``: its seat ("p1" leads this match, "p2" follows) under ``rules.neutral_ids``, so no
+        prompt or challenge id carries a model or vendor name; else the agent name, as older logs recorded it."""
+        if not self.rules.neutral_ids:
+            return name
+        return "p1" if name == self.agents[0].name else "p2"
 
     def round_challenges(self, round_no: int) -> list[Challenge]:
         return [c for c in self.challenges.values() if c.round == round_no]

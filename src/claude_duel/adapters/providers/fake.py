@@ -130,4 +130,5 @@ class FakeProvider:
 
     @staticmethod
     def _wrap(request: CompletionRequest, text: str) -> Completion:
-        return Completion(text=text, input_tokens=len(request.prompt) // 4, output_tokens=len(text) // 4)
+        out = min(len(text) // 4, request.max_tokens)  # like a vendor: never bills past the output cap
+        return Completion(text=text, input_tokens=len(request.prompt) // 4, output_tokens=out)

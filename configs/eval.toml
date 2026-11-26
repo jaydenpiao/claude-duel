@@ -1,0 +1,9 @@
+# Final eval profile (jayden, 2026-11-26): the pilot, its two controls and the final ladder run twice.
+# Secrets come from env only (ANTHROPIC_API_KEY, OPENAI_API_KEY). Each vendor key's own hard limit must be at least
+# key_limit_usd. `duel --config configs/eval.toml ladder examples/ladder-pilot.toml`.
+allow_premium = true
+
+[budget]
+# $82.06 already in the ledger (2026-11-26) + $15 pilot and controls + 2 x $675 ladder_max_usd = $1447.06
+lifetime_max_usd = 1450.0
+key_limit_usd = 1450.0

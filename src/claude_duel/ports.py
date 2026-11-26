@@ -9,10 +9,9 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from claude_duel.domain.models import Event, MatchState, SandboxLimits
+from claude_duel.domain.models import Event, MatchState, Purpose, SandboxLimits
 from claude_duel.domain.results import MatchProjection, RatingRow, RunCounts, RunStatus, Stored
 
-Purpose = Literal["build", "attack", "allocate"]
 KilledReason = Literal["wall", "signal", "output"]
 KILL_WALL: KilledReason = "wall"
 KILL_SIGNAL: KilledReason = "signal"
@@ -49,10 +48,16 @@ class Completion(BaseModel):
     reasoning_summary: str = (
         ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
     )
+    units: int | None = None  # engine-set arena units (Rules.accounting = "arena"); None: vendor tokens count
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    @property
+    def spent_tokens(self) -> int:
+        """What stakes, the clock and wallets count: arena units when set, else vendor tokens."""
+        return self.units if self.units is not None else self.total_tokens
 
 
 class LLMProvider(Protocol):
@@ -110,9 +115,38 @@ class SpendLedger(Protocol):
 
     def spent_usd(self, prefix: str) -> float: ...
 
-    def reserve(self, match_id: str, model: str, usd: float) -> str: ...
+    def reserve(
+        self,
+        match_id: str,
+        model: str,
+        usd: float,
+        caps: Sequence[tuple[str, str, float]] = (),
+        key: str | None = None,
+    ) -> str:
+        """Append a worst-case entry. Under one exclusive lock: refuse if any ``(label, prefix, max_usd)`` cap would
+        pass, and replace an open reservation already holding ``key`` (one attempt, one reservation)."""
+        ...
 
-    def record(self, match_id: str, model: str, tokens: int, usd: float, settles: str | None = None) -> None: ...
+    def record(
+        self,
+        match_id: str,
+        model: str,
+        tokens: int,
+        usd: float,
+        settles: str | None = None,
+        key: str | None = None,
+        reply: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a charge; with ``key`` and ``reply``, the reply is kept durably first so a resume reuses it."""
+        ...
+
+    def settled(self, key: str) -> dict[str, Any] | None:
+        """The kept reply of an attempt already charged under ``key``, or None."""
+        ...
+
+    def forget(self, key: str) -> None:
+        """Drop the kept reply once the attempt's own event is durable."""
+        ...
 
 
 class EventLog(Protocol):

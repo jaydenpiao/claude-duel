@@ -49,6 +49,10 @@ class BudgetExceededError(DuelError):
     """Arena cost circuit breaker tripped."""
 
 
+class SpendLedgerCorruptError(BudgetExceededError):
+    """The spend ledger has a line it cannot trust (torn, unparseable, negative or non-finite usd): spend stops."""
+
+
 class MatchCapError(BudgetExceededError):
     """A match-scoped cap (calls, tokens or $) was reached: the match ends ``CAPPED`` (ADR 0014)."""
 

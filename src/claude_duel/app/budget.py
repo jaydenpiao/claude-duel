@@ -7,8 +7,10 @@ processes can each overshoot the lifetime cap by at most one in-flight call.
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -125,6 +127,15 @@ def make_override(limits: BudgetLimits, field: str, value: float, reason: str, s
     return RunOverride(field=field, default=limits.run_max_usd, value=value, reason=reason.strip())
 
 
+@dataclass(frozen=True)
+class SpendCap:
+    """A spend ceiling over every match whose id starts with ``prefix``, read from the shared ledger."""
+
+    label: str
+    prefix: str
+    max_usd: float
+
+
 class CostBudget:
     def __init__(
         self,
@@ -139,6 +150,10 @@ class CostBudget:
         self._prices = prices
         self.run_calls = 0
         self.run_usd = 0.0
+        # Hard stops: a call whose worst case (its reservation) could take a prefix's spend past its cap is never
+        # made. The caller sets these per ladder step; empty means none.
+        self.hard_caps: tuple[SpendCap, ...] = ()
+        self._reserved: dict[str, tuple[int, int]] = {}  # reservation id -> (input, output) tokens it covers
 
     def cost(self, model: str, completion: Completion) -> float:
         pin, pout = self._prices[model]
@@ -170,21 +185,85 @@ class CostBudget:
                 raise BudgetExceededError(f"budget exceeded: {what}")
         self.check_lifetime()
 
-    def reserve(self, match_id: str, model: str, request: CompletionRequest) -> str:
-        """ledger the worst case (prompt chars as tokens + ``max_tokens`` out) before the call."""
+    def reserve(self, match_id: str, model: str, request: CompletionRequest, key: str | None = None) -> str:
+        """Ledger the worst case before the call: every request character (system, prompt, answer schema, plus a
+        fixed framing allowance) as an input token, and ``max_tokens`` out. The hard caps are checked against the
+        ledger under the same lock as the append (``SpendLedger.reserve``)."""
         pin, pout = self._prices[model]
-        usd = (len(request.system) + len(request.prompt)) * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
-        return self._ledger.reserve(match_id, model, usd)
+        tokens_in = reserved_input_tokens(request)
+        usd = tokens_in * pin / 1_000_000 + request.max_tokens * pout / 1_000_000
+        caps = [(c.label, c.prefix, c.max_usd) for c in self.hard_caps]
+        rid = self._ledger.reserve(match_id, model, usd, caps=caps, key=key)
+        self._reserved[rid] = (tokens_in, request.max_tokens)
+        return rid
 
     def release(self, match_id: str, model: str, reservation: str) -> None:
         """The call failed without a charge: cancel its reservation."""
+        self._reserved.pop(reservation, None)
         self._ledger.record(match_id, model, 0, 0.0, settles=reservation)
 
-    def charge(self, match_id: str, model: str, completion: Completion, reservation: str | None = None) -> float:
-        """Count the call against the run caps and the shared ledger; return its cost in USD."""
+    def keep(self, match_id: str, model: str, reservation: str) -> float:
+        """The call timed out: vendors generally bill tokens generated after the client gave up, so settle its
+        reservation at the full reserved worst case instead of $0, and count it against the run caps."""
+        tokens_in, tokens_out = self._reserved.pop(reservation, (0, 0))
+        pin, pout = self._prices[model]
+        usd = tokens_in * pin / 1_000_000 + tokens_out * pout / 1_000_000
+        self.run_calls += 1
+        self.run_usd += usd
+        self._ledger.record(match_id, model, tokens_in + tokens_out, usd, settles=reservation)
+        return usd
+
+    def settled(self, key: str) -> Completion | None:
+        """The reply of an attempt already charged under ``key`` (a resume after a crash before its event)."""
+        reply = self._ledger.settled(key)
+        return Completion.model_validate(reply) if reply is not None else None
+
+    def forget(self, key: str) -> None:
+        self._ledger.forget(key)
+
+    def recount(self, model: str, completion: Completion) -> float:
+        """Count a reused, already-ledgered reply against this process's run caps; return its cost."""
         usd = self.cost(model, completion)
         self.run_calls += 1
         self.run_usd += usd
-        # Every call is ledgered, $0 included, so mispriced or free models stay visible.
-        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation)
         return usd
+
+    def charge(
+        self,
+        match_id: str,
+        model: str,
+        completion: Completion,
+        reservation: str | None = None,
+        key: str | None = None,
+    ) -> float:
+        """Count the call against the run caps and the shared ledger; return its cost in USD. Then, after the charge
+        is durable: a reply bigger than its reservation is rejected, and a hard cap passed by the settled total stops
+        the run (both raise ``BudgetExceededError``; the money is already counted, so nothing is under-reported)."""
+        usd = self.recount(model, completion)
+        bound = self._reserved.pop(reservation, None) if reservation else None
+        over = bound is not None and (completion.input_tokens > bound[0] or completion.output_tokens > bound[1])
+        reply = completion.model_dump(mode="json") if key and not over else None  # an over-size reply is not reused
+        # Every call is ledgered, $0 included, so mispriced or free models stay visible.
+        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation, key=key, reply=reply)
+        if over and bound is not None:
+            raise BudgetExceededError(
+                f"budget exceeded: the provider reported {completion.input_tokens} in / {completion.output_tokens} out"
+                f" tokens, more than the reserved {bound[0]} / {bound[1]}; the call is charged and its reply rejected"
+            )
+        for cap in self.hard_caps:
+            spent = self._ledger.spent_usd(cap.prefix)
+            if spent > cap.max_usd:
+                raise BudgetExceededError(
+                    f"hard stop: {cap.label} settled spend ${spent:.4f} > ${cap.max_usd:.2f}; stopping after this call"
+                )
+        return usd
+
+
+REQUEST_FRAMING_TOKENS = 64  # vendor role and message framing around a request, counted as input in the reservation
+
+
+def reserved_input_tokens(request: CompletionRequest) -> int:
+    """Worst-case input tokens for a request: one per character (a token is never shorter than one character for
+    the text vendors bill) of system, prompt and answer schema, plus the framing allowance."""
+    schema = len(json.dumps(request.json_schema)) if request.json_schema else 0
+    return len(request.system) + len(request.prompt) + schema + REQUEST_FRAMING_TOKENS

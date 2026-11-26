@@ -133,4 +133,4 @@ def _scratchpad(state: MatchState, agent: str, upto: int) -> str:
 
 
 def _board(state: MatchState) -> str:
-    return ", ".join(f"{k} {v}" for k, v in sorted(state.scores.items())) or "0-0"
+    return ", ".join(f"{state.seat(k)} {v}" for k, v in sorted(state.scores.items())) or "0-0"
