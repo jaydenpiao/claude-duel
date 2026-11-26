@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
 
 from claude_duel.adapters.sandbox.common import execute
 from claude_duel.adapters.sandbox.runner import PYTHON_FLAGS, frame
@@ -19,6 +20,12 @@ TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the wall limit fires
 SIGNAL_EXIT_BASE = 128  # container exit status 128+N means killed by signal N
 _PROBE_SECONDS = 10.0
 _SELF_TEST_FLAG = "DUEL{" + "0" * 32 + "}"
+# Docker's default seccomp profile (moby v26.1.5, profiles/seccomp/default.json) minus ptrace, process_vm_readv/writev
+# and personality. A same-uid ptrace could stop the in-container `timeout` watchdog; the host-side kill deadline in
+# `execute` is the backstop. Refresh: copy default.json from a newer moby tag, drop the DENIED_SYSCALLS names from its
+# allow rules, and run test_profile_is_dockers_default_minus_the_tracing_calls.
+SECCOMP_PROFILE = Path(__file__).with_name("seccomp.json")
+DENIED_SYSCALLS = frozenset({"ptrace", "process_vm_readv", "process_vm_writev", "personality"})
 
 
 def docker_probe(docker: Sequence[str]) -> str | None:
@@ -101,6 +108,7 @@ class DockerSandbox:
             "--tmpfs", "/tmp:size=1m,noexec,nosuid,nodev",  # noqa: S108 - container-private tmpfs
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
+            "--security-opt", f"seccomp={SECCOMP_PROFILE}",
             "--ipc", "none",
             "--user", "65534:65534",
             "--pids-limit", str(limits.pids_limit),
