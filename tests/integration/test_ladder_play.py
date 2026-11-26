@@ -61,7 +61,7 @@ def test_another_plan_for_the_same_id_is_refused(tmp_path: Path) -> None:
 
 def test_cap_stops_before_a_step_that_could_pass_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ladder_mod, "project", lambda cfg: Projection([], 0.0, []))
-    monkeypatch.setattr(ladder_mod, "match_usd", lambda cfg, a, b, worst=True: 1.5)
+    monkeypatch.setattr(ladder_mod, "match_usd", lambda cfg, a, b, **kw: 1.5)
     state = play_ladder(_settings(tmp_path), "lad-three", _load(FAKE), InMemoryMetrics())
     assert state.capped
     assert state.steps == []
@@ -138,10 +138,10 @@ def test_hard_stop_ends_a_typical_basis_ladder_cleanly_and_a_raised_cap_resumes_
     def budget() -> CostBudget:
         return CostBudget(BudgetLimits(match_max_usd=10, run_max_usd=10), build_ledger(settings), prices)
 
-    tight = _load(FAKE, {"budget.match_max_usd": 0.02, "budget.basis": "typical"})
+    tight = _load(FAKE, {"budget.match_max_usd": 0.01, "budget.basis": "typical"})
     with pytest.raises(BudgetExceededError, match="hard stop"):
         play_ladder(settings, "lad-stop", tight, InMemoryMetrics(), budget=budget())
-    assert FileSpendLedger(settings.store_dir / "ledger.jsonl").spent_usd("lad-stop-s1-") <= 0.02
+    assert FileSpendLedger(settings.store_dir / "ledger.jsonl").spent_usd("lad-stop-s1-") <= 0.01
     done = play_ladder(settings, "lad-stop", _load(FAKE), InMemoryMetrics(), budget=budget())  # same plan digest
     assert done.done()
     assert verify_ladder(settings, "lad-stop").consistent
@@ -164,11 +164,14 @@ def test_compare_marks_agreement_and_too_close() -> None:
     assert split.matchups[0].results == ("first", "second")
 
 
-def test_final_plan_passes_on_typical_cost_and_is_refused_on_worst() -> None:
+def test_final_plan_fits_its_pair_caps_on_calibrated_cost_and_is_refused_on_worst() -> None:
     final = _load(EXAMPLES / "ladder-final.toml")
+    assert final.budget.basis == "calibrated"
     assert not ladder_mod.project(final).refusals
+    assert final.match_cap("claude-fable-5-2", "gpt-6.2-astra") > final.budget.match_max_usd
+    assert not ladder_mod.project(_load(EXAMPLES / "ladder-final.toml", {"budget.basis": "typical"})).refusals
     assert ladder_mod.project(_load(EXAMPLES / "ladder-final.toml", {"budget.basis": "worst"})).refusals
-    assert final.digest() == _load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 200}).digest()
+    assert final.digest() == _load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 700}).digest()
 
 
 def test_watch_prints_halves_and_attacks(
@@ -180,3 +183,21 @@ def test_watch_prints_halves_and_attacks(
     assert "half 1: fake-1-a vs fake-1-b" in out
     assert "half done · $" in out
     assert "verified ✓" in out
+
+
+def test_a_capped_step_ends_the_ladder_with_no_verdict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = ladder_mod.play_duplicate
+
+    def capped(settings: Settings, duplicate_id: str, rule: Any, *a: Any) -> Any:
+        state = real(settings, duplicate_id, rule.model_copy(update={"boards_min": 1, "boards_max": 1}), *a)
+        state.capped = True
+        state.rule = rule  # the plan wanted more boards than the money allowed
+        return state
+
+    monkeypatch.setattr(ladder_mod, "play_duplicate", capped)
+    plan = _load(FAKE, {"match.boards_min": 4, "match.boards_max": 4})
+    state = play_ladder(_settings(tmp_path), "lad-capped", plan, InMemoryMetrics())
+    assert [s.result for s in state.steps] == ["capped"]
+    assert state.capped
+    assert state.done()
+    assert ld.fold("lad-capped", build_ladder_log(_settings(tmp_path)).read("lad-capped")).capped

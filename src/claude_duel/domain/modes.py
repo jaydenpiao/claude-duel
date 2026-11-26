@@ -63,6 +63,11 @@ MODES["ladder"] = _LEDGER.model_copy(
         "max_attempts": 3,
         "scoring": ScoringRule(kind="ledger", round_weight="flat"),
         "ledger": _SEALED.model_copy(update={"terrain": "none"}),
+        "neutral_ids": True,  # models see seats (p1/p2), never model or vendor names
+        # stakes, clock and caps in vendor-neutral units; Claude's ratio is 1/1.594, its input tokens over GPT's on
+        # identical prompts (fairness audit 2026-11-19); re-pin from the logged per-call k after the pilot
+        "accounting": "arena",
+        "arena_ratio": {"anthropic": 0.63, "openai": 1.0},
     }
 )
 

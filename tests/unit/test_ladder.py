@@ -34,12 +34,11 @@ def test_loser_steps_down_and_no_winner_moves_both() -> None:
     assert ld.advance((0, 0), "first") == (0, 1)
     assert ld.advance((0, 0), "second") == (1, 0)
     assert ld.advance((0, 0), "inconclusive") == (1, 1)
-    assert ld.advance((0, 0), "void") == (1, 1)
     state = ld.fold("L", _events(("a0", "b0", "first"), ("a0", "b1", "second")))
     assert state.tiers() == (1, 1)
     assert state.next_pair() == ("a1", "b1")
     assert not state.done()
-    assert ld.fold("L", _events(("a0", "b0", "first"), ("a0", "b1", "second"), ("a1", "b1", "void"))).done()
+    assert ld.fold("L", _events(("a0", "b0", "first"), ("a0", "b1", "second"), ("a1", "b1", "inconclusive"))).done()
 
 
 def test_fold_rejects_a_step_off_the_ladder() -> None:
@@ -62,7 +61,7 @@ def test_dry_run_refuses_over_the_ladder_cap_and_passes_above_it() -> None:
 
 
 def test_one_dear_match_is_refused_even_when_the_total_fits() -> None:
-    cfg = _load(EXAMPLES / "ladder-c.toml", {"budget.ladder_max_usd": 10_000.0, "budget.match_max_usd": 100.0})
+    cfg = _load(EXAMPLES / "ladder-c.toml", {"budget.ladder_max_usd": 10_000.0, "budget.match_max_usd": 25.0})
     refusals = project(cfg).refusals
     assert refusals
     assert all("match_max_usd" in r for r in refusals)
@@ -71,7 +70,7 @@ def test_one_dear_match_is_refused_even_when_the_total_fits() -> None:
 
 @pytest.mark.parametrize(
     ("name", "total", "rows"),
-    [("a", 1743.21, 9), ("b", 606.24, 7), ("c", 770.08, 9), ("fake", 0.0, 3)],
+    [("a", 848.17, 9), ("b", 291.38, 7), ("c", 373.16, 9), ("fake", 0.0, 3)],
 )
 def test_projection_golden(name: str, total: float, rows: int) -> None:
     proj = project(_load(EXAMPLES / f"ladder-{name}.toml"))
@@ -81,9 +80,20 @@ def test_projection_golden(name: str, total: float, rows: int) -> None:
     assert proj.typical_usd() <= proj.total_usd
 
 
-def test_match_cost_scales_with_boards_and_replays() -> None:
+def test_match_cost_scales_with_boards() -> None:
     cfg = _load(EXAMPLES / "ladder-b.toml")
     half = _load(EXAMPLES / "ladder-b.toml", {"match.boards_max": 4})
     assert match_usd(half, "claude-opus-5-5", "gpt-5-mini") == pytest.approx(
         match_usd(cfg, "claude-opus-5-5", "gpt-5-mini") / 2
     )
+
+
+def test_vendor_breaker_trips_on_two_blocked_steps_in_a_row_only() -> None:
+    def steps(*results: str) -> list[ld.Step]:
+        return [
+            ld.Step(step_no=n, a="a", b="b", duplicate_id=f"x-s{n}", result=r, usd=0) for n, r in enumerate(results, 1)
+        ]  # type: ignore[arg-type]
+
+    assert ld.breaker_trips(steps("first", "blocked", "blocked"))
+    assert not ld.breaker_trips(steps("blocked", "first", "blocked"))
+    assert not ld.breaker_trips(steps("blocked"))

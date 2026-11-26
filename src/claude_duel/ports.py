@@ -48,10 +48,16 @@ class Completion(BaseModel):
     reasoning_summary: str = (
         ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
     )
+    units: int | None = None  # engine-set arena units (Rules.accounting = "arena"); None: vendor tokens count
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    @property
+    def spent_tokens(self) -> int:
+        """What stakes, the clock and wallets count: arena units when set, else vendor tokens."""
+        return self.units if self.units is not None else self.total_tokens
 
 
 class LLMProvider(Protocol):
