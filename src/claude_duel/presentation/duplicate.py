@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 from claude_duel.domain.duplicate import DuplicateState
 
 
@@ -33,19 +35,15 @@ def duplicate_view(state: DuplicateState, verified: bool, mismatches: list[str])
 
 def truncated(state: DuplicateState) -> dict[str, int]:
     """Per agent: twice-truncated builds and attack tries over all boards (scored like refusals, never voided)."""
-    out = {a.name: 0 for a in state.agents}
-    for b in state.boards:
-        for name, n in b.truncated.items():
-            out[name] = out.get(name, 0) + n
-    return out
+    total = sum((Counter(b.truncated) for b in state.boards), Counter[str]())
+    return {a.name: total[a.name] for a in state.agents}
 
 
 def duplicate_lines(state: DuplicateState, verified: bool, mismatches: list[str]) -> list[str]:
     first, second = (a.name for a in state.agents)
     lines = [f"duplicate {state.duplicate_id}: {first} vs {second} (board diff is {first}'s side)"]
     for b in state.boards:
-        tag = f"void ({b.fault})" if b.void else f"{b.diff:+d}"
-        lines.append(f"board {b.board_no}: {tag} · raw {b.raw:+d} · replays {b.replays} · ${b.usd:.4f}")
+        lines.append(f"board {b.board_no}: {b.diff:+d} · raw {b.raw:+d} · ${b.usd:.4f}")
     r, (lo, hi) = state.record(), state.ci()
     lines.append(
         f"record {r.wins}-{r.losses}-{r.ties} · margin {sum(state.diffs()):+d} (p={state.margin_p():.4f})"

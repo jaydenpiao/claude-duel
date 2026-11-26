@@ -1,6 +1,6 @@
 """Board statistics for duplicate play (no-fluke ladder: margin, confidence, sequential stop): pure, seeded, $0.
 
-Board differences are from the first agent's side: > 0 a board win, < 0 a loss, 0 a tie (void boards are 0).
+Board differences are from the first agent's side: > 0 a board win, < 0 a loss, 0 a tie.
 """
 
 from __future__ import annotations

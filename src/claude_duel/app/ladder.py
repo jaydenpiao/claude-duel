@@ -29,8 +29,8 @@ from claude_duel.ports import EventObserver, Metrics
 class Row:
     a: str
     b: str
-    worst_usd: float  # boards_max boards, every board replayed fault_replays times, every reply at its cap
-    typical_usd: float  # boards_max boards, no retries or replays, assumed reply sizes
+    worst_usd: float  # boards_max boards, every reply at its cap
+    typical_usd: float  # boards_max boards, no retries, assumed reply sizes
 
 
 @dataclass(frozen=True)
@@ -48,9 +48,8 @@ class Projection:
 def match_usd(cfg: LadderConfig, a: str, b: str, *, worst: bool = True) -> float:
     """One duplicate match: two halves per board, each half a match where both agents play."""
     rules, rule = cfg.rules(), cfg.duplicate_rule()
-    tries = 1 + rule.fault_replays if worst else 1
     half = agent_usd(rules, a, worst=worst) + agent_usd(rules, b, worst=worst)
-    return rule.boards_max * tries * 2 * half
+    return rule.boards_max * 2 * half
 
 
 def project(cfg: LadderConfig) -> Projection:
