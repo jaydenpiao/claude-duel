@@ -71,7 +71,7 @@ def test_one_dear_match_is_refused_even_when_the_total_fits() -> None:
 
 @pytest.mark.parametrize(
     ("name", "total", "rows"),
-    [("a", 1743.21, 9), ("b", 606.24, 7), ("c", 770.08, 9), ("fake", 0.0, 3)],
+    [("a", 2544.51, 9), ("b", 874.15, 7), ("c", 1119.49, 9), ("fake", 0.0, 3)],
 )
 def test_projection_golden(name: str, total: float, rows: int) -> None:
     proj = project(_load(EXAMPLES / f"ladder-{name}.toml"))
