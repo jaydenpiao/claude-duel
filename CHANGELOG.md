@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Findings: dropped the unreachable `dunder-string` severity entry and the escape-attribute names that `policy.INTROSPECTION_ATTR` already matches (no behavior change).
 - CI: the test job's limit is 60 minutes (was 30). With 4 runners sharing the VM the 3.11/3.12 suites hit 30 minutes and were cancelled, blocking merges.
 - Tamper findings (ruleset 2): jail-escape attempts are reported as `sandbox-escape` high again instead of low `policy-reject` noise. That covers introspection attributes (`__subclasses__`, `__globals__`, `__bases__`, frame and generator attributes, `_getframe`, `modules`), dunder-string rejections (`'__import__'`), and imports of OS, process, FFI, import-machinery or introspection modules outside the allowlist, including any private `_` module (`posix`, `_posixsubprocess`, `fcntl`, `mmap`, `_io`, `runpy`, `code`, `_thread`, `sysconfig`). Enforcement is unchanged: all of these were and are rejected.
 - OpenAI requests send a stable pseudonymous `safety_identifier` (sha256 of a per-install id, never a name or other personal data). The id lives in the store dir (never HOME). An OpenAI response whose parsed `error.code` is `cyber_policy` is a non-retryable `CyberPolicyError` and stops the run, instead of a generic 4xx client error. It is never a forfeit or a spent try: the match fails resumably and a series or tournament pauses without recording the game, until an explicit rerun.
