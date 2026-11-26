@@ -13,11 +13,11 @@ Implementations of the Protocols in `ports.py`. Chosen only in `app/container.py
 - Extend: [add-provider skill](../../../.agents/skills/add-provider/SKILL.md).
 
 ## sandbox/
-- `common.py:execute`: the single process runner (own process group, wall timeout, streamed output cap, group kill + `cleanup` after every run). Reuse it; don't fork it.
+- `common.py:execute`: the single process runner (own process group, wall timeout, streamed output cap, group kill, then `cleanup` before any wait on the client or reader, and every wait bounded by `REAP_SECONDS`: a `sudo -n docker` client survives the group kill). Reuse it; don't fork it.
 - `runner.py`: in-sandbox loader; flag, source and rlimits go over stdin (`frame`), never argv/env.
 - `subprocess_sandbox.py`: rlimits (CPU, AS, FSIZE=0, NOFILE=16, NPROC=1), `python -I -S`, read-only temp dir, minimal env. Fake provider only; not a hard boundary.
 - Sandbox and app image pin: `claude_duel.sandbox_image.DEFAULT_IMAGE` is the one constant. `Settings.docker_image` and CI `docker pull` read it; the Dockerfile `ARG PYTHON_IMAGE` default must match (enforced by `tests/unit/test_image_pin.py`). Dependabot ignores `python` bumps; update the constant and the ARG together.
-- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run. `docker_probe` gates it (also refusing a daemon with cgroup driver `none`, which would ignore the limits); real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. Default image is `DEFAULT_IMAGE` from `sandbox_image.py`, and `health()` refuses an image that is not `name@sha256:...` (`unpinned`). Tests: `tests/integration/test_docker_sandbox.py`, `tests/unit/test_image_pin.py`, `tests/unit/test_docker_probe.py`.
+- `docker_sandbox.py`: hardened `docker run` (see ADR 0003), limits from `SandboxLimits`, `docker rm -f` after every run, and `seccomp.json` (Docker's default profile minus `ptrace`, `process_vm_readv`/`writev` and `personality`, so a challenge cannot stop the in-container `timeout`). `docker_probe` gates it (also refusing a daemon with cgroup driver `none`, which would ignore the limits); real-model matches fail closed without it. Optional `runtime` (e.g. gVisor `runsc`, ADR 0011), checked with `docker_runtimes`. Default image is `DEFAULT_IMAGE` from `sandbox_image.py`, and `health()` refuses an image that is not `name@sha256:...` (`unpinned`). Tests: `tests/integration/test_docker_sandbox.py`, `tests/unit/test_image_pin.py`, `tests/unit/test_docker_probe.py`.
 - Never pass the host env through; the child env is only a minimal PATH.
 
 ## metrics/
