@@ -162,8 +162,12 @@ class OpenAIProvider:
         )
         body: dict[str, object] = {
             "model": self._model,
-            "instructions": request.system,
-            "input": request.prompt,
+            # GPT-6.2 appends top-level `instructions` after `input` and caches only a leading developer item,
+            # so the rules go first as a developer message for every Responses model.
+            "input": [
+                {"role": "developer", "content": request.system},
+                {"role": "user", "content": request.prompt},
+            ],
             "max_output_tokens": request.max_tokens,
             "text": {"format": fmt},
             "store": False,
