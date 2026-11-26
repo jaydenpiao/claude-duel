@@ -213,7 +213,7 @@ def test_capped_ends_the_match_on_played_boards() -> None:
     st = dp.fold("d", [_created(), capped])
     assert st.capped
     assert st.done()
-    assert st.result() == "inconclusive"
+    assert st.result() == "capped"  # stopped by money before boards_max: no verdict
     late = Event(v=1, seq=2, type=dp.BOARD_SCORED, trace_id="d", data={})
     with pytest.raises(EventLogCorruptError, match="unexpected"):
         dp.fold("d", [_created(), capped, late])

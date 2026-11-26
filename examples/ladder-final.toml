@@ -1,6 +1,8 @@
 # Final no-fluke ladder, Plan A (jayden, 2026-11-19): $25 a match, $95 the ladder, ladder-a's per-call caps.
-# Budget basis "typical": the dry run checks the caps against expected cost, and a per-call hard stop keeps actual
-# spend under both caps (a stopped run resumes after raising the cap). Premium models: set allow_premium = true.
+# Budget basis "calibrated": the dry run checks the caps against each model's measured token use (app/calibration.py)
+# and refuses any pairing whose boards cannot fit match_max_usd; a per-call hard stop keeps actual spend under both
+# caps, and a match it stops early is "capped" (no verdict). At these caps and boards the dry run refuses: the
+# fable pairings need fewer boards or a larger per-match cap. Premium models: set allow_premium = true.
 # `duel ladder examples/ladder-final.toml --dry-run`; run it twice (each run has fresh seeds from its ladder id), then
 # `duel ladder-compare RUN1 RUN2`.
 run_date = "2026-11-20"  # required; drives the model cutoffs, never the wall clock
@@ -20,7 +22,7 @@ boards_max = 38
 [budget]
 match_max_usd = 25.0
 ladder_max_usd = 95.0
-basis = "typical"
+basis = "calibrated"
 
 [caps]  # per-call output tokens, the same for both sides
 build = 24000

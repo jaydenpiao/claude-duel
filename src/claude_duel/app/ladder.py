@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cache
 
+from claude_duel.app import calibration
 from claude_duel.app.budget import CostBudget, SpendCap
 from claude_duel.app.container import (
     build_budget,
@@ -17,7 +18,7 @@ from claude_duel.app.container import (
 from claude_duel.app.driver import append, open_or_create
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.estimate import agent_usd
-from claude_duel.app.ladder_config import LadderConfig, agents
+from claude_duel.app.ladder_config import Basis, LadderConfig, agents
 from claude_duel.config import Settings
 from claude_duel.domain import duplicate as dp
 from claude_duel.domain import ladder as ld
@@ -31,6 +32,7 @@ class Row:
     b: str
     worst_usd: float  # boards_max boards, every board replayed fault_replays times, every reply at its cap
     typical_usd: float  # boards_max boards, no retries or replays, assumed reply sizes
+    calibrated_usd: float = 0.0  # boards_max boards at each model's measured token use (app/calibration.py)
 
 
 @dataclass(frozen=True)
@@ -44,42 +46,66 @@ class Projection:
         """The same path at typical cost: the expected spend, and the refusal basis when ``basis = "typical"``."""
         return sum(r.typical_usd for r in self.rows)
 
+    def calibrated_usd(self) -> float:
+        """The same path at each model's measured token use: the refusal basis when ``basis = "calibrated"``."""
+        return sum(r.calibrated_usd for r in self.rows)
 
-def match_usd(cfg: LadderConfig, a: str, b: str, *, worst: bool = True) -> float:
-    """One duplicate match: two halves per board, each half a match where both agents play."""
+
+def match_usd(cfg: LadderConfig, a: str, b: str, *, basis: Basis = "worst") -> float:
+    """One duplicate match: two halves per board, each half a match where both agents play. ``basis`` "calibrated"
+    prices each model at its measured token use; "worst" and "typical" use the assumed sizes
+    (``estimate.agent_usd``)."""
     rules, rule = cfg.rules(), cfg.duplicate_rule()
+    if basis == "calibrated":
+        half = calibration.calibrated_agent_usd(rules, a) + calibration.calibrated_agent_usd(rules, b)
+        return rule.boards_max * 2 * half
+    worst = basis == "worst"
     tries = 1 + rule.fault_replays if worst else 1
     half = agent_usd(rules, a, worst=worst) + agent_usd(rules, b, worst=worst)
     return rule.boards_max * tries * 2 * half
+
+
+def basis_usd(cfg: LadderConfig, a: str, b: str) -> float:
+    """One match priced on the plan's own ``budget.basis``."""
+    return match_usd(cfg, a, b, basis=cfg.budget.basis)
 
 
 def project(cfg: LadderConfig) -> Projection:
     """The dearest ladder path (the most expensive sequence of step-downs), priced at $0 with no model calls.
     Refusals use ``budget.basis``: every reachable match and the path must fit their caps at that basis."""
     a, b = cfg.sides.a, cfg.sides.b
-    worst = cfg.budget.basis == "worst"
 
     @cache
     def dearest(i: int, j: int) -> tuple[float, tuple[tuple[int, int], ...]]:
         if i >= len(a) or j >= len(b):
             return 0.0, ()
-        here = match_usd(cfg, a[i], b[j], worst=worst)
+        here = basis_usd(cfg, a[i], b[j])
         best = max((dearest(*n) for n in {(i + 1, j), (i, j + 1), (i + 1, j + 1)}), key=lambda t: (t[0], len(t[1])))
         return here + best[0], ((i, j), *best[1])
 
     start = (cfg.start_tier.a, cfg.start_tier.b)
     path_usd, path = dearest(*start)
-    rows = [Row(a[i], b[j], match_usd(cfg, a[i], b[j]), match_usd(cfg, a[i], b[j], worst=False)) for i, j in path]
+    rows = [_row(cfg, a[i], b[j]) for i, j in path]
     cap, label = cfg.budget.match_max_usd, f"{cfg.budget.basis} case"
     reachable = [(m, n) for m in a[start[0] :] for n in b[start[1] :]]
     refusals = [
         f"{m} vs {n}: {label} ${usd:.2f} > match_max_usd ${cap:.2f}"
         for m, n in reachable
-        if (usd := match_usd(cfg, m, n, worst=worst)) > cap
+        if (usd := basis_usd(cfg, m, n)) > cap
     ]
     if path_usd > cfg.budget.ladder_max_usd:
         refusals.append(f"ladder {label} ${path_usd:.2f} > ladder_max_usd ${cfg.budget.ladder_max_usd:.2f}")
     return Projection(rows, sum(r.worst_usd for r in rows), refusals, cfg.budget.basis)
+
+
+def _row(cfg: LadderConfig, a: str, b: str) -> Row:
+    try:
+        calibrated = match_usd(cfg, a, b, basis="calibrated")
+    except ConfigError:
+        if cfg.budget.basis == "calibrated":
+            raise
+        calibrated = float("nan")  # shown as unknown; only a calibrated plan needs every model measured
+    return Row(a, b, match_usd(cfg, a, b), match_usd(cfg, a, b, basis="typical"), calibrated)
 
 
 def ladder_settings(settings: Settings, cfg: LadderConfig) -> Settings:
@@ -145,11 +171,10 @@ def play_ladder(
         settings = ladder_settings(settings, cfg)
         budget = budget or build_budget(settings)
         spent = build_ledger(settings)
-        worst = cfg.budget.basis == "worst"
         while not state.done():
             n = len(state.steps) + 1
             a, b = state.next_pair()
-            if spent.spent_usd(f"{ladder_id}-") + match_usd(cfg, a, b, worst=worst) > cfg.budget.ladder_max_usd:
+            if spent.spent_usd(f"{ladder_id}-") + basis_usd(cfg, a, b) > cfg.budget.ladder_max_usd:
                 append(
                     log, ladder_id, schema_version=ld.LADDER_SCHEMA_VERSION, seq=n, event_type=ld.LADDER_CAPPED, data={}
                 )
@@ -179,6 +204,16 @@ def play_ladder(
                 data=step.model_dump(),
             )
             state.steps.append(step)
+            if step.result == "capped":  # a hard stop cut the match short of its boards: no verdict, stop here
+                append(
+                    log,
+                    ladder_id,
+                    schema_version=ld.LADDER_SCHEMA_VERSION,
+                    seq=n + 1,
+                    event_type=ld.LADDER_CAPPED,
+                    data={},
+                )
+                state.capped = True
         return state
 
 
@@ -239,7 +274,7 @@ def compare_ladders(first: ld.LadderState, second: ld.LadderState) -> Comparison
     matchups = []
     for pair in pairs:
         r = (by_run[0].get(pair, "-"), by_run[1].get(pair, "-"))
-        decided = r[0] == r[1] and r[0] in ("first", "second")
+        decided = r[0] == r[1] and r[0] in ("first", "second")  # "capped" never agrees: it has no verdict
         matchups.append(Matchup(pair[0], pair[1], r, "agree" if decided else "too close to call"))
     same_path = [(s.a, s.b) for s in first.steps] == [(s.a, s.b) for s in second.steps]
     ordering = "agree" if same_path and all(m.verdict == "agree" for m in matchups) else "too close to call"
