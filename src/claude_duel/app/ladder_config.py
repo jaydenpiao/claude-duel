@@ -48,13 +48,16 @@ class MatchPlan(_Plan):
     boards: int | None = None
 
 
+Basis = Literal["worst", "typical", "calibrated"]
+
+
 class BudgetPlan(_Plan):
     match_max_usd: float
     ladder_max_usd: float
     # What the dry run checks the caps against. "typical" admits plans whose worst case is over a cap; the per-call
     # hard stop then keeps actual spend under both caps (the run stops cleanly, resumable after raising a cap).
     # "calibrated" prices each model from its measured token use (app/calibration.py) instead of one assumed size.
-    basis: Literal["worst", "typical", "calibrated"] = "worst"
+    basis: Basis = "worst"
 
 
 class CapsPlan(_Plan):

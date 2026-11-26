@@ -67,7 +67,8 @@ def test_calibrated_price_follows_each_models_measured_output() -> None:
     cfg = lc.parse(_plan(), allow_premium=True)
     rules = cfg.rules()
     # fable writes ~2.6x astra's mean output at the same list price ratio: it must price dearer, not equal
-    assert calibration.agent_usd(rules, "claude-fable-5-2") > 2 * calibration.agent_usd(rules, "gpt-6.2-astra")
+    fable = calibration.calibrated_agent_usd(rules, "claude-fable-5-2")
+    assert fable > 2 * calibration.calibrated_agent_usd(rules, "gpt-6.2-astra")
     assert match_usd(cfg, "claude-haiku-5-5", "gpt-6-luna", basis="calibrated") < 1.0
 
 

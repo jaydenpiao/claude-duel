@@ -2,7 +2,9 @@
 actually writes instead of one assumed reply size for every model.
 
 ``MEASURED`` is pinned from the real match logs of 2026-10-30 to 2026-11-19 by ``scripts/calibrate_usage.py`` (calls
-whose agent ran with an output cap of at least 8000 tokens). Models with no logged calls borrow a measured model's
+whose agent ran with an output cap of at least 8000 tokens). The logs are the maintainer's local run store (the
+``*.events.jsonl`` files under his ``DUEL_STORE_DIR``) and are not in the repo; ``tests/unit/test_calibrate_usage.py``
+pins the script's arithmetic on a fixture. Models with no logged calls borrow a measured model's
 row (``PROXY``) and say so; a model with neither is refused, never guessed. No API calls.
 """
 
@@ -55,7 +57,7 @@ def usage(model: str) -> Usage:
     return Usage(tin, tout, calls, source)
 
 
-def agent_usd(rules: Rules, model: str) -> float:
+def calibrated_agent_usd(rules: Rules, model: str) -> float:
     """One agent's expected cost for one match (one half of a board) on the calibrated basis: measured mean tokens per
     call at ``DEFAULT_PRICES[model]``, ``CALLS_PER_CHALLENGE`` calls per challenge plus one allocation per round in
     ledger modes. Replies are capped at the rules' largest per-purpose output cap."""

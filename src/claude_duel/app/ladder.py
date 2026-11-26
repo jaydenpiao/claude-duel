@@ -18,7 +18,7 @@ from claude_duel.app.container import (
 from claude_duel.app.driver import append, open_or_create
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.estimate import agent_usd
-from claude_duel.app.ladder_config import LadderConfig, agents
+from claude_duel.app.ladder_config import Basis, LadderConfig, agents
 from claude_duel.config import Settings
 from claude_duel.domain import duplicate as dp
 from claude_duel.domain import ladder as ld
@@ -51,12 +51,15 @@ class Projection:
         return sum(r.calibrated_usd for r in self.rows)
 
 
-def match_usd(cfg: LadderConfig, a: str, b: str, *, worst: bool = True, basis: str = "") -> float:
+def match_usd(cfg: LadderConfig, a: str, b: str, *, basis: Basis = "worst") -> float:
     """One duplicate match: two halves per board, each half a match where both agents play. ``basis`` "calibrated"
-    prices each model at its measured token use; otherwise ``worst`` picks the worst or the typical case."""
+    prices each model at its measured token use; "worst" and "typical" use the assumed sizes
+    (``estimate.agent_usd``)."""
     rules, rule = cfg.rules(), cfg.duplicate_rule()
     if basis == "calibrated":
-        return rule.boards_max * 2 * (calibration.agent_usd(rules, a) + calibration.agent_usd(rules, b))
+        half = calibration.calibrated_agent_usd(rules, a) + calibration.calibrated_agent_usd(rules, b)
+        return rule.boards_max * 2 * half
+    worst = basis == "worst"
     tries = 1 + rule.fault_replays if worst else 1
     half = agent_usd(rules, a, worst=worst) + agent_usd(rules, b, worst=worst)
     return rule.boards_max * tries * 2 * half
@@ -64,7 +67,7 @@ def match_usd(cfg: LadderConfig, a: str, b: str, *, worst: bool = True, basis: s
 
 def basis_usd(cfg: LadderConfig, a: str, b: str) -> float:
     """One match priced on the plan's own ``budget.basis``."""
-    return match_usd(cfg, a, b, worst=cfg.budget.basis == "worst", basis=cfg.budget.basis)
+    return match_usd(cfg, a, b, basis=cfg.budget.basis)
 
 
 def project(cfg: LadderConfig) -> Projection:
@@ -102,7 +105,7 @@ def _row(cfg: LadderConfig, a: str, b: str) -> Row:
         if cfg.budget.basis == "calibrated":
             raise
         calibrated = float("nan")  # shown as unknown; only a calibrated plan needs every model measured
-    return Row(a, b, match_usd(cfg, a, b), match_usd(cfg, a, b, worst=False), calibrated)
+    return Row(a, b, match_usd(cfg, a, b), match_usd(cfg, a, b, basis="typical"), calibrated)
 
 
 def ladder_settings(settings: Settings, cfg: LadderConfig) -> Settings:
