@@ -18,25 +18,35 @@ from claude_duel.domain import match_stats as ms
 from claude_duel.domain.driver import fold_created
 from claude_duel.domain.errors import EventLogCorruptError
 from claude_duel.domain.events import check_version, typed
-from claude_duel.domain.models import TRUNCATED, AgentSpec, Event, MatchState, Rules, SandboxLimits
+from claude_duel.domain.models import AgentSpec, AttackAttempt, Event, MatchState, Rules, SandboxLimits
 
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
+MAX_BOARDS = 64  # money caps bind first; this only stops a typo
 Result = Literal["first", "second", "inconclusive", "void"]
+
+
+SIGN_TEST_ALPHA = 0.05
 
 
 class DuplicateRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    boards_min: int = Field(default=4, ge=1, le=16)
-    boards_max: int = Field(default=8, ge=1, le=16)
+    boards_min: int = Field(default=12, ge=1, le=MAX_BOARDS)
+    boards_max: int = Field(default=48, ge=1, le=MAX_BOARDS)
     board_cap_mult: int = Field(default=2, ge=1, le=10, description="board clip = mult x max defense award")
     fault_replays: int = Field(default=2, ge=0, le=2)
     void_share_max_pct: int = Field(default=25, ge=0, le=100, description="more void boards => inconclusive")
-    stop: Literal["none", "sprt"] = "sprt"
+    # "margin" (default): exact sign-flip test on the seat-paired board margins; stop early past boards_min only at
+    # p <= early_alpha (checked every look_every boards), else call at boards_max with p <= margin_alpha. "sprt" is the
+    # older win-count rule (sign test or SPRT), kept so logs that pinned it replay unchanged.
+    stop: Literal["none", "sprt", "margin"] = "margin"
     sprt_p1: float = Field(default=0.75, gt=0.5, lt=1)
     alpha: float = Field(default=0.05, gt=0, lt=0.5)
     beta: float = Field(default=0.05, gt=0, lt=0.5)
+    margin_alpha: float = Field(default=0.035, gt=0, lt=0.5)
+    early_alpha: float = Field(default=0.005, gt=0, lt=0.5)
+    look_every: int = Field(default=2, ge=1, le=MAX_BOARDS)
     match_max_usd: float = Field(default=2.0, gt=0, description="checked against played boards before each board")
 
     @model_validator(mode="after")
@@ -84,32 +94,31 @@ class DuplicateState(BaseModel):
         r = self.record()
         return ms.sprt(r.wins, r.losses, self.rule.sprt_p1, self.rule.alpha, self.rule.beta)
 
+    def scored(self) -> list[int]:
+        return [b.diff for b in self.boards if not b.void]
+
     def done(self) -> bool:
-        n = len(self.boards)
-        if self.capped or n >= self.rule.boards_max:
-            return True
-        return n >= self.rule.boards_min and self.rule.stop == "sprt" and self.sprt() != "continue"
+        return self.capped or stop_now(self.rule, len(self.boards), self.scored())
 
     def p_value(self) -> float:
         r = self.record()
         return ms.sign_test_p(r.wins, r.losses)
 
+    def margin_p(self) -> float:
+        """Exact seat-paired sign-flip p on the summed board margin (what the margin rule calls on)."""
+        return ms.sign_flip_p(self.scored())
+
     def ci(self) -> tuple[float, float]:
         return ms.bootstrap_ci(self.diffs(), self.seed)
 
     def result(self) -> Result:
-        """``first``/``second`` only when the sign test (p <= 0.05) or the SPRT backs it; spend never decides."""
+        """``first``/``second`` only when the stop rule backs it (see ``verdict``: the summed-margin sign-flip by
+        default, or the sign test / SPRT for ``stop="sprt"``); spend never decides."""
         if not self.done():
             raise ValueError("duplicate match is not finished")
         if self.void_share_exceeded():
             return "void"
-        r = self.record()
-        test = self.sprt()
-        if r.wins > r.losses and (self.p_value() <= 0.05 or test == "first"):
-            return "first"
-        if r.losses > r.wins and (self.p_value() <= 0.05 or test == "second"):
-            return "second"
-        return "inconclusive"
+        return verdict(self.rule, self.scored(), final=len(self.boards) >= self.rule.boards_max or self.capped)
 
     def winner(self) -> str | None:
         res = self.result()
@@ -123,6 +132,35 @@ class DuplicateState(BaseModel):
 
     def half_id(self, board_no: int, half: int, replay: int = 0) -> str:
         return f"{self.duplicate_id}-b{board_no}{'ab'[half]}" + (f"-r{replay}" if replay else "")
+
+
+def stop_now(rule: DuplicateRule, boards: int, scored: list[int]) -> bool:
+    """The stop rule after ``boards`` boards (``scored``: the non-void margins): boards_max, or an early call."""
+    if boards >= rule.boards_max:
+        return True
+    if boards < rule.boards_min or rule.stop == "none":
+        return False
+    if rule.stop == "margin":
+        return (boards - rule.boards_min) % rule.look_every == 0 and ms.sign_flip_p(scored) <= rule.early_alpha
+    r = ms.record(scored)
+    return ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta) != "continue"
+
+
+def verdict(rule: DuplicateRule, scored: list[int], *, final: bool = True) -> Result:
+    """A side wins only when the test backs it; otherwise the match is too close to call ("inconclusive"). Margin:
+    p <= margin_alpha at boards_max (or a cap), p <= early_alpha before. Void handling is the caller's."""
+    if rule.stop == "margin":
+        total = sum(scored)
+        if total and ms.sign_flip_p(scored) <= (rule.margin_alpha if final else rule.early_alpha):
+            return "first" if total > 0 else "second"
+        return "inconclusive"
+    r = ms.record(scored)
+    p, test = ms.sign_test_p(r.wins, r.losses), ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta)
+    if r.wins > r.losses and (p <= SIGN_TEST_ALPHA or test == "first"):
+        return "first"
+    if r.losses > r.wins and (p <= SIGN_TEST_ALPHA or test == "second"):
+        return "second"
+    return "inconclusive"
 
 
 def next_board_usd(state: DuplicateState) -> float:
@@ -145,25 +183,30 @@ def half_agents(agents: tuple[AgentSpec, AgentSpec], half: int) -> tuple[AgentSp
 
 
 def board_cap(rule: DuplicateRule, rules: Rules) -> int:
-    """Clip = mult x the largest one-challenge defense award (difficulty 3, weight 1)."""
-    return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY
+    """Clip = mult x the largest one-challenge defense award (difficulty 3, at the largest round weight: the last
+    round's number under linear weights, 1 under flat ones), so a multi-round mode is not clipped flat."""
+    weight = rules.rounds if rules.scoring.round_weight == "linear" else 1
+    return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY * weight
 
 
-def build_fault(reason: str | None) -> bool:
-    """A build forfeited on a twice-truncated reply is a harness fault; every other invalid reason is scored."""
-    return (reason or "").startswith(f"malformed: {TRUNCATED}")
+def build_fault(state: MatchState, challenge_id: str) -> bool:
+    """A build forfeited on a twice-truncated reply is a harness fault; every other forfeit is scored. Reads the
+    engine-set ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
+    ch = state.challenges.get(challenge_id)
+    return ch is not None and ch.spec is None and challenge_id in state.build_truncated
 
 
-def attack_fault(output: str) -> bool:
-    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored."""
-    return output.startswith(TRUNCATED)
+def attack_fault(attempt: AttackAttempt) -> bool:
+    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored. Reads
+    the engine-set ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
+    return attempt.truncated
 
 
 def fault(state: MatchState) -> str:
     """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
-    if any(build_fault(v.reason) for v in state.validations.values()):
+    if any(build_fault(state, cid) for cid in state.validations):
         return "build truncated"
-    if any(attack_fault(a.output) for tries in state.attempts.values() for a in tries):
+    if any(attack_fault(a) for tries in state.attempts.values() for a in tries):
         return "attack truncated"
     return ""
 

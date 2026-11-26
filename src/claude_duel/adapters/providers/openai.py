@@ -29,9 +29,9 @@ HTTP_BAD_REQUEST = 400
 _PROCESS_ID = uuid.uuid4().hex  # fallback when the store dir is not writable (read-only image, odd HOME)
 
 
-def install_id_path() -> Path:
-    """``install-id`` in the store dir (``DUEL_STORE_DIR``, default ``.duel``); never under HOME."""
-    return Path(os.environ.get("DUEL_STORE_DIR") or ".duel") / "install-id"
+def install_id_path(store_dir: Path = Path(".duel")) -> Path:
+    """``install-id`` in the store dir the composition root passes (``settings.store_dir``); never under HOME."""
+    return store_dir / "install-id"
 
 
 def _read_id(path: Path) -> str:

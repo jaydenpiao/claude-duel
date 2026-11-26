@@ -33,6 +33,7 @@ from claude_duel.domain.models import (
     Finding,
     LedgerRule,
     MatchState,
+    Purpose,
     SandboxLimits,
     Stage,
     Validation,
@@ -59,7 +60,6 @@ from claude_duel.ports import (
     LLMProvider,
     MatchStore,
     Metrics,
-    Purpose,
     RunResult,
     Sandbox,
 )
@@ -96,6 +96,14 @@ STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this f
 def _decoy(state: MatchState, cid: str, use: str) -> str:
     """A flag-shaped stand-in for challenge cid, never its real flag (SV-1: solver runs, second validation)."""
     return flag_of(state.secret, f"{cid}:{use}-decoy", state.round)
+
+
+def attempt_key(state: MatchState, agent: str, request: CompletionRequest) -> str:
+    """Idempotency key of one paid attempt: the match, how many calls it has charged so far (a failure event does not
+    move it) and the exact request. A resume after a crash between the ledger charge and CALL_CHARGED asks the same
+    thing at the same call count."""
+    parts = (state.match_id, str(state.usage.calls), agent, request.model_dump_json())
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:32]
 
 
 class MatchEngine:
@@ -246,16 +254,21 @@ class MatchEngine:
                 f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
             )
         model = self._models[agent]
-        reservation = self._budget.reserve(state.match_id, model, request)  # a crash keeps it counted
+        key = attempt_key(state, agent, request)
         started = time.monotonic()
-        try:
-            completion = self._providers[agent].complete(request)
-        except Exception:
-            self._budget.release(state.match_id, model, reservation)
-            raise
+        reused = self._budget.settled(key)  # charged before a crash, but its CALL_CHARGED never landed
+        if reused is not None:
+            completion, usd = reused, self._budget.recount(model, reused)
+        else:
+            reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
+            try:
+                completion = self._providers[agent].complete(request)
+            except Exception:
+                self._budget.release(state.match_id, model, reservation)
+                raise
+            usd = self._budget.charge(state.match_id, model, completion, reservation, key)
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
-        usd = self._budget.charge(state.match_id, model, completion, reservation)
         charged: dict[str, object] = {
             "agent": agent,
             "model": model,
@@ -274,6 +287,7 @@ class MatchEngine:
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
         self._checkpoint(state, ev.CALL_CHARGED, **charged)
+        self._budget.forget(key)  # the event is durable now; resume will not repeat this attempt
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
@@ -348,7 +362,8 @@ class MatchEngine:
                 return last, None, probed
             if not problem.startswith("malformed"):
                 self._metrics.incr("model.invalid", purpose="build")
-            self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem)
+            cut = {"truncated": True} if completion.truncated else {}  # typed; omitted when false (old logs unchanged)
+            self._checkpoint(state, ev.BUILD_REJECTED, challenge_id=cid, error=problem, **cut)
             errors = state.build_errors[cid]
         return (last, None, False) if last is not None else (None, errors[-1], False)
 
@@ -482,15 +497,15 @@ class MatchEngine:
         return left - math.ceil(len(f"{system}\n{prompt}".encode()) / 4)
 
     @staticmethod
-    def _output_cap(state: MatchState, agent: str) -> int:
+    def _output_cap(state: MatchState, agent: str, purpose: Purpose) -> int:
         """The agent's own ``max_output_tokens`` (thinking models), else the rules'; the wallet cap only lowers it."""
         own = next((a.max_output_tokens for a in state.agents if a.name == agent), None)
-        return state.rules.output_cap(own)
+        return state.rules.output_cap(own, purpose)
 
     def _request(
         self, state: MatchState, agent: str, prompt: str, purpose: Purpose, left: int | None = None
     ) -> CompletionRequest:
-        tokens = self._output_cap(state, agent)
+        tokens = self._output_cap(state, agent, purpose)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         return CompletionRequest(
@@ -881,11 +896,15 @@ class MatchEngine:
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
         tokens = completion.total_tokens
-        if completion.refused:
-            return AttackAttempt(payload=MALFORMED, output=REFUSED, tokens=tokens, usd_micros=micros, refused=True)
+        if completion.refused or completion.truncated:  # typed flags: challenge stdout can never claim either
+            cut = not completion.refused
+            if cut:
+                self._metrics.incr("model.malformed", purpose="attack")
+            out = TRUNCATED if cut else REFUSED
+            return AttackAttempt(
+                payload=MALFORMED, output=out, tokens=tokens, usd_micros=micros, refused=not cut, truncated=cut
+            )
         try:
-            if completion.truncated:
-                raise MalformedOutputError(TRUNCATED)
             move = agents.parse_attack(completion.text)
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
