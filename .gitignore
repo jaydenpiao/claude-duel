@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .duel/
 .coverage
+.coverage.*
 coverage.xml
 .mypy_cache/
 .ruff_cache/
