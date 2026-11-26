@@ -14,7 +14,13 @@ from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
-from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
+from claude_duel.domain.errors import (
+    DeadlineExceededError,
+    MalformedOutputError,
+    MatchCapError,
+    ProviderTimeoutError,
+    WalletEmptyError,
+)
 from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
 from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.heat_bound import heavy
@@ -263,6 +269,9 @@ class MatchEngine:
             reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
             try:
                 completion = self._providers[agent].complete(request)
+            except ProviderTimeoutError:
+                self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
+                raise
             except Exception:
                 self._budget.release(state.match_id, model, reservation)
                 raise

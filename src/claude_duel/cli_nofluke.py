@@ -65,6 +65,9 @@ _LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on t
     ("--cap-attack", "caps.attack", int),
     ("--max-attempts", "caps.max_attempts", int),
     ("--effort", "caps.effort", str),
+    ("--provider-timeout", "limits.provider_timeout_s", int),
+    ("--call-deadline", "limits.call_deadline_s", int),
+    ("--match-deadline", "limits.match_deadline_s", int),
     ("--run-date", "run_date", str),
 )
 

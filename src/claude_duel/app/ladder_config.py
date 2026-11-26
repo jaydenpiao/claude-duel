@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from claude_duel.app import latency
 from claude_duel.app.budget import FAKE_MODEL, check_model_allowed, vendor_of
 from claude_duel.config import read_toml
 from claude_duel.domain.duplicate import MAX_BOARDS, DuplicateRule
@@ -63,6 +64,15 @@ class CapsPlan(_Plan):
     effort: Literal["low", "medium", "high"] = "medium"
 
 
+class LimitsPlan(_Plan):
+    """Wall-clock limits; unset means sized for the slowest model in the plan (``latency.sized``). A set value below
+    that size is refused, so no model is timed out by a limit tuned for a faster one."""
+
+    provider_timeout_s: int | None = None
+    call_deadline_s: int | None = None
+    match_deadline_s: int | None = None
+
+
 class LadderConfig(_Plan):
     run_date: date
     sides: Sides
@@ -70,6 +80,19 @@ class LadderConfig(_Plan):
     match: MatchPlan = MatchPlan()
     budget: BudgetPlan
     caps: CapsPlan
+    limits: LimitsPlan = LimitsPlan()
+
+    def models(self) -> list[str]:
+        return [m for s in SIDES for m in self.side(s)]
+
+    def timeouts(self) -> latency.Timeouts:
+        """The plan's wall-clock limits: each set value, else the size for the slowest model in the plan."""
+        size, lim = latency.sized(self.models()), self.limits
+        return latency.Timeouts(
+            provider_timeout_s=lim.provider_timeout_s or size.provider_timeout_s,
+            call_deadline_s=lim.call_deadline_s or size.call_deadline_s,
+            match_deadline_s=lim.match_deadline_s or size.match_deadline_s,
+        )
 
     def side(self, name: str) -> tuple[str, ...]:
         return self.sides.a if name == "a" else self.sides.b
@@ -85,7 +108,9 @@ class LadderConfig(_Plan):
         caps = CallCaps(build=self.caps.build, allocate=self.caps.allocate, attack=self.caps.attack)
         base = preset("ladder").model_dump()
         plan = {"max_attempts": self.caps.max_attempts, "call_caps": caps.model_dump()}
-        return Rules.model_validate(base | plan | {"reasoning_effort": self.caps.effort})
+        return Rules.model_validate(
+            base | plan | {"reasoning_effort": self.caps.effort, "match_deadline_s": self.timeouts().match_deadline_s}
+        )
 
     def duplicate_rule(self) -> DuplicateRule:
         return DuplicateRule(
@@ -174,7 +199,21 @@ def _check_numbers(cfg: LadderConfig) -> None:
             raise ConfigError(f"{key} must be > 0")
     if cfg.budget.match_max_usd > cfg.budget.ladder_max_usd:
         raise ConfigError("match_max_usd must be <= ladder_max_usd")
+    _check_limits(cfg)
     try:
         cfg.rules()
     except ValidationError as exc:
         raise ConfigError(f"bad caps: {exc.errors()[0]['msg']}") from exc
+
+
+def _check_limits(cfg: LadderConfig) -> None:
+    """Set wall-clock limits must cover the slowest model in the plan (its sized value) and nest: one request fits in
+    one call deadline."""
+    size = latency.sized(cfg.models())
+    for key, value in cfg.limits.model_dump().items():
+        need = getattr(size, key)
+        if value is not None and value < need:
+            raise ConfigError(f"limits.{key}={value} is below {need}s, the size for the slowest model in this plan")
+    t = cfg.timeouts()
+    if t.call_deadline_s < t.provider_timeout_s:
+        raise ConfigError("limits.call_deadline_s must be >= limits.provider_timeout_s")

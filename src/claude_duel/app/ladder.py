@@ -84,7 +84,8 @@ def project(cfg: LadderConfig) -> Projection:
 
 def ladder_settings(settings: Settings, cfg: LadderConfig) -> Settings:
     """Rules from the plan; dollars, not per-half token or call counts, bound a ladder: its run cap is the ladder
-    cap and each half may spend up to the match cap (the per-call hard stop keeps the duplicate match under it)."""
+    cap and each half may spend up to the match cap (the per-call hard stop keeps the duplicate match under it).
+    Provider timeouts come from the plan, sized for its slowest model, the same for every model."""
     limits = settings.budget.model_copy(
         update={
             "match_max_usd": cfg.budget.match_max_usd,
@@ -94,7 +95,15 @@ def ladder_settings(settings: Settings, cfg: LadderConfig) -> Settings:
             "run_max_calls": LADDER_RUN_MAX_CALLS,
         }
     )
-    return settings.model_copy(update={"rules": cfg.rules(), "budget": limits})
+    t = cfg.timeouts()
+    return settings.model_copy(
+        update={
+            "rules": cfg.rules(),
+            "budget": limits,
+            "provider_timeout": float(t.provider_timeout_s),
+            "provider_call_deadline": float(t.call_deadline_s),
+        }
+    )
 
 
 LADDER_HALF_MAX_TOKENS = 5_000_000

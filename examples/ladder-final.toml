@@ -28,3 +28,5 @@ allocate = 2000
 attack = 8000
 max_attempts = 3
 effort = "medium"  # one reasoning effort sent to every model (default medium; pending confirmation)
+
+[limits]  # unset: sized for the slowest model in the plan (here 900 s per request, 1800 s per call, 6660 s per half)
