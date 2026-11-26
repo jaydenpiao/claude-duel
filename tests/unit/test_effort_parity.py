@@ -45,13 +45,13 @@ def _sent_effort(model: str, effort: str | None) -> object:
     return reasoning.get("effort") if isinstance(reasoning, dict) else None
 
 
-@pytest.mark.parametrize("plan", ["final", "pilot", "pilot-self"])
+@pytest.mark.parametrize("plan", ["final", "pilot", "pilot-self", "control-200"])
 def test_every_model_in_a_plan_is_sent_the_same_effort(plan: str) -> None:
     cfg = lc.load(EXAMPLES / f"ladder-{plan}.toml", allow_premium=True)
-    assert cfg.caps.effort == "medium"
-    assert cfg.rules().reasoning_effort == "medium"
+    assert cfg.caps.effort == "high"  # jayden, 2026-11-26: high for all 8 models
+    assert cfg.rules().reasoning_effort == "high"
     models = {m for side in (cfg.sides.a, cfg.sides.b) for m in side}
-    assert {m: _sent_effort(m, cfg.rules().reasoning_effort) for m in models} == dict.fromkeys(models, "medium")
+    assert {m: _sent_effort(m, cfg.rules().reasoning_effort) for m in models} == dict.fromkeys(models, "high")
 
 
 def test_without_a_plan_effort_the_vendors_would_differ() -> None:

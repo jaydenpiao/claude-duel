@@ -55,7 +55,7 @@ def match_usd(cfg: LadderConfig, a: str, b: str, *, basis: Basis = "worst") -> f
     """One duplicate match: two halves per board, each half a match where both agents play. ``basis`` "calibrated"
     prices each model at its measured token use; "worst" and "typical" use the assumed sizes
     (``estimate.agent_usd``)."""
-    rules, rule = cfg.rules(), cfg.duplicate_rule()
+    rules, rule = cfg.rules(), cfg.duplicate_rule(a, b)
     if basis == "calibrated":
         half = calibration.calibrated_agent_usd(rules, a) + calibration.calibrated_agent_usd(rules, b)
         return rule.boards_max * 2 * half
@@ -85,16 +85,20 @@ def project(cfg: LadderConfig) -> Projection:
     start = (cfg.start_tier.a, cfg.start_tier.b)
     path_usd, path = dearest(*start)
     rows = [_row(cfg, a[i], b[j]) for i, j in path]
-    cap, label = cfg.budget.match_max_usd, f"{cfg.budget.basis} case"
+    label = f"{cfg.budget.basis} case"
     reachable = [(m, n) for m in a[start[0] :] for n in b[start[1] :]]
     refusals = [
-        f"{m} vs {n}: {label} ${usd:.2f} > match_max_usd ${cap:.2f}"
+        f"{m} vs {n}: {label} ${usd:.2f} > {_cap_name(cfg, m, n)} ${cap:.2f}"
         for m, n in reachable
-        if (usd := basis_usd(cfg, m, n)) > cap
+        if (usd := basis_usd(cfg, m, n)) > (cap := cfg.match_cap(m, n))
     ]
     if path_usd > cfg.budget.ladder_max_usd:
         refusals.append(f"ladder {label} ${path_usd:.2f} > ladder_max_usd ${cfg.budget.ladder_max_usd:.2f}")
     return Projection(rows, sum(r.worst_usd for r in rows), refusals, cfg.budget.basis)
+
+
+def _cap_name(cfg: LadderConfig, a: str, b: str) -> str:
+    return "pair_max_usd" if f"{a} vs {b}" in cfg.budget.pair_max_usd else "match_max_usd"
 
 
 def _row(cfg: LadderConfig, a: str, b: str) -> Row:
@@ -113,7 +117,7 @@ def ladder_settings(settings: Settings, cfg: LadderConfig) -> Settings:
     Provider timeouts come from the plan, sized for its slowest model, the same for every model."""
     limits = settings.budget.model_copy(
         update={
-            "match_max_usd": cfg.budget.match_max_usd,
+            "match_max_usd": cfg.top_match_cap(),
             "match_max_tokens": LADDER_HALF_MAX_TOKENS,
             "match_max_calls": LADDER_HALF_MAX_CALLS,
             "run_max_usd": cfg.budget.ladder_max_usd,
@@ -182,10 +186,12 @@ def play_ladder(
             step_settings = settings.model_copy(update={"agents": agents(a, b)})
             budget.hard_caps = (
                 SpendCap("ladder", f"{ladder_id}-", cfg.budget.ladder_max_usd),
-                SpendCap(f"match {state.step_id(n)}", f"{state.step_id(n)}-", cfg.budget.match_max_usd),
+                SpendCap(f"match {state.step_id(n)}", f"{state.step_id(n)}-", cfg.match_cap(a, b)),
             )
             try:
-                dup = play_duplicate(step_settings, state.step_id(n), cfg.duplicate_rule(), metrics, observer, budget)
+                dup = play_duplicate(
+                    step_settings, state.step_id(n), cfg.duplicate_rule(a, b), metrics, observer, budget
+                )
             except CyberPolicyError:  # a vendor policy block is an outcome of this pairing, not a pause
                 usd = spent.spent_usd(f"{state.step_id(n)}-")
                 step = ld.Step(step_no=n, a=a, b=b, duplicate_id=state.step_id(n), result="blocked", usd=usd)

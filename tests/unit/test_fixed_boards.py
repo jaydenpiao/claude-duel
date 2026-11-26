@@ -65,7 +65,7 @@ def test_calibrated_usage_uses_measured_rows_and_named_proxies() -> None:
 
 def test_calibrated_price_follows_each_models_measured_output() -> None:
     cfg = lc.parse(_plan(), allow_premium=True)
-    rules = cfg.rules()
+    rules = cfg.rules().model_copy(update={"reasoning_effort": None})  # each row at the effort it was logged at
     # fable writes ~2.6x astra's mean output at the same list price ratio: it must price dearer, not equal
     fable = calibration.calibrated_agent_usd(rules, "claude-fable-5-2")
     assert fable > 2 * calibration.calibrated_agent_usd(rules, "gpt-6.2-astra")
@@ -86,3 +86,42 @@ def test_calibrated_basis_refuses_an_unmeasured_model() -> None:
     plan = _plan(sides={"a": ["claude-haiku-5-5"], "b": ["gpt-5-mini"]})
     with pytest.raises(ConfigError, match="no calibrated token use"):
         project(lc.parse(plan))
+
+
+def test_high_effort_scales_output_from_each_rows_logged_effort() -> None:
+    # luna was logged at low, astra at medium, Claude at its API default (high): high doubles astra, quadruples luna
+    assert calibration.effort_scale("gpt-6-luna", "high") == 4.0
+    assert calibration.effort_scale("gpt-6-astra", "high") == 2.0
+    assert calibration.effort_scale("claude-haiku-5-5", "high") == 1.0
+    assert calibration.effort_scale("gpt-6-astra", None) == 1.0
+    high = lc.parse(_plan(caps={**_plan()["caps"], "effort": "high"}), allow_premium=True)
+    low = lc.parse(_plan(caps={**_plan()["caps"], "effort": "low"}), allow_premium=True)
+    assert match_usd(high, "claude-haiku-5-5", "gpt-6-luna", basis="calibrated") > match_usd(
+        low, "claude-haiku-5-5", "gpt-6-luna", basis="calibrated"
+    )
+
+
+def test_pair_caps_raise_only_the_named_pairings() -> None:
+    pricey = "claude-fable-5-2 vs gpt-6.2-astra"
+    budget = {"match_max_usd": 5.0, "ladder_max_usd": 900.0, "basis": "calibrated", "pair_max_usd": {pricey: 300.0}}
+    cfg = lc.parse(_plan(budget=budget), allow_premium=True)
+    assert cfg.match_cap("claude-fable-5-2", "gpt-6.2-astra") == 300.0
+    assert cfg.duplicate_rule("claude-fable-5-2", "gpt-6.2-astra").match_max_usd == 300.0
+    assert cfg.match_cap("claude-haiku-5-5", "gpt-6-luna") == 5.0
+    assert cfg.top_match_cap() == 300.0
+    refused = project(cfg).refusals
+    assert not any(r.startswith(pricey) for r in refused)
+    assert any(r.startswith("claude-fable-5-2 vs gpt-6-luna") for r in refused)
+
+
+@pytest.mark.parametrize(
+    ("pairs", "why"),
+    [
+        ({"claude-haiku-5-5 vs claude-fable-5-2": 30.0}, "not a pairing"),
+        ({"claude-haiku-5-5 vs gpt-6-luna": 0.0}, "> 0"),
+    ],
+)
+def test_pair_caps_name_real_pairings_and_stay_under_the_ladder_cap(pairs: dict[str, float], why: str) -> None:
+    budget = {"match_max_usd": 25.0, "ladder_max_usd": 95.0, "basis": "calibrated", "pair_max_usd": pairs}
+    with pytest.raises(ConfigError, match=why):
+        lc.parse(_plan(budget=budget), allow_premium=True)

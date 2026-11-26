@@ -1,6 +1,7 @@
-# Real pilot before the final ladder (jayden, 2026-11-19): ladder-final's caps and boards on the two cheapest models.
-# Run it twice (fresh seeds from each ladder id), then `duel ladder-compare`. With ladder-pilot-self.toml the
-# pilot is hard-capped at $10 in total ($4.50 + $4.50 + $1).
+# Real pilot before the final ladder (jayden, 2026-11-26): ladder-final's caps, 34 fixed boards and effort high on
+# the two cheapest models. Run it twice (fresh seeds from each ladder id), then `duel ladder-compare`. With the two
+# controls (ladder-pilot-self.toml, ladder-control-200.toml) the pilot is hard-capped at $15 in total
+# ($2.50 + $2.50 + $2 + $8; calibrated $0.90 + $0.90 + $0.88 + $5.30).
 run_date = "2026-11-20"
 
 [sides]
@@ -8,12 +9,11 @@ a = ["claude-haiku-5-5"]
 b = ["gpt-6-luna"]
 
 [match]
-boards_min = 12
-boards_max = 48
+boards = 34  # fixed: every pairing plays all 34 boards, no early stop
 
 [budget]
-match_max_usd = 4.5
-ladder_max_usd = 4.5
+match_max_usd = 2.5
+ladder_max_usd = 2.5
 basis = "calibrated"
 
 [caps]
@@ -21,7 +21,7 @@ build = 24000
 allocate = 2000
 attack = 8000
 max_attempts = 3
-effort = "medium"  # one reasoning effort sent to every model (default medium; pending confirmation)
+effort = "high"  # sent to all 8 models (jayden, 2026-11-26)
 
 [limits]  # wall clock, the same for both models; the floors already cover haiku and luna (slowest call seen: 39 s)
 provider_timeout_s = 300  # one HTTP request (the old 60 s default timed out slower models mid-reply)

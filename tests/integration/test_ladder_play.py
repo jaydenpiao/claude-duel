@@ -138,10 +138,10 @@ def test_hard_stop_ends_a_typical_basis_ladder_cleanly_and_a_raised_cap_resumes_
     def budget() -> CostBudget:
         return CostBudget(BudgetLimits(match_max_usd=10, run_max_usd=10), build_ledger(settings), prices)
 
-    tight = _load(FAKE, {"budget.match_max_usd": 0.02, "budget.basis": "typical"})
+    tight = _load(FAKE, {"budget.match_max_usd": 0.01, "budget.basis": "typical"})
     with pytest.raises(BudgetExceededError, match="hard stop"):
         play_ladder(settings, "lad-stop", tight, InMemoryMetrics(), budget=budget())
-    assert FileSpendLedger(settings.store_dir / "ledger.jsonl").spent_usd("lad-stop-s1-") <= 0.02
+    assert FileSpendLedger(settings.store_dir / "ledger.jsonl").spent_usd("lad-stop-s1-") <= 0.01
     done = play_ladder(settings, "lad-stop", _load(FAKE), InMemoryMetrics(), budget=budget())  # same plan digest
     assert done.done()
     assert verify_ladder(settings, "lad-stop").consistent
@@ -164,13 +164,14 @@ def test_compare_marks_agreement_and_too_close() -> None:
     assert split.matchups[0].results == ("first", "second")
 
 
-def test_final_plan_is_refused_on_calibrated_and_worst_cost_and_passes_only_on_typical() -> None:
+def test_final_plan_fits_its_pair_caps_on_calibrated_cost_and_is_refused_on_worst() -> None:
     final = _load(EXAMPLES / "ladder-final.toml")
     assert final.budget.basis == "calibrated"
-    assert any("claude-fable-5-2 vs gpt-6.2-astra" in r for r in ladder_mod.project(final).refusals)
+    assert not ladder_mod.project(final).refusals
+    assert final.match_cap("claude-fable-5-2", "gpt-6.2-astra") > final.budget.match_max_usd
     assert not ladder_mod.project(_load(EXAMPLES / "ladder-final.toml", {"budget.basis": "typical"})).refusals
     assert ladder_mod.project(_load(EXAMPLES / "ladder-final.toml", {"budget.basis": "worst"})).refusals
-    assert final.digest() == _load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 200}).digest()
+    assert final.digest() == _load(EXAMPLES / "ladder-final.toml", {"budget.ladder_max_usd": 700}).digest()
 
 
 def test_watch_prints_halves_and_attacks(

@@ -59,6 +59,8 @@ class BudgetPlan(_Plan):
     # hard stop then keeps actual spend under both caps (the run stops cleanly, resumable after raising a cap).
     # "calibrated" prices each model from its measured token use (app/calibration.py) instead of one assumed size.
     basis: Basis = "worst"
+    # per-pairing match caps over match_max_usd for the dearer pairings, keyed "<side a model> vs <side b model>"
+    pair_max_usd: dict[str, float] = Field(default_factory=dict)
 
 
 class CapsPlan(_Plan):
@@ -119,14 +121,23 @@ class LadderConfig(_Plan):
             base | plan | {"reasoning_effort": self.caps.effort, "match_deadline_s": self.timeouts().match_deadline_s}
         )
 
-    def duplicate_rule(self) -> DuplicateRule:
-        """``match.boards`` fixes every pairing at that many boards (no early stop); else the margin rule's range."""
+    def match_cap(self, a: str, b: str) -> float:
+        """The match cap for ``a`` vs ``b``: its ``pair_max_usd`` entry, else ``match_max_usd``."""
+        return self.budget.pair_max_usd.get(f"{a} vs {b}", self.budget.match_max_usd)
+
+    def top_match_cap(self) -> float:
+        """The largest match cap any pairing has (what one half may spend at most)."""
+        return max([self.budget.match_max_usd, *self.budget.pair_max_usd.values()])
+
+    def duplicate_rule(self, a: str = "", b: str = "") -> DuplicateRule:
+        """``match.boards`` fixes every pairing at that many boards (no early stop); else the margin rule's range.
+        The money cap is ``a`` vs ``b``'s (``match_cap``)."""
         n = self.match.boards
         return DuplicateRule(
             boards_min=self.match.boards_min if n is None else n,
             boards_max=self.match.boards_max if n is None else n,
             stop="margin" if n is None else "none",
-            match_max_usd=self.budget.match_max_usd,
+            match_max_usd=self.match_cap(a, b),
         )
 
 
@@ -176,6 +187,7 @@ def check(cfg: LadderConfig, allow_premium: bool = False) -> None:
     boards, money, caps and retirement."""
     _check_models(cfg, allow_premium)
     _check_numbers(cfg)
+    _check_pair_caps(cfg)
 
 
 def _check_models(cfg: LadderConfig, allow_premium: bool) -> None:
@@ -199,6 +211,15 @@ def _check_models(cfg: LadderConfig, allow_premium: bool) -> None:
             raise ConfigError(f"{m} is retired from {cutoff} (run_date={cfg.run_date}); use {use}")
 
 
+def _check_pair_caps(cfg: LadderConfig) -> None:
+    pairs = {f"{m} vs {n}" for m in cfg.sides.a for n in cfg.sides.b}
+    for key, usd in cfg.budget.pair_max_usd.items():
+        if key not in pairs:
+            raise ConfigError(f"budget.pair_max_usd: {key!r} is not a pairing of this plan ('<a model> vs <b model>')")
+        if not 0 < usd <= cfg.budget.ladder_max_usd:
+            raise ConfigError(f"budget.pair_max_usd[{key!r}] must be > 0 and <= ladder_max_usd")
+
+
 def _check_numbers(cfg: LadderConfig) -> None:
     boards = cfg.match
     if boards.boards is not None:
@@ -208,7 +229,7 @@ def _check_numbers(cfg: LadderConfig) -> None:
             raise ConfigError(f"match.boards must be >= 1 and <= {MAX_BOARDS}")
     elif not 1 <= boards.boards_min <= boards.boards_max <= MAX_BOARDS:
         raise ConfigError(f"boards_min must be >= 1 and <= boards_max, and boards_max <= {MAX_BOARDS}")
-    positive = {**cfg.budget.model_dump(exclude={"basis"}), **cfg.caps.model_dump(exclude={"effort"})}
+    positive = {**cfg.budget.model_dump(exclude={"basis", "pair_max_usd"}), **cfg.caps.model_dump(exclude={"effort"})}
     for key, value in positive.items():
         if value <= 0:
             raise ConfigError(f"{key} must be > 0")

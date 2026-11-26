@@ -25,7 +25,7 @@ from claude_duel.domain.models import AgentSpec, AttackAttempt, Event, MatchStat
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
-MAX_BOARDS = 64  # money caps bind first; this only stops a typo
+MAX_BOARDS = 256  # money caps bind first; this only stops a typo
 Result = Literal["first", "second", "inconclusive", "capped"]
 
 
