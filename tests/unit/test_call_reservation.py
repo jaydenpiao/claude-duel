@@ -162,3 +162,15 @@ def test_one_attempt_key_holds_one_reservation_and_one_charge(tmp_path: Path) ->
     resumed.forget("k1")
     assert resumed.settled("k1") is None
     assert not list((tmp_path / "replies").iterdir())
+
+
+def test_a_kept_reply_without_its_charge_is_never_reused(tmp_path: Path) -> None:
+    """The reply is written before the charge line: a crash between them leaves a reply nobody paid for, so the
+    resume asks the provider again (and pays once) instead of reusing it for free."""
+    path = tmp_path / "ledger.jsonl"
+    budget = _budget(path)
+    budget.reserve("m1", FAKE_MODEL, REQ, key="k1")
+    FileReplyStore(tmp_path / "replies").keep(
+        "k1", Completion(text="answer", input_tokens=10, output_tokens=5).model_dump()
+    )
+    assert _budget(path).settled("k1") is None
