@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -13,6 +14,9 @@ from claude_duel.domain.models import SandboxLimits
 from claude_duel.ports import KILL_OUTPUT, KILL_SIGNAL, KILL_WALL, KilledReason, RunResult
 
 _CHUNK = 4096
+# After the group kill and cleanup, how long to wait for the client process and the stdout reader. A privileged
+# client (``sudo -n docker``) survives killpg, so nothing here may wait on it without a bound.
+REAP_SECONDS = 5.0
 
 
 def execute(
@@ -27,8 +31,10 @@ def execute(
 ) -> RunResult:
     """Run argv in its own process group with a wall-clock limit and a hard output cap.
 
-    The whole process group is always killed afterwards, so forked children can't
-    outlive the run; ``cleanup`` runs last (e.g. to remove a container).
+    The whole process group is always killed afterwards, so forked children can't outlive the run. ``cleanup`` (e.g.
+    ``docker rm -f``) runs right after the kill and before any wait on the client or its stdout reader, because a
+    privileged client survives the group kill and keeps the pipe open until its container is gone. Every wait after
+    that is bounded by ``REAP_SECONDS``.
     """
     proc = subprocess.Popen(  # noqa: S603 - argv is built by the arena, never by a model
         list(argv),
@@ -43,7 +49,9 @@ def execute(
     assert proc.stdout is not None
     out = bytearray()
     overflow = threading.Event()
-    reader = threading.Thread(target=_read_capped, args=(proc, proc.stdout, out, limits.max_output_bytes, overflow))
+    reader = threading.Thread(
+        target=_read_capped, args=(proc, proc.stdout, out, limits.max_output_bytes, overflow), daemon=True
+    )
     reader.start()
     _write(proc.stdin, stdin.encode())
     timed_out = False
@@ -53,14 +61,20 @@ def execute(
         timed_out = True
     finally:
         kill_group(proc.pid)
-        proc.wait()
-        reader.join()
         if cleanup is not None:
             cleanup()
+        _reap(proc, reader)
     stdout = bytes(out[: limits.max_output_bytes]).decode(errors="replace")
     return RunResult(
         stdout=stdout, exit_code=proc.returncode, timed_out=timed_out, killed_reason=_reason(proc, timed_out, overflow)
     )
+
+
+def _reap(proc: subprocess.Popen[bytes], reader: threading.Thread) -> None:
+    """Bounded waits only: a client that outlives the kill and cleanup is abandoned, never waited on forever."""
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=REAP_SECONDS)
+    reader.join(timeout=REAP_SECONDS)
 
 
 def kill_group(pgid: int) -> None:
