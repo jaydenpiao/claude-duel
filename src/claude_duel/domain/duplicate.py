@@ -112,7 +112,8 @@ class DuplicateState(BaseModel):
         return ms.bootstrap_ci(self.diffs(), self.seed)
 
     def result(self) -> Result:
-        """``first``/``second`` only when the sign test (p <= 0.05) or the SPRT backs it; spend never decides."""
+        """``first``/``second`` only when the stop rule backs it (see ``verdict``: the summed-margin sign-flip by default,
+        or the sign test / SPRT for ``stop="sprt"``); spend never decides."""
         if not self.done():
             raise ValueError("duplicate match is not finished")
         if self.void_share_exceeded():
