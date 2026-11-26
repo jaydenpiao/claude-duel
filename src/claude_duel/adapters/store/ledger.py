@@ -11,9 +11,9 @@ A line that cannot be trusted (torn, unparseable, or a negative or non-finite ``
 ``SpendLedgerCorruptError``: spending stops until a person inspects the file, instead of the line being skipped or
 lowering the total.
 
-Idempotent attempts: a reservation and its charge may carry an attempt ``key``. A charge with a ``reply`` keeps that
-reply under ``replies/`` (0600, written before the charge line), so a resume after a crash between the charge and the
-match's own event reuses it instead of paying again; a second reservation for the same key replaces the first.
+Idempotent attempts: a reservation and its charge may carry an attempt ``key``; ``charged(key)`` says the charge is
+in. The reply itself lives in a ``ReplyStore`` (adapters/store/replies.py), not here. A second reservation for the
+same key replaces the first.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ class FileSpendLedger:
         self._by_match: dict[str, float] = {}
         self._keys: dict[str, str] = {}  # attempt key -> its open reservation id
         self._charged: set[str] = set()  # attempt keys with a settled charge
-        self._replies = path.parent / "replies"
 
     def spent_usd(self, prefix: str) -> float:
         """Spend of every match whose id starts with ``prefix`` (a series or tournament), failed games included."""
@@ -103,7 +102,6 @@ class FileSpendLedger:
         usd: float,
         settles: str | None = None,
         key: str | None = None,
-        reply: dict[str, Any] | None = None,
     ) -> None:
         entry: dict[str, object] = {
             "ts": time.time(),
@@ -116,41 +114,12 @@ class FileSpendLedger:
             entry["settles"] = settles
         if key:
             entry["key"] = key
-            if reply is not None:
-                self._keep(key, reply)
         self._append(entry)
 
-    def settled(self, key: str) -> dict[str, Any] | None:
+    def charged(self, key: str) -> bool:
         with jsonl.locked(self._path, exclusive=False) as fd:
             self._catch_up(fd)
-        if key not in self._charged:
-            return None
-        try:
-            data = json.loads(self._reply_path(key).read_text())
-        except (FileNotFoundError, ValueError):
-            return None
-        return data if isinstance(data, dict) else None
-
-    def forget(self, key: str) -> None:
-        self._reply_path(key).unlink(missing_ok=True)
-
-    def _reply_path(self, key: str) -> Path:
-        if not key.isalnum():
-            raise ValueError("attempt keys are hex digests")
-        return self._replies / f"{key}.json"
-
-    def _keep(self, key: str, reply: dict[str, Any]) -> None:
-        """Write the reply atomically at 0600 and fsync it before the charge line refers to it."""
-        self._replies.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = self._reply_path(key)
-        tmp = path.with_name(f".{key}.{uuid.uuid4().hex}")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            os.write(fd, json.dumps(reply).encode())
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(tmp, path)
+        return key in self._charged
 
     def _spent(self, prefix: str) -> float:
         return sum(v for k, v in self._by_match.items() if k.startswith(prefix))

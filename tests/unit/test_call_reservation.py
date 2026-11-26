@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.replies import FileReplyStore
 from claude_duel.app.budget import (
     DEFAULT_PRICES,
     FAKE_MODEL,
@@ -30,7 +31,7 @@ WORST = (IN * 1.0 + 1000 * 2.0) / 1e6
 
 
 def _budget(path: Path) -> CostBudget:
-    return CostBudget(BudgetLimits(), FileSpendLedger(path), PRICES)
+    return CostBudget(BudgetLimits(), FileSpendLedger(path), PRICES, replies=FileReplyStore(path.parent / "replies"))
 
 
 def test_crash_between_call_and_charge_stays_counted(tmp_path: Path) -> None:
