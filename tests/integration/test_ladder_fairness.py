@@ -73,3 +73,31 @@ def test_heat_history_is_scoped_to_the_current_pairing(tmp_path: Path) -> None:
     assert _refs(settings, "pair2-b1a") == []  # pair1's halves are in the store, but another pairing never counts
     later = _refs(settings, "pair2-b2a")
     assert set(later) <= _built(settings, "pair2-b1a", "pair2-b1b")  # only this pairing's own earlier halves
+
+
+def test_two_blocks_in_a_row_pause_the_ladder_and_a_rerun_resumes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = ladder_mod.play_duplicate
+
+    def block(settings: Settings, duplicate_id: str, *a: Any) -> Any:
+        raise CyberPolicyError("openai cyber_policy: access limited; not retried")
+
+    plan = tmp_path / "three.toml"
+    plan.write_text(
+        FAKE.read_text()
+        .replace('a = ["fake-1", "fake-1"]', 'a = ["fake-1", "fake-1", "fake-1"]')
+        .replace('b = ["fake-1", "fake-1"]', 'b = ["fake-1", "fake-1", "fake-1"]')
+    )
+    cfg = lc.load(plan)
+    monkeypatch.setattr(ladder_mod, "play_duplicate", block)
+    state = play_ladder(_settings(tmp_path), "lad-pause", cfg, InMemoryMetrics())
+    assert [s.result for s in state.steps] == ["blocked", "blocked"]
+    assert state.paused == 1  # paused, not stepped down past the vendor's whole side
+    assert not state.done()
+    monkeypatch.setattr(ladder_mod, "play_duplicate", real)
+    assert verify_ladder(_settings(tmp_path), "lad-pause").consistent
+    again = play_ladder(_settings(tmp_path), "lad-pause", cfg, InMemoryMetrics())
+    assert again.done()
+    assert again.steps[:2] == state.steps
+    assert len(again.steps) == 3

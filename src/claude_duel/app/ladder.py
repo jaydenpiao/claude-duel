@@ -174,12 +174,18 @@ def play_ladder(
         settings = ladder_settings(settings, cfg)
         budget = budget or build_budget(settings)
         spent = build_ledger(settings)
+        seq = len(events)
         while not state.done():
             n = len(state.steps) + 1
             a, b = state.next_pair()
             if spent.spent_usd(f"{ladder_id}-") + basis_usd(cfg, a, b) > cfg.budget.ladder_max_usd:
                 append(
-                    log, ladder_id, schema_version=ld.LADDER_SCHEMA_VERSION, seq=n, event_type=ld.LADDER_CAPPED, data={}
+                    log,
+                    ladder_id,
+                    schema_version=ld.LADDER_SCHEMA_VERSION,
+                    seq=seq,
+                    event_type=ld.LADDER_CAPPED,
+                    data={},
                 )
                 state.capped = True
                 break
@@ -204,17 +210,29 @@ def play_ladder(
                 log,
                 ladder_id,
                 schema_version=ld.LADDER_SCHEMA_VERSION,
-                seq=n,
+                seq=seq,
                 event_type=ld.STEP_FINISHED,
                 data=step.model_dump(),
             )
+            seq += 1
             state.steps.append(step)
+            if step.result == "blocked" and ld.breaker_trips(state.steps):
+                append(
+                    log,
+                    ladder_id,
+                    schema_version=ld.LADDER_SCHEMA_VERSION,
+                    seq=seq,
+                    event_type=ld.LADDER_PAUSED,
+                    data={"reason": "two blocked steps in a row", "after_step": n},
+                )
+                state.paused += 1
+                return state  # `duel ladder` again resumes once the vendor block is cleared
             if step.result == "capped":  # a hard stop cut the match short of its boards: no verdict, stop here
                 append(
                     log,
                     ladder_id,
                     schema_version=ld.LADDER_SCHEMA_VERSION,
-                    seq=n + 1,
+                    seq=seq,
                     event_type=ld.LADDER_CAPPED,
                     data={},
                 )

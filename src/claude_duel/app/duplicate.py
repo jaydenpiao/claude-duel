@@ -51,16 +51,16 @@ def play_duplicate(
         budget = budget or build_budget(settings)
         seq = len(events)
         while not state.done():
-            if state.boards and state.spent_usd() + dp.next_board_usd(state) > state.rule.match_max_usd:
+            if (reason := dp.cap_reason(state)) is not None:
                 append(
                     log,
                     duplicate_id,
                     schema_version=dp.DUPLICATE_SCHEMA_VERSION,
                     seq=seq,
                     event_type=dp.DUPLICATE_CAPPED,
-                    data={},
+                    data={"reason": reason},
                 )
-                state.capped = True
+                state.capped, state.cap_reason = True, reason
                 break
             board = _board(settings, state, metrics, observer, budget)
             if board is None:

@@ -9,6 +9,7 @@ import pytest
 
 from claude_duel.app import calibration
 from claude_duel.app import ladder_config as lc
+from claude_duel.app.estimate import agent_usd
 from claude_duel.app.ladder import match_usd, project
 from claude_duel.domain import duplicate as dp
 from claude_duel.domain.errors import ConfigError
@@ -125,3 +126,28 @@ def test_pair_caps_name_real_pairings_and_stay_under_the_ladder_cap(pairs: dict[
     budget = {"match_max_usd": 25.0, "ladder_max_usd": 95.0, "basis": "calibrated", "pair_max_usd": pairs}
     with pytest.raises(ConfigError, match=why):
         lc.parse(_plan(budget=budget), allow_premium=True)
+
+
+def _priced(usd: list[float], *, stop: str = "none", cap: float = 10.0, boards: int = 34) -> dp.DuplicateState:
+    rule = dp.DuplicateRule(boards_min=boards, boards_max=boards, stop=stop, match_max_usd=cap)  # type: ignore[arg-type]
+    state = _state(0, capped=False, rule=rule)
+    for n, u in enumerate(usd, 1):
+        state.boards.append(dp.Board(board_no=n, seed=f"{n}", halves=(f"{n}a", f"{n}b"), raw=1, diff=1, usd=u))
+    return state
+
+
+def test_projected_cap_abort_from_board_4_on_fixed_boards_only() -> None:
+    over = 10.0 / 34 * 1.5  # each board 1.5x the cap's share
+    assert dp.cap_reason(_priced([over] * 3)) is None  # too early to project
+    assert dp.cap_reason(_priced([over] * 4)) == "projected_over_cap"
+    assert dp.cap_reason(_priced([10.0 / 34] * 20)) is None  # on budget: plays on
+    assert dp.cap_reason(_priced([over] * 4, stop="margin")) is None  # early-stop matches rarely reach boards_max
+    assert dp.cap_reason(_priced([6.0])) == "next_board_over_cap"
+    assert dp.cap_reason(_priced([])) is None
+
+
+def test_worst_case_prices_one_try_per_board() -> None:
+    cfg = lc.parse(_plan(budget={"match_max_usd": 25.0, "ladder_max_usd": 95.0}), allow_premium=True)
+    rules, a, b = cfg.rules(), "claude-haiku-5-5", "gpt-6-luna"
+    per_board = 2 * (agent_usd(rules, a) + agent_usd(rules, b))  # two halves, every reply at its cap, no replays
+    assert match_usd(cfg, a, b) == pytest.approx(cfg.duplicate_rule().boards_max * per_board)

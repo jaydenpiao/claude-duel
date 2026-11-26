@@ -25,6 +25,7 @@ def duplicate_view(state: DuplicateState, verified: bool, mismatches: list[str])
         "spent_usd": round(state.spent_usd(), 4),
         "cap_usd": state.rule.match_max_usd,
         "capped": state.capped,
+        "cap_reason": state.cap_reason,
         "truncated": truncated(state),
         "result": state.result() if done else "unfinished",
         "winner": state.winner() if done else None,
@@ -49,7 +50,8 @@ def duplicate_lines(state: DuplicateState, verified: bool, mismatches: list[str]
         f"record {r.wins}-{r.losses}-{r.ties} · margin {sum(state.diffs()):+d} (p={state.margin_p():.4f})"
         f" · sign p={state.p_value():.4f}"
         f" · 95% CI [{lo:.2f}, {hi:.2f}] · SPRT {state.sprt()}"
-        f" · ${state.spent_usd():.4f}/${state.rule.match_max_usd}" + (" · CAPPED" if state.capped else "")
+        f" · ${state.spent_usd():.4f}/${state.rule.match_max_usd}"
+        + (f" · CAPPED ({state.cap_reason or 'cap'})" if state.capped else "")
     )
     cut = truncated(state)
     if any(cut.values()):

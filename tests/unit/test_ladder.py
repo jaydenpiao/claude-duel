@@ -86,3 +86,14 @@ def test_match_cost_scales_with_boards() -> None:
     assert match_usd(half, "claude-opus-5-5", "gpt-5-mini") == pytest.approx(
         match_usd(cfg, "claude-opus-5-5", "gpt-5-mini") / 2
     )
+
+
+def test_vendor_breaker_trips_on_two_blocked_steps_in_a_row_only() -> None:
+    def steps(*results: str) -> list[ld.Step]:
+        return [
+            ld.Step(step_no=n, a="a", b="b", duplicate_id=f"x-s{n}", result=r, usd=0) for n, r in enumerate(results, 1)
+        ]  # type: ignore[arg-type]
+
+    assert ld.breaker_trips(steps("first", "blocked", "blocked"))
+    assert not ld.breaker_trips(steps("blocked", "first", "blocked"))
+    assert not ld.breaker_trips(steps("blocked"))

@@ -7,6 +7,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from claude_duel.domain import events as ev
+from claude_duel.domain import ladder as ld
 from claude_duel.domain.ladder import LadderState
 from claude_duel.domain.models import Event
 
@@ -67,6 +68,7 @@ def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> di
         "steps": [s.model_dump() for s in state.steps],
         "spent_usd": round(state.spent_usd(), 4),
         "capped": state.capped,
+        "paused": state.paused,
         "done": state.done(),
         "verified": verified,
         "mismatches": mismatches,
@@ -79,7 +81,15 @@ def ladder_lines(state: LadderState, verified: bool, mismatches: list[str]) -> l
         side = _WINNER.get(s.result)
         tag = f"winner {s.a if side == 'a' else s.b}" if side else s.result
         lines.append(f"step {s.step_no}: {s.a} vs {s.b} · {tag} · ${s.usd:.4f} · {s.duplicate_id}")
-    status = "CAPPED" if state.capped else "finished" if state.done() else "unfinished (run again to resume)"
+    status = (
+        "CAPPED"
+        if state.capped
+        else "finished"
+        if state.done()
+        else "PAUSED: two vendor policy blocks in a row (clear the block, then run again)"
+        if state.paused and state.steps and ld.breaker_trips(state.steps)
+        else "unfinished (run again to resume)"
+    )
     lines.append(f"{status} · ${state.spent_usd():.4f}")
     lines.append("verified ✓" if verified else "verified ✗ " + ", ".join(mismatches))
     return lines

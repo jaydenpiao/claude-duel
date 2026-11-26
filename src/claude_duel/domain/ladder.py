@@ -19,6 +19,8 @@ from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import Event
 
 LADDER_CREATED, STEP_FINISHED, LADDER_CAPPED = "ladder_created", "step_finished", "ladder_capped"
+# two blocked steps in a row: the vendor key is likely flagged; stop for a human, resumable (never a verdict)
+LADDER_PAUSED = "ladder_paused"
 LADDER_SCHEMA_VERSION = 1  # Event.v of ladder events, versioned apart from match events
 # A pairing a vendor policy block (OpenAI cyber_policy) stopped: no verdict, excluded from claims; the ladder goes on.
 StepResult = Result | Literal["blocked"]
@@ -55,6 +57,7 @@ class LadderState(BaseModel):
     start: tuple[int, int]
     steps: list[Step] = Field(default_factory=list)
     capped: bool = False
+    paused: int = 0  # ladder_paused events seen (a pause ends one run; rerunning resumes)
 
     def tiers(self) -> tuple[int, int]:
         tiers = self.start
@@ -92,6 +95,9 @@ def fold(ladder_id: str, events: Iterable[Event]) -> LadderState:
         if e.type == LADDER_CAPPED and not state.capped:
             state.capped = True
             continue
+        if e.type == LADDER_PAUSED and not state.done():
+            state.paused += 1
+            continue
         if e.type != STEP_FINISHED or state.done():
             raise EventLogCorruptError(f"unexpected ladder event {e.type!r}")
         step = typed(Step, e.data)
@@ -99,3 +105,9 @@ def fold(ladder_id: str, events: Iterable[Event]) -> LadderState:
             raise EventLogCorruptError(f"ladder step {step.step_no} does not follow the ladder")
         state.steps.append(step)
     return state
+
+
+def breaker_trips(steps: list[Step]) -> bool:
+    """The vendor-policy circuit breaker: the last two steps were both ``blocked``. Each side is one vendor and only
+    OpenAI raises cyber_policy, so two in a row are the same vendor's account-level block."""
+    return len(steps) >= 2 and steps[-1].result == steps[-2].result == "blocked"

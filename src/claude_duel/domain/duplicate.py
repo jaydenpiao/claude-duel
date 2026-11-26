@@ -77,6 +77,7 @@ class DuplicateState(BaseModel):
     limits: SandboxLimits
     boards: list[Board] = Field(default_factory=list)
     capped: bool = False  # the next board could pass match_max_usd: result "capped" (no verdict) before boards_max
+    cap_reason: str = ""  # cap_reason() when it stopped: next_board_over_cap or projected_over_cap
 
     def diffs(self) -> list[int]:
         return [b.diff for b in self.boards]
@@ -153,6 +154,24 @@ def verdict(rule: DuplicateRule, diffs: list[int], *, final: bool = True) -> Res
     if r.losses > r.wins and (p <= SIGN_TEST_ALPHA or test == "second"):
         return "second"
     return "inconclusive"
+
+
+PROJECT_FROM = 4  # boards played before the projected-cap abort may stop a fixed-board match
+
+
+def cap_reason(state: DuplicateState) -> str | None:
+    """Why the match must stop as ``capped`` before its next board, or ``None``. ``next_board_over_cap``: the dearest
+    board so far would pass the cap. ``projected_over_cap`` (fixed boards only, from board ``PROJECT_FROM`` on): the
+    mean board so far, times the scheduled boards, is over the cap, so stopping now wastes the least. Reads only
+    logged board spend, so a replay stops on the same board."""
+    if not state.boards:
+        return None
+    spent, cap, done = state.spent_usd(), state.rule.match_max_usd, len(state.boards)
+    if spent + next_board_usd(state) > cap:
+        return "next_board_over_cap"
+    if state.rule.stop == "none" and done >= PROJECT_FROM and spent / done * state.rule.boards_max > cap:
+        return "projected_over_cap"
+    return None
 
 
 def next_board_usd(state: DuplicateState) -> float:
@@ -235,6 +254,7 @@ def fold(duplicate_id: str, events: Iterable[Event]) -> DuplicateState:
         check_version(e, DUPLICATE_SCHEMA_VERSION, "duplicate event")
         if e.type == DUPLICATE_CAPPED and not state.capped:
             state.capped = True
+            state.cap_reason = str(e.data.get("reason", ""))
             continue
         if e.type != BOARD_SCORED or state.capped:
             raise EventLogCorruptError(f"unexpected duplicate event {e.type!r}")
