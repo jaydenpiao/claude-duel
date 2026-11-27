@@ -43,7 +43,7 @@ def test_two_truncations_are_their_own_failure_reason(make_engine, new_state) ->
     mine = next(c for c in state.challenges.values() if c.author == "alice")
     assert state.build_errors[mine.id][0] == f"malformed: {TRUNCATED}"
     assert state.validations[mine.id].valid  # the next format retry succeeded
-    assert not dp.build_truncated(state, mine.id)  # repaired: a later valid build is never a harness fault
+    assert not dp.build_truncated(state, mine.id)  # repaired: a later valid build is not a truncation
 
 
 def test_a_build_forfeited_on_truncation_is_typed_scored_and_counted(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]
