@@ -62,6 +62,9 @@ PREMIUM: frozenset[str] = frozenset(
 )
 
 
+POLICY_BLOCKS_TO_PAUSE = 2  # the 2nd cyber_policy block from one vendor in a ladder step pauses the ladder (S18-5)
+
+
 def vendor_of(model: str) -> str:
     if model == FAKE_MODEL:
         return "fake"
@@ -154,6 +157,15 @@ class CostBudget:
         # made. The caller sets these per ladder step; empty means none.
         self.hard_caps: tuple[SpendCap, ...] = ()
         self._reserved: dict[str, tuple[int, int]] = {}  # reservation id -> (input, output) tokens it covers
+        # cyber_policy blocks per vendor in this scope (the ladder resets it per step): the first attack block is a
+        # spent try, the POLICY_BLOCKS_TO_PAUSE-th stops the step so a limited org is not called again (S18-5)
+        self.policy_blocks: dict[str, int] = {}
+
+    def policy_block(self, model: str) -> int:
+        """Count one cyber_policy block against ``model``'s vendor; returns that vendor's count in this scope."""
+        vendor = vendor_of(model)
+        self.policy_blocks[vendor] = self.policy_blocks.get(vendor, 0) + 1
+        return self.policy_blocks[vendor]
 
     def cost(self, model: str, completion: Completion) -> float:
         pin, pout = self._prices[model]

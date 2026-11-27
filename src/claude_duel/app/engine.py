@@ -10,11 +10,12 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from claude_duel.app import agents, allowance
-from claude_duel.app.budget import CostBudget
+from claude_duel.app.budget import POLICY_BLOCKS_TO_PAUSE, CostBudget
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import arena_units, contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import (
+    CyberPolicyError,
     DeadlineExceededError,
     MalformedOutputError,
     MatchCapError,
@@ -279,6 +280,8 @@ class MatchEngine:
             provider = next((a.provider for a in state.agents if a.name == agent), "")
             ratio = state.rules.arena_ratio.get(provider, 1.0)
             unit_in, unit_out = arena_units.units(nbytes, completion.output_tokens, ratio)
+            if completion.policy_blocked:  # nothing was processed: a block debits no stake or clock (S18-5)
+                unit_in = unit_out = 0
             completion = completion.model_copy(update={"units": unit_in + unit_out})
             arena = {"input_bytes": nbytes, "units_in": unit_in, "units_out": unit_out}
         charged: dict[str, object] = {
@@ -299,6 +302,8 @@ class MatchEngine:
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
+        if completion.policy_blocked:
+            charged["policy_blocked"] = True
         self._checkpoint(state, ev.CALL_CHARGED, **charged)
         self._budget.forget(key)  # the event is durable now; resume will not repeat this attempt
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
@@ -314,6 +319,19 @@ class MatchEngine:
             reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
             try:
                 return self._providers[agent].complete(request), reservation
+            except CyberPolicyError:
+                # S17-3/S18-5: an account policy block. Nothing was generated, so the reservation settles at $0. The
+                # first attack block from a vendor is that agent's refusal (a spent try; opponent text that baits the
+                # classifier cannot void decided boards). Any other block (never a forfeit) or the vendor's
+                # POLICY_BLOCKS_TO_PAUSE-th in scope stops the match here: the ladder pauses the step at once.
+                self._metrics.incr("provider.policy_blocked", agent=agent, purpose=request.purpose)
+                count = self._budget.policy_block(model)
+                if request.purpose != "attack" or count >= POLICY_BLOCKS_TO_PAUSE:
+                    self._budget.release(state.match_id, model, reservation)
+                    raise
+                return Completion(
+                    text="", input_tokens=0, output_tokens=0, refused=True, policy_blocked=True
+                ), reservation
             except ProviderTimeoutError:
                 self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
                 if timeouts >= TIMEOUT_RETRIES:

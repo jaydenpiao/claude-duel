@@ -45,6 +45,7 @@ class Completion(BaseModel):
     truncated: bool = False  # the vendor stopped at max_tokens, so the answer is cut off
     reasoning_effort: str | None = None  # the effort the adapter actually sent (None = vendor default)
     refused: bool = False  # the vendor declined to answer (safety classifier); omitted from the log when false
+    policy_blocked: bool = False  # engine-set: a vendor account policy block (cyber_policy), scored as a refusal
     reasoning_summary: str = (
         ""  # vendor-written summary of the thinking when it returns one (never raw chain of thought)
     )

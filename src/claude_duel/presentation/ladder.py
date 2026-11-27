@@ -61,7 +61,25 @@ def _usd(value: float) -> float | None:
     return None if math.isnan(value) else round(value, 4)
 
 
-def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> dict[str, object]:
+def policy_block_lines(models: dict[str, int], vendors: dict[str, int]) -> list[str]:
+    """cyber_policy blocks (each a spent attack try at $0; S18-5) per model and vendor; nothing when there were none."""
+    if not models:
+        return []
+    per_model = ", ".join(f"{m} {n}" for m, n in models.items())
+    per_vendor = ", ".join(f"{v} {n}" for v, n in vendors.items())
+    return [f"policy blocks (spent tries, $0): {per_model} · by vendor: {per_vendor}"]
+
+
+def _blocks_view(models: dict[str, int], vendors: dict[str, int]) -> dict[str, object]:
+    return {"by_model": models, "by_vendor": vendors}
+
+
+def ladder_view(
+    state: LadderState,
+    verified: bool,
+    mismatches: list[str],
+    blocks: tuple[dict[str, int], dict[str, int]] = ({}, {}),
+) -> dict[str, object]:
     return {
         "ladder_id": state.ladder_id,
         "digest": state.digest,
@@ -72,10 +90,16 @@ def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> di
         "done": state.done(),
         "verified": verified,
         "mismatches": mismatches,
+        "policy_blocked": _blocks_view(*blocks),
     }
 
 
-def ladder_lines(state: LadderState, verified: bool, mismatches: list[str]) -> list[str]:
+def ladder_lines(
+    state: LadderState,
+    verified: bool,
+    mismatches: list[str],
+    blocks: tuple[dict[str, int], dict[str, int]] = ({}, {}),
+) -> list[str]:
     lines = [f"ladder {state.ladder_id} (plan {state.digest[:12]})"]
     for s in state.steps:
         side = _WINNER.get(s.result)
@@ -88,9 +112,12 @@ def ladder_lines(state: LadderState, verified: bool, mismatches: list[str]) -> l
         if state.done()
         else "PAUSED: two vendor policy blocks in a row (clear the block, then run again)"
         if state.paused and state.steps and ld.breaker_trips(state.steps)
+        else "PAUSED: vendor policy block (check the vendor key, then run again)"
+        if state.paused
         else "unfinished (run again to resume)"
     )
     lines.append(f"{status} · ${state.spent_usd():.4f}")
+    lines += policy_block_lines(*blocks)
     lines.append("verified ✓" if verified else "verified ✗ " + ", ".join(mismatches))
     return lines
 
@@ -99,6 +126,7 @@ def comparison_lines(cmp: Comparison) -> list[str]:
     lines = [f"{'side a':<20}{'side b':<20}{'run 1':<8}{'run 2':<8}verdict"]
     lines += [f"{m.a:<20}{m.b:<20}{m.results[0]:<8}{m.results[1]:<8}{m.verdict}" for m in cmp.matchups]
     lines.append(f"final ordering: {cmp.ordering}")
+    lines += policy_block_lines(*cmp.policy_blocked)
     return lines
 
 
@@ -106,6 +134,7 @@ def comparison_view(cmp: Comparison) -> dict[str, object]:
     return {
         "matchups": [{"a": m.a, "b": m.b, "results": list(m.results), "verdict": m.verdict} for m in cmp.matchups],
         "ordering": cmp.ordering,
+        "policy_blocked": _blocks_view(*cmp.policy_blocked),
     }
 
 

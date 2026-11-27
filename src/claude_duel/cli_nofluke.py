@@ -7,13 +7,22 @@ import json
 import sys
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from claude_duel.app import ladder_config, repro
 from claude_duel.app.container import build_metrics
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.harness import measure
-from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
+from claude_duel.app.ladder import (
+    by_vendor,
+    compare_ladders,
+    play_ladder,
+    policy_blocks,
+    project,
+    read_ladder,
+    verify_ladder,
+)
 from claude_duel.config import Settings
 from claude_duel.domain.duplicate import DuplicateRule
 from claude_duel.domain.errors import ConfigError
@@ -178,7 +187,9 @@ def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
 
 
 def ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
-    cmp = compare_ladders(read_ladder(settings, args.first), read_ladder(settings, args.second))
+    first, second = read_ladder(settings, args.first), read_ladder(settings, args.second)
+    blocks = policy_blocks(settings, first, second)
+    cmp = replace(compare_ladders(first, second), policy_blocked=(blocks, by_vendor(blocks)))
     print(json.dumps(comparison_view(cmp)) if args.format == "json" else "\n".join(comparison_lines(cmp)))
     return 0
 
@@ -198,10 +209,12 @@ def ladder(settings: Settings, args: argparse.Namespace) -> int:
     metrics = build_metrics(settings, ladder_id, InMemoryMetrics())
     state = play_ladder(settings, ladder_id, cfg, metrics, ticker)
     report = verify_ladder(settings, ladder_id)
+    found = policy_blocks(settings, state)
+    blocks = (found, by_vendor(found))
     if args.format == "json":
-        print(json.dumps(ladder_view(state, report.consistent, report.mismatches)))
+        print(json.dumps(ladder_view(state, report.consistent, report.mismatches, blocks)))
     else:
-        print("\n".join(ladder_lines(state, report.consistent, report.mismatches)))
+        print("\n".join(ladder_lines(state, report.consistent, report.mismatches, blocks)))
     return 0 if report.consistent and state.done() else 1
 
 
