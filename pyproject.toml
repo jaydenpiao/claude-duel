@@ -5,7 +5,7 @@ description = "Agent-vs-agent staged CTF arena"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "Jayden Piao" }]
+authors = [{ name = "jayppizzle" }]
 keywords = ["ctf", "llm", "agents", "benchmark", "security"]
 classifiers = [
     "Development Status :: 3 - Alpha",

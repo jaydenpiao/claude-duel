@@ -22,3 +22,8 @@ def test_no_internal_board_or_agent_roles() -> None:
         text = template.read_text()
         assert "product-scout" not in text
         assert "private" not in text
+
+
+def test_public_credit_uses_the_handle() -> None:
+    assert "Copyright (c) 2026 jayppizzle" in (ROOT / "LICENSE").read_text()
+    assert 'authors = [{ name = "jayppizzle" }]' in (ROOT / "pyproject.toml").read_text()
