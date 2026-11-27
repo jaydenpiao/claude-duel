@@ -38,12 +38,12 @@ _ESCAPE_MODULES = frozenset(
      "threading", "multiprocessing", "concurrent", "asyncio", "msvcrt", "winreg", "webbrowser"}
 )  # fmt: skip
 # Introspection attributes of the classic jail-escape chains (``().__class__.__bases__[0].__subclasses__()``,
-# ``f.__globals__``, frame walking); policy's no-underscore introspection pattern counts as well.
+# ``f.__globals__``, ``_getframe``); the no-underscore ones (``f_back``, ``gi_frame``, ``mro``, ``modules``...) are
+# policy.INTROSPECTION_ATTR, which ``_escape`` also checks.
 _ESCAPE_ATTRS = frozenset(
     {"__globals__", "__builtins__", "__code__", "__closure__", "__subclasses__", "__bases__", "__base__", "__mro__",
      "__class__", "__import__", "__loader__", "__spec__", "__getattribute__", "__reduce__", "__reduce_ex__",
-     "__func__", "__self__", "_getframe", "f_back", "f_globals", "f_locals", "f_builtins", "gi_frame", "cr_frame",
-     "ag_frame", "tb_frame", "modules", "builtins", "mro"}
+     "__func__", "__self__", "_getframe"}
 )  # fmt: skip
 
 
@@ -59,7 +59,7 @@ def _escape(code: str, rejection: str) -> bool:
     return code == "dunder-string"  # '__import__', '__subclasses__' and friends built as strings
 
 
-_REJECT_CODES = {"import": "low", "attribute": "low", "submodule": "low", "dunder-string": "low"}
+_REJECT_CODES = {"import": "low", "attribute": "low", "submodule": "low"}  # dunder-string is always an escape
 _ESCAPE_NAMES = frozenset({"eval", "exec", "compile", "open", "globals", "getattr", "setattr", "vars", "breakpoint"})
 
 
