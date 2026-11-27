@@ -13,6 +13,7 @@ from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app.replay import replay
 from claude_duel.domain import arena_units
 from claude_duel.domain import events as ev
+from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits
 from claude_duel.domain.modes import preset
 from claude_duel.ports import Completion, CompletionRequest
@@ -107,3 +108,31 @@ def test_vendor_tokens_round_the_cap_up() -> None:
     assert arena_units.vendor_tokens(8000, 0.63) == 12699
     assert arena_units.vendor_tokens(8000, 1.0) == 8000
     assert arena_units.request_bytes("ab", "é", {"k": 1}) == 2 + 2 + len('{"k": 1}')
+
+
+def test_the_cap_and_the_charge_use_one_ratio(make_engine, event_log) -> None:  # type: ignore[no-untyped-def]
+    """M60: the ratio that sends an output cap is the ratio that charges the reply (``Rules.ratio_for``)."""
+    rules = preset("ladder").model_copy(update={"arena_ratio": {"fake": 0.5}})
+    alice = Tokenizer(1.0)
+    make_engine({"alice": alice, "bob": Tokenizer(1.0)}).run(_state(rules))
+    cap = rules.output_cap(purpose="build")
+    assert {r.max_tokens for r in alice.requests if r.purpose == "build"} == {math.ceil(cap / 0.5)}
+    charged = [e.data for e in event_log.read("units-1") if e.type == "call_charged" and e.data["agent"] == "alice"]
+    assert charged
+    assert all(d["units_out"] == math.ceil(d["output_tokens"] * 0.5) for d in charged)
+
+
+def test_an_arena_match_with_an_unknown_vendor_raises() -> None:
+    rules = preset("ladder")
+    assert rules.ratio_for("anthropic") == 0.63
+    assert rules.ratio_for("fake") == 1.0
+    with pytest.raises(ConfigError, match="no arena_ratio"):
+        rules.ratio_for("acme")
+    assert Rules().ratio_for("acme") == 1.0  # vendor-token accounting never scales
+
+
+@pytest.mark.parametrize("ratio", [0.0, -1.0, float("nan"), float("inf")])
+def test_arena_ratios_must_be_finite_and_positive(ratio: float) -> None:
+    """I22-1: a negative ratio would credit the clock, NaN crashes ceil, 0 divides by zero."""
+    with pytest.raises(ValueError, match="finite and > 0"):
+        Rules(arena_ratio={"openai": ratio})
