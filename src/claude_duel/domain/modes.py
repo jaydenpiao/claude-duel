@@ -64,10 +64,17 @@ MODES["ladder"] = _LEDGER.model_copy(
         "scoring": ScoringRule(kind="ledger", round_weight="flat"),
         # stakes sized for effort high (pilot 2026-11-26): at min_alloc 1000 an attack's max_tokens is cut to the stake,
         # so hidden reasoning used it all and 55% of attack replies truncated; 6000 leaves room for reasoning + answer
-        "ledger": _SEALED.model_copy(update={"terrain": "none", "min_alloc": 6_000, "attack_tokens": 24_000}),
+        # min_try_units (pilot run 2, 2026-11-26): 108 of 124 attack truncations were stake-bound (max_tokens cut to
+        # the stake left), nearly all thinking with no answer. A try needs 5000 units of room: that skips 82 of the 108
+        # (76%; 4000 would skip 63%). A min_alloc stake (6000) always gets its first try: the floor counts output
+        # room only, never the opponent-authored prompt bytes (S18-6).
+        # No vendor lets us cap thinking inside max_tokens, so this is the vendor-neutral lever.
+        "ledger": _SEALED.model_copy(
+            update={"terrain": "none", "min_alloc": 6_000, "attack_tokens": 24_000, "min_try_units": 5_000}
+        ),
         "neutral_ids": True,  # models see seats (p1/p2), never model or vendor names
         # stakes, clock and caps in vendor-neutral units; Claude's ratio is 1/1.594, its input tokens over GPT's on
-        # identical prompts (fairness audit 2026-11-19); re-pin from the logged per-call k after the pilot
+        # identical prompts (fairness audit 2026-11-19); re-pin from logged input_bytes / input_tokens per vendor
         "accounting": "arena",
         "arena_ratio": {"anthropic": 0.63, "openai": 1.0},
     }

@@ -27,6 +27,7 @@ from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
+    DEFAULT_MIN_TRY_UNITS,
     LONG_TIMEOUT,
     TIMEOUTS_TO_VOID,
     TRUNCATED,
@@ -96,7 +97,7 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
-STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
+STAKE_FLOOR = DEFAULT_MIN_TRY_UNITS  # ledger: no repair call below this many output units (tries: min_try_units)
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
@@ -258,10 +259,7 @@ class MatchEngine:
         if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (#121)
             allowance.check(state, agent)
         self._budget.check(state)
-        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
-            raise DeadlineExceededError(
-                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
-            )
+        self._deadline(state)
         model = self._models[agent]
         key = attempt_key(state, agent, request)
         started = time.monotonic()
@@ -304,6 +302,13 @@ class MatchEngine:
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
+    @staticmethod
+    def _deadline(state: MatchState) -> None:
+        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
+            raise DeadlineExceededError(
+                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
+            )
+
     def _try_call(
         self, state: MatchState, agent: str, model: str, request: CompletionRequest, key: str
     ) -> tuple[Completion, str]:
@@ -312,15 +317,20 @@ class MatchEngine:
         timeouts = 0
         while True:
             reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
+            started = time.monotonic()
             try:
                 return self._providers[agent].complete(request), reservation
             except ProviderTimeoutError:
-                self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
+                tokens, usd = self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger it
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                kept = {"agent": agent, "model": model, "tokens": tokens, "usd": usd, "elapsed_ms": elapsed_ms}
+                self._checkpoint(state, ev.CALL_TIMED_OUT, **kept, purpose=request.purpose)  # S18-1: match usage
                 if timeouts >= TIMEOUT_RETRIES:
                     raise
                 timeouts += 1
                 self._metrics.incr("provider.timeout_retry", agent=agent, purpose=request.purpose)
                 self._budget.check(state)
+                self._deadline(state)
             except Exception:
                 self._budget.release(state.match_id, model, reservation)
                 raise
@@ -790,6 +800,7 @@ class MatchEngine:
             self._memory(state, attacker),
             own_rows,
             ghost_labels,
+            min_try=rule.min_try_units if rule.min_try_units > STAKE_FLOOR else None,
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -893,7 +904,10 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
-            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+            floor = state.rules.ledger.min_try_units if state.rules.ledger is not None else STAKE_FLOOR
+            # S18-6: the floor is on the stake's output room only. The prompt's input estimate carries the opponent's
+            # source and description, so it must not decide whether a try happens (it still shrinks max_tokens).
+            if left is not None and (left < floor or self._fit(state, prompt, left) < STAKE_FLOOR):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)

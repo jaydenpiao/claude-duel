@@ -57,6 +57,7 @@ KEYSTONE_SEALED = "keystone_sealed"
 KEYSTONE_REVEALED = "keystone_revealed"
 TERRAIN_DRAWN = "terrain_drawn"
 GHOST_RUN = "ghost_run"
+CALL_TIMED_OUT = "call_timed_out"
 
 # Event.v is the minimum reader version an event needs; readers refuse anything newer (#139).
 # 0 = written before versioning; 1 = typed payloads; 2 = note_recorded, call token counts and later
@@ -131,6 +132,19 @@ class CallCharged(_Payload):
     input_bytes: int = 0  # arena units only (absent otherwise): request bytes, units_in = ceil(bytes / 4)
     units_in: int = 0
     units_out: int = 0  # output_tokens x the vendor's pinned arena_ratio; ``tokens`` is units_in + units_out
+
+
+class CallTimedOut(_Payload):
+    """A paid try that timed out (S18-1): its reservation was ledgered as likely billed (S17-1). Folded into the
+    match's usage (calls, tokens, usd, elapsed_ms) so match caps and match_deadline_s see it across resumes; the
+    token clock and the input/output split are left alone (nothing was returned)."""
+
+    agent: str
+    model: str
+    tokens: int  # reserved input + output tokens, the ledgered worst case
+    usd: float
+    elapsed_ms: int = 0
+    purpose: str = ""
 
 
 class BuildRejected(_Payload):
@@ -380,6 +394,16 @@ def _ghost_ran(state: MatchState, p: GhostRun) -> None:
     state.ghost_runs[f"{p.round}:{p.ghost_id}>{p.target}"] = p.hit
 
 
+def _timed_out(state: MatchState, p: CallTimedOut) -> None:
+    mine = state.usage_by_agent.setdefault(p.agent, Usage())
+    for u in (state.usage, mine):
+        u.calls += 1
+        u.tokens += p.tokens
+        u.usd += p.usd
+    state.usage.elapsed_ms += p.elapsed_ms
+    state.last_agent = p.agent
+
+
 def _scored(state: MatchState, p: RoundScored) -> None:
     state.scores = add_scores(state.scores, p.delta)
     state.scored_rounds.append(p.round)
@@ -392,6 +416,7 @@ _HANDLERS: dict[str, tuple[type[_Payload], Callable[[MatchState, Any], None]]] =
     MATCH_RECOVERED: (MatchRecovered, _recovered),
     MATCH_CAPPED: (MatchCapped, _capped),
     CALL_CHARGED: (CallCharged, _charged),
+    CALL_TIMED_OUT: (CallTimedOut, _timed_out),
     BUILD_REJECTED: (BuildRejected, _rejected),
     CHALLENGE_BUILT: (ChallengeBuilt, _built),
     CHALLENGE_VALIDATED: (ChallengeValidated, _validated),

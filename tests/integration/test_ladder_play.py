@@ -22,6 +22,7 @@ from claude_duel.domain.errors import BudgetExceededError, ConfigError
 from claude_duel.domain.models import CallCaps, MatchState
 from claude_duel.observability import InMemoryMetrics
 from claude_duel.ports import Completion, CompletionRequest
+from claude_duel.presentation.ladder import comparison_lines, comparison_view
 
 
 def _load(*a: Any, **k: Any) -> lc.LadderConfig:  # premium plans validate; the premium gate is tested apart
@@ -201,3 +202,17 @@ def test_a_capped_step_ends_the_ladder_with_no_verdict(tmp_path: Path, monkeypat
     assert state.capped
     assert state.done()
     assert ld.fold("lad-capped", build_ladder_log(_settings(tmp_path)).read("lad-capped")).capped
+
+
+def test_compare_counts_stake_exhausted_attacks_per_model(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    one = play_ladder(settings, "lad-se1", _load(FAKE), InMemoryMetrics())
+    counts = ladder_mod.stake_exhausted(settings, one, one)
+    assert counts
+    assert all(0 <= hit <= total and total > 0 for hit, total in counts.values())
+    cmp = ladder_mod.Comparison([], "agree", {"m-a": (2, 8), "m-b": (0, 8)})
+    assert "stake exhausted m-a: 2/8 attacks (25%)" in comparison_lines(cmp)
+    assert comparison_view(cmp)["stake_exhausted"] == {
+        "m-a": {"attacks": 8, "stake_exhausted": 2},
+        "m-b": {"attacks": 8, "stake_exhausted": 0},
+    }

@@ -1,4 +1,4 @@
-# No-fluke ladder, option (c): cut per-call caps, 4-6 boards. Expect more truncation voids (untested). Dollar figures are estimates.
+# No-fluke ladder, option (c): cut per-call caps, 4-6 boards. Expect more truncations (untested). Dollar figures are estimates.
 # SUPERSEDED (2026-11-26): jayden picked ladder-final.toml; kept only as a dry-run and test fixture. Do not run.
 run_date = "2026-11-20"  # required; drives the model cutoffs (gpt-5-nano retires 2026-12-11), never the wall clock
 

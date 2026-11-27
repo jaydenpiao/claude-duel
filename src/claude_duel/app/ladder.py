@@ -3,7 +3,7 @@ the two-run comparison."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 
 from claude_duel.app import calibration
@@ -14,6 +14,7 @@ from claude_duel.app.container import (
     build_duplicate_log,
     build_ladder_log,
     build_ledger,
+    build_store,
 )
 from claude_duel.app.driver import append, open_or_create
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
@@ -285,6 +286,28 @@ class Matchup:
 class Comparison:
     matchups: list[Matchup]
     ordering: str  # "agree" when both runs took the same path with the same decided results
+    # model -> (attacks that ended "stake exhausted", all attacks) across both runs; filled by `stake_exhausted`
+    stake_exhausted: dict[str, tuple[int, int]] = field(default_factory=dict)
+
+
+STAKE_EXHAUSTED = "stake exhausted"
+
+
+def stake_exhausted(settings: Settings, *ladders: ld.LadderState) -> dict[str, tuple[int, int]]:
+    """Per attacking model: attacks ended "stake exhausted" (no try fit min_try_units) and all attacks, over every
+    board half of the ladders' steps. Read-only; a half not in the store yet is skipped."""
+    store = build_store(settings)
+    counts: dict[str, tuple[int, int]] = {}
+    for lad in ladders:
+        for step in lad.steps:
+            for board in dp.fold(step.duplicate_id, build_duplicate_log(settings).read(step.duplicate_id)).boards:
+                for mid in board.halves:
+                    m = store.load(mid)
+                    model = {a.name: a.model or a.name for a in m.agents}
+                    for attack in m.attacks.values():
+                        hit, total = counts.get(model[attack.attacker], (0, 0))
+                        counts[model[attack.attacker]] = (hit + (attack.reason == STAKE_EXHAUSTED), total + 1)
+    return dict(sorted(counts.items()))
 
 
 def compare_ladders(first: ld.LadderState, second: ld.LadderState) -> Comparison:
