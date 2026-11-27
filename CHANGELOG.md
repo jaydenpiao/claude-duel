@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- One model proxy table: `app/latency.py` uses `calibration.PROXY`, and a test checks every calibrated model has a latency row or proxy (M58). Stale comments: `TRUNCATED` is the model's own outcome, `domain/AGENTS.md` drops `fault` and names the margin stop rule, `ladder-c.toml` says truncations, not voids.
 - Ladder preset stakes (pilot 2026-11-26): `min_alloc` 1000 -> 6000 and `attack_tokens` 6000 -> 24000. An attack's `max_tokens` is cut to its stake, so at effort high the hidden reasoning used the whole 1000-token stake and 55% of attack replies truncated. Ladder-final worst case $2128.62 -> $2421.88; typical ($67.32) and calibrated ($585.79) are unchanged because they use measured reply sizes. `RULES_VERSION` stays 2: only the preset's values change, not what a `Rules` field means, and every match logs its full rules, so old logs replay unchanged.
 - Claude calls log the effort they sent on `call_charged` (it was always empty); `None` still means the API default.
 - Provider timeouts scale with each reply's output cap: the configured timeout, sized for the slowest model in the plan, is the wait for a 24000-token reply, and smaller caps wait proportionally less, never under 60 s (allocate 60 s, attack 100-160 s at the pilot's 300 s). The rule is the same for every model. In the pilot, 11 of about 225 calls stalled for the full 300 s and held their board.
