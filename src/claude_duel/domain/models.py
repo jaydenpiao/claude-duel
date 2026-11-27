@@ -119,11 +119,17 @@ class MemoryRule(_Frozen):
     source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
 
 
+DEFAULT_MIN_TRY_UNITS = 256  # LedgerRule.min_try_units default (the old engine floor); omitted from logs at this value
+
+
 class LedgerRule(_Frozen):
     """Sealed Ledger stakes (design-core-logic.md): tokens an attacker splits across the opponent's challenges."""
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # a try is made only while this many output units fit in the stake left; otherwise the attack ends "stake
+    # exhausted" with no call. The default is the old engine floor, so logs pinned before the field replay as written.
+    min_try_units: int = Field(default=DEFAULT_MIN_TRY_UNITS, ge=1)
     # Feature switches default off so a log pinned before they existed replays as written; the ledger
     # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
@@ -330,6 +336,8 @@ class Rules(_Frozen):
         ledger = data.get("ledger")
         if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
             ledger.pop("heat_token_cap", None)
+        if isinstance(ledger, dict) and ledger.get("min_try_units") == DEFAULT_MIN_TRY_UNITS:
+            ledger.pop("min_try_units")  # absent at the old floor, so logs without it stay byte-identical
         if data.get("call_caps") is None:
             data.pop("call_caps", None)  # absent unless set, so logs without it stay byte-identical
         return data

@@ -99,6 +99,8 @@ def comparison_lines(cmp: Comparison) -> list[str]:
     lines = [f"{'side a':<20}{'side b':<20}{'run 1':<8}{'run 2':<8}verdict"]
     lines += [f"{m.a:<20}{m.b:<20}{m.results[0]:<8}{m.results[1]:<8}{m.verdict}" for m in cmp.matchups]
     lines.append(f"final ordering: {cmp.ordering}")
+    for model, (hit, total) in cmp.stake_exhausted.items():
+        lines.append(f"stake exhausted {model}: {hit}/{total} attacks ({hit / max(total, 1):.0%})")
     return lines
 
 
@@ -106,6 +108,7 @@ def comparison_view(cmp: Comparison) -> dict[str, object]:
     return {
         "matchups": [{"a": m.a, "b": m.b, "results": list(m.results), "verdict": m.verdict} for m in cmp.matchups],
         "ordering": cmp.ordering,
+        "stake_exhausted": {m: {"attacks": t, "stake_exhausted": h} for m, (h, t) in cmp.stake_exhausted.items()},
     }
 
 

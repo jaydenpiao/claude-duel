@@ -27,6 +27,7 @@ from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
+    DEFAULT_MIN_TRY_UNITS,
     LONG_TIMEOUT,
     TIMEOUTS_TO_VOID,
     TRUNCATED,
@@ -96,7 +97,7 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
-STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
+STAKE_FLOOR = DEFAULT_MIN_TRY_UNITS  # ledger: no repair call below this many output units (tries: min_try_units)
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
@@ -799,6 +800,7 @@ class MatchEngine:
             self._memory(state, attacker),
             own_rows,
             ghost_labels,
+            min_try=rule.min_try_units if rule.min_try_units > STAKE_FLOOR else None,
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -902,7 +904,10 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
-            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+            floor = state.rules.ledger.min_try_units if state.rules.ledger is not None else STAKE_FLOOR
+            # S18-6: the floor is on the stake's output room only. The prompt's input estimate carries the opponent's
+            # source and description, so it must not decide whether a try happens (it still shrinks max_tokens).
+            if left is not None and (left < floor or self._fit(state, prompt, left) < STAKE_FLOOR):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
