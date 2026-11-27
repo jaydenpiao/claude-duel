@@ -7,13 +7,21 @@ import json
 import sys
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from claude_duel.app import ladder_config, repro
 from claude_duel.app.container import build_metrics
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.harness import measure
-from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
+from claude_duel.app.ladder import (
+    compare_ladders,
+    play_ladder,
+    project,
+    read_ladder,
+    stake_exhausted,
+    verify_ladder,
+)
 from claude_duel.config import Settings
 from claude_duel.domain.duplicate import DuplicateRule
 from claude_duel.domain.errors import ConfigError
@@ -178,7 +186,8 @@ def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
 
 
 def ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
-    cmp = compare_ladders(read_ladder(settings, args.first), read_ladder(settings, args.second))
+    first, second = read_ladder(settings, args.first), read_ladder(settings, args.second)
+    cmp = replace(compare_ladders(first, second), stake_exhausted=stake_exhausted(settings, first, second))
     print(json.dumps(comparison_view(cmp)) if args.format == "json" else "\n".join(comparison_lines(cmp)))
     return 0
 
