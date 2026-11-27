@@ -48,7 +48,7 @@ def play_duplicate(
         )
         state = dp.fold(duplicate_id, events)
         settings = pinned(settings, state.rules, state.limits, duplicate_id)
-        budget = budget or build_budget(settings)
+        budget = budget or build_budget(run_calls_for(settings, state.rule))
         seq = len(events)
         while not state.done():
             if (reason := dp.cap_reason(state)) is not None:
@@ -114,6 +114,18 @@ def _half(
 class DuplicateReport:
     consistent: bool
     mismatches: list[str]
+
+
+def run_calls_for(settings: Settings, rule: dp.DuplicateRule) -> Settings:
+    """A duplicate match is ``2 x boards_max`` matches in one invocation, each capped at ``match_max_calls``: the run
+    call cap covers that many (never lower than the configured one). The flat ``run_max_calls`` (sized for one match
+    or a short series) otherwise stopped a 12-board fake match at 200 calls. Dollars stay bounded by
+    ``rule.match_max_usd`` and the run/lifetime USD caps."""
+    lim = settings.budget
+    need = 2 * rule.boards_max * lim.match_max_calls
+    if need <= lim.run_max_calls:
+        return settings
+    return settings.model_copy(update={"budget": lim.model_copy(update={"run_max_calls": need})})
 
 
 def verify_duplicate(settings: Settings, duplicate_id: str) -> DuplicateReport:
