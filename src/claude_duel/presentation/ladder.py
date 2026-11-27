@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from claude_duel.domain import events as ev
+from claude_duel.domain import ladder as ld
 from claude_duel.domain.ladder import LadderState
 from claude_duel.domain.models import Event
 
@@ -16,15 +18,18 @@ _WINNER = {"first": "a", "second": "b"}
 
 
 def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
-    lines = [f"{'side a':<20}{'side b':<20}{'worst $':>10}{'typical $':>11}"]
-    lines += [f"{r.a:<20}{r.b:<20}{r.worst_usd:>10.2f}{r.typical_usd:>11.2f}" for r in proj.rows]
+    lines = [f"{'side a':<20}{'side b':<20}{'worst $':>10}{'typical $':>11}{'calibrated $':>14}"]
+    lines += [
+        f"{r.a:<20}{r.b:<20}{r.worst_usd:>10.2f}{r.typical_usd:>11.2f}{r.calibrated_usd:>14.2f}" for r in proj.rows
+    ]
     lines.append(f"worst-case ladder ${proj.total_usd:.2f} / ladder_max_usd ${ladder_max_usd:.2f}")
     dearest = max((r.typical_usd for r in proj.rows), default=0.0)
     lines.append(
         f"typical ladder ${proj.typical_usd():.2f} (dearest match ${dearest:.2f}): expected, no retries or replays,"
         f" assumed reply sizes; caps are checked against the {proj.basis} case"
     )
-    if proj.basis == "typical":
+    lines.append(f"calibrated ladder ${proj.calibrated_usd():.2f}: each model at its measured mean tokens per call")
+    if proj.basis in ("typical", "calibrated"):
         lines.append("hard stop: no call is made whose worst case could pass match_max_usd or ladder_max_usd")
     lines += [f"refused: {r}" for r in proj.refusals] or ["dry run ok: within every cap"]
     return lines
@@ -33,15 +38,27 @@ def projection_lines(proj: Projection, ladder_max_usd: float) -> list[str]:
 def projection_view(proj: Projection, ladder_max_usd: float) -> dict[str, object]:
     return {
         "rows": [
-            {"a": r.a, "b": r.b, "worst_usd": round(r.worst_usd, 4), "typical_usd": round(r.typical_usd, 4)}
+            {
+                "a": r.a,
+                "b": r.b,
+                "worst_usd": round(r.worst_usd, 4),
+                "typical_usd": round(r.typical_usd, 4),
+                "calibrated_usd": _usd(r.calibrated_usd),
+            }
             for r in proj.rows
         ],
         "total_usd": round(proj.total_usd, 4),
         "typical_usd": round(proj.typical_usd(), 4),
+        "calibrated_usd": _usd(proj.calibrated_usd()),
         "ladder_max_usd": ladder_max_usd,
         "basis": proj.basis,
         "refusals": proj.refusals,
     }
+
+
+def _usd(value: float) -> float | None:
+    """Rounded dollars; ``None`` for a model with no calibrated token use (shown as nan in text)."""
+    return None if math.isnan(value) else round(value, 4)
 
 
 def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> dict[str, object]:
@@ -51,6 +68,7 @@ def ladder_view(state: LadderState, verified: bool, mismatches: list[str]) -> di
         "steps": [s.model_dump() for s in state.steps],
         "spent_usd": round(state.spent_usd(), 4),
         "capped": state.capped,
+        "paused": state.paused,
         "done": state.done(),
         "verified": verified,
         "mismatches": mismatches,
@@ -63,7 +81,15 @@ def ladder_lines(state: LadderState, verified: bool, mismatches: list[str]) -> l
         side = _WINNER.get(s.result)
         tag = f"winner {s.a if side == 'a' else s.b}" if side else s.result
         lines.append(f"step {s.step_no}: {s.a} vs {s.b} · {tag} · ${s.usd:.4f} · {s.duplicate_id}")
-    status = "CAPPED" if state.capped else "finished" if state.done() else "unfinished (run again to resume)"
+    status = (
+        "CAPPED"
+        if state.capped
+        else "finished"
+        if state.done()
+        else "PAUSED: two vendor policy blocks in a row (clear the block, then run again)"
+        if state.paused and state.steps and ld.breaker_trips(state.steps)
+        else "unfinished (run again to resume)"
+    )
     lines.append(f"{status} · ${state.spent_usd():.4f}")
     lines.append("verified ✓" if verified else "verified ✗ " + ", ".join(mismatches))
     return lines

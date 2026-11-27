@@ -203,3 +203,12 @@ def test_other_400s_are_not_retried() -> None:
     with pytest.raises(PermanentProviderError):
         p.complete(REQ)
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize("model", ["gpt-5", "gpt-5-nano", "gpt-6-luna", "gpt-6.2-sol", "gpt-6.2-astra"])
+def test_responses_body_sends_the_rules_as_the_first_developer_item(model: str) -> None:
+    sent: list[httpx.Request] = []
+    _provider(model, RESP, sent).complete(REQ)
+    body = _body(sent[0])
+    assert "instructions" not in body
+    assert body["input"] == [{"role": "developer", "content": "s"}, {"role": "user", "content": "p"}]

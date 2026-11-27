@@ -48,19 +48,19 @@ def play_duplicate(
         )
         state = dp.fold(duplicate_id, events)
         settings = pinned(settings, state.rules, state.limits, duplicate_id)
-        budget = budget or build_budget(settings)
+        budget = budget or build_budget(run_calls_for(settings, state.rule))
         seq = len(events)
         while not state.done():
-            if state.boards and state.spent_usd() + dp.next_board_usd(state) > state.rule.match_max_usd:
+            if (reason := dp.cap_reason(state)) is not None:
                 append(
                     log,
                     duplicate_id,
                     schema_version=dp.DUPLICATE_SCHEMA_VERSION,
                     seq=seq,
                     event_type=dp.DUPLICATE_CAPPED,
-                    data={},
+                    data={"reason": reason},
                 )
-                state.capped = True
+                state.capped, state.cap_reason = True, reason
                 break
             board = _board(settings, state, metrics, observer, budget)
             if board is None:
@@ -85,17 +85,13 @@ def _board(
     observer: EventObserver | None,
     budget: CostBudget,
 ) -> dp.Board | None:
-    """Both halves on the board seed; a harness fault replays the board on a derived seed, then counts it void."""
+    """Both halves on the board seed; ``None`` when a half did not complete (failed or capped: resumable)."""
     k = state.next_board()
-    for replay_no in range(state.rule.fault_replays + 1):
-        seed = dp.replay_seed(dp.board_seed(state.seed, k), replay_no)
-        halves = tuple(_half(settings, state, k, h, replay_no, seed, metrics, observer, budget) for h in (0, 1))
-        if any(m.stage is not Stage.COMPLETE for m in halves):
-            return None
-        board = dp.board_of(state, k, seed, (halves[0], halves[1]), replay_no)
-        if not board.void:
-            return board
-    return board
+    seed = dp.board_seed(state.seed, k)
+    halves = tuple(_half(settings, state, k, h, seed, metrics, observer, budget) for h in (0, 1))
+    if any(m.stage is not Stage.COMPLETE for m in halves):
+        return None
+    return dp.board_of(state, k, seed, (halves[0], halves[1]))
 
 
 def _half(
@@ -103,20 +99,33 @@ def _half(
     state: dp.DuplicateState,
     k: int,
     half: int,
-    replay_no: int,
     seed: str,
     metrics: Metrics,
     observer: EventObserver | None,
     budget: CostBudget,
 ) -> MatchState:
     half_settings = settings.model_copy(update={"agents": dp.half_agents(state.agents, half), "seed": seed})
-    return play(half_settings, state.half_id(k, half, replay_no), metrics, observer, budget)
+    # heat history is this pairing's own earlier halves only: never another pairing, step or run in the store
+    scope = f"{state.duplicate_id}-"
+    return play(half_settings, state.half_id(k, half), metrics, observer, budget, history_prefix=scope)
 
 
 @dataclass(frozen=True)
 class DuplicateReport:
     consistent: bool
     mismatches: list[str]
+
+
+def run_calls_for(settings: Settings, rule: dp.DuplicateRule) -> Settings:
+    """A duplicate match is ``2 x boards_max`` matches in one invocation, each capped at ``match_max_calls``: the run
+    call cap covers that many (never lower than the configured one). The flat ``run_max_calls`` (sized for one match
+    or a short series) otherwise stopped a 12-board fake match at 200 calls. Dollars stay bounded by
+    ``rule.match_max_usd`` and the run/lifetime USD caps."""
+    lim = settings.budget
+    need = 2 * rule.boards_max * lim.match_max_calls
+    if need <= lim.run_max_calls:
+        return settings
+    return settings.model_copy(update={"budget": lim.model_copy(update={"run_max_calls": need})})
 
 
 def verify_duplicate(settings: Settings, duplicate_id: str) -> DuplicateReport:
@@ -131,6 +140,6 @@ def verify_duplicate(settings: Settings, duplicate_id: str) -> DuplicateReport:
                 bad.append(f"board {b.board_no}: {m.match_id} replay")
             if (m.rules, m.limits) != (state.rules, state.limits):
                 bad.append(f"board {b.board_no}: {m.match_id} rules differ from the pinned rules")
-        if dp.board_of(state, b.board_no, b.seed, halves, b.replays) != b:
+        if dp.board_of(state, b.board_no, b.seed, halves) != b:
             bad.append(f"board {b.board_no}: result")
     return DuplicateReport(not bad, bad)

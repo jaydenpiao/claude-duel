@@ -62,7 +62,14 @@ MODES["ladder"] = _LEDGER.model_copy(
         "challenges_per_round": 1,
         "max_attempts": 3,
         "scoring": ScoringRule(kind="ledger", round_weight="flat"),
-        "ledger": _SEALED.model_copy(update={"terrain": "none"}),
+        # stakes sized for effort high (pilot 2026-11-26): at min_alloc 1000 an attack's max_tokens is cut to the stake,
+        # so hidden reasoning used it all and 55% of attack replies truncated; 6000 leaves room for reasoning + answer
+        "ledger": _SEALED.model_copy(update={"terrain": "none", "min_alloc": 6_000, "attack_tokens": 24_000}),
+        "neutral_ids": True,  # models see seats (p1/p2), never model or vendor names
+        # stakes, clock and caps in vendor-neutral units; Claude's ratio is 1/1.594, its input tokens over GPT's on
+        # identical prompts (fairness audit 2026-11-19); re-pin from the logged per-call k after the pilot
+        "accounting": "arena",
+        "arena_ratio": {"anthropic": 0.63, "openai": 1.0},
     }
 )
 

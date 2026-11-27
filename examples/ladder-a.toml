@@ -1,5 +1,5 @@
 # No-fluke ladder, option (a): raise the cap. Top tier first, 4-8 boards. Dollar figures are estimates.
-# jayden picks or edits one of ladder-a/b/c before any real run; `duel ladder examples/ladder-a.toml --dry-run`.
+# SUPERSEDED (2026-11-26): jayden picked ladder-final.toml; kept only as a dry-run and test fixture. Do not run.
 run_date = "2026-11-20"  # required; drives the model cutoffs (gpt-5-nano retires 2026-12-11), never the wall clock
 
 [sides]  # strongest first
