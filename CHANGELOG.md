@@ -6,6 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Security
+- The sandbox image is built and Trivy-scanned in CI (S17-4): `docker/sandbox.Dockerfile` is the pinned slim base with the app image's zlib1g/libzstd1 patches, scanned in the `image` job. `DockerSandbox` still runs the raw pinned base: switching needs a published, digest-pinned patched image (it refuses unpinned local tags). Neither CVE is reachable from the allowed modules.
 - Timed-out provider tries are all ledgered (S17-1): `RetryingProvider` no longer retries `ProviderTimeoutError`; the engine retries it (`TIMEOUT_RETRIES` 2, so 3 tries), each try under its own reservation, kept at its worst case on timeout, with the caps re-checked before the next try. Before, timeouts swallowed by the wrapper never reached the ledger, so the hard stops undercounted.
 - Arena output units use the vendor's pinned `Rules.arena_ratio`, not the call's own input bytes per token (S17-2). The opponent's text in a prompt (for example whitespace padding in its source) multiplied a side's stake and clock debit 2.5-5.6x. Logged units replay unchanged; `RULES_VERSION` stays 2.
 
