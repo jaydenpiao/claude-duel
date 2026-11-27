@@ -29,7 +29,7 @@ def test_adjusts_every_scored_board_and_leaves_the_result(tmp_path: Path) -> Non
     played = play_duplicate(settings, "cv1", RULE, InMemoryMetrics())
     before = build_duplicate_log(settings).read("cv1")
     res = adjust(settings, "cv1")
-    assert len(res.raw) == len(res.baseline) == len(res.adjusted) == sum(not b.void for b in played.boards)
+    assert len(res.raw) == len(res.baseline) == len(res.adjusted) == len(played.boards)
     assert res.adjusted == [r - b for r, b in zip(res.raw, res.baseline, strict=True)]
     assert 0 <= res.p_value <= 1
     assert build_duplicate_log(settings).read("cv1") == before  # reported only
