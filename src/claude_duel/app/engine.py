@@ -27,6 +27,7 @@ from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
+    DEFAULT_MIN_TRY_UNITS,
     LONG_TIMEOUT,
     TIMEOUTS_TO_VOID,
     TRUNCATED,
@@ -96,7 +97,7 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
-STAKE_FLOOR = 256  # ledger: no repair call when fewer output tokens than this fit (tries: LedgerRule.min_try_units)
+STAKE_FLOOR = DEFAULT_MIN_TRY_UNITS  # ledger: no repair call below this many output units (tries: min_try_units)
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:

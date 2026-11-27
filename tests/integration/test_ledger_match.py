@@ -14,13 +14,13 @@ from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, reserved_input_tokens
-from claude_duel.app.engine import MatchEngine
+from claude_duel.app.engine import STAKE_FLOOR, MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
 from claude_duel.domain import events as ev
 from claude_duel.domain import stakes
 from claude_duel.domain.heat_tokens import REF_CAP
-from claude_duel.domain.models import LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
+from claude_duel.domain.models import DEFAULT_MIN_TRY_UNITS, LedgerRule, MatchState, Rules, ScoringRule, Stage, Usage
 from claude_duel.domain.modes import preset
 from claude_duel.domain.scoring import capture_points
 from claude_duel.domain.series import game_winner
@@ -486,6 +486,8 @@ def test_a_try_needs_min_try_units_of_room_or_the_attack_ends_stake_exhausted(ma
 def test_min_try_units_at_the_old_floor_is_omitted_from_logs() -> None:
     rules = preset("ladder")
     assert rules.ledger is not None
-    old = rules.model_copy(update={"ledger": rules.ledger.model_copy(update={"min_try_units": 256})})
+    old = rules.model_copy(update={"ledger": LedgerRule()})  # every LedgerRule default, min_try_units included
+    assert old.ledger is not None
+    assert old.ledger.min_try_units == DEFAULT_MIN_TRY_UNITS == STAKE_FLOOR  # one source for the old floor
     assert "min_try_units" not in old.dump()["ledger"]
     assert rules.dump()["ledger"]["min_try_units"] == 5000
