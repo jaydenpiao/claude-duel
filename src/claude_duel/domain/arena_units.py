@@ -5,7 +5,7 @@ a cap or stake counted in vendor tokens buys one vendor less text. Arena units f
 / 4 (rounded up); output = the vendor's output tokens x its pinned ratio (``Rules.arena_ratio``), the same ratio that
 sends output caps as ``ceil(cap / ratio)`` vendor tokens. The ratio is never taken from the call itself: a per-call
 ``k`` (input bytes / input tokens) let the opponent's text in the prompt, such as whitespace runs, multiply a
-side's stake and clock debit 2.7-5.6x (security review S17-2, 2026-11-26). Logged units replay exactly.
+side's stake and clock debit 2.5-5.6x (security review S17-2, 2026-11-26). Logged units replay exactly.
 """
 
 from __future__ import annotations
