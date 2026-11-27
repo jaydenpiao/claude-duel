@@ -21,7 +21,8 @@
 ## Failure modes
 | Failure | Handling |
 |---|---|
-| Provider timeout / 5xx | Retry with exponential backoff + full jitter, bounded attempts |
+| Provider 5xx / transport error | Retry with exponential backoff + full jitter, bounded attempts |
+| Provider timeout | Engine retries up to 2 more times, no backoff, each try under a fresh reservation kept at its worst case (likely billed) |
 | Rate limit (429) | Honour `retry-after`, else backoff |
 | Permanent provider error (4xx) | No retry; unit forfeited, match continues |
 | Malformed or invalid model output | Re-prompt with the parse or validation error up to `max_format_retries` (budgeted); then forfeit/invalid (build) or wasted attempt (attack) |
