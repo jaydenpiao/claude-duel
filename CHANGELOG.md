@@ -10,6 +10,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Arena output units use the vendor's pinned `Rules.arena_ratio`, not the call's own input bytes per token (S17-2). The opponent's text in a prompt (for example whitespace padding in its source) multiplied a side's stake and clock debit 2.5-5.6x. Logged units replay unchanged; `RULES_VERSION` stays 2.
 
 ### Fixed
+- Spend ledger: kept provider replies moved out of the `SpendLedger` port into a `ReplyStore` port (`FileReplyStore`). The ledger now only counts money (`charged(key)`), the reply store holds the text; a kept reply without its charge line is never reused. Same on-disk layout (`replies/<key>.json`).
 - Docs after #322 (L124-L127): `adapters/AGENTS.md` and `app/AGENTS.md` say timeouts are retried by the engine, `docs/requirements.md` splits the timeout row, `modes.py` re-pins from logged `input_bytes`/`input_tokens`, and the S17-2 range reads 2.5-5.6x everywhere.
 - One model proxy table: `app/latency.py` uses `calibration.PROXY`, and a test checks every calibrated model has a latency row or proxy (M58). Stale comments: `TRUNCATED` is the model's own outcome, `domain/AGENTS.md` drops `fault` and names the margin stop rule, `ladder-c.toml` says truncations, not voids.
 - Findings: dropped the unreachable `dunder-string` severity entry and the escape-attribute names that `policy.INTROSPECTION_ATTR` already matches (no behavior change).

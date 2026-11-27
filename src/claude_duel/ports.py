@@ -135,13 +135,25 @@ class SpendLedger(Protocol):
         usd: float,
         settles: str | None = None,
         key: str | None = None,
-        reply: dict[str, Any] | None = None,
     ) -> None:
-        """Append a charge; with ``key`` and ``reply``, the reply is kept durably first so a resume reuses it."""
+        """Append a charge (with ``key``, the attempt's)."""
         ...
 
-    def settled(self, key: str) -> dict[str, Any] | None:
-        """The kept reply of an attempt already charged under ``key``, or None."""
+    def charged(self, key: str) -> bool:
+        """True once a charge for the attempt ``key`` is in the ledger."""
+        ...
+
+
+class ReplyStore(Protocol):
+    """Durable provider replies by attempt key, so a resume after a crash between an attempt's charge and its own
+    event reuses the reply instead of paying again. Money lives in ``SpendLedger``; this holds only the text."""
+
+    def keep(self, key: str, reply: dict[str, Any]) -> None:
+        """Store the reply durably (before the charge line that refers to it)."""
+        ...
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        """The kept reply, or None."""
         ...
 
     def forget(self, key: str) -> None:

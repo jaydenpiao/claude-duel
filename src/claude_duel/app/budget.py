@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, MatchCapError
 from claude_duel.domain.models import MatchState
 from claude_duel.domain.vendors import VENDORS
-from claude_duel.ports import CHAT_MODELS, RESPONSES_MODELS, Completion, CompletionRequest, SpendLedger
+from claude_duel.ports import CHAT_MODELS, RESPONSES_MODELS, Completion, CompletionRequest, ReplyStore, SpendLedger
 
 # USD per 1M tokens (input, output). This is also the model allowlist (low/medium-tier only). It is code-defined
 # and deliberately not configurable: a config that could add models or lower prices would bypass the spend caps.
@@ -143,10 +143,12 @@ class CostBudget:
         ledger: SpendLedger,
         prices: Mapping[str, tuple[float, float]],
         override: RunOverride | None = None,
+        replies: ReplyStore | None = None,
     ) -> None:
         self.limits = limits
         self.override = override
         self._ledger = ledger
+        self._replies = replies  # None: attempts are not made resumable (no reply is kept)
         self._prices = prices
         self.run_calls = 0
         self.run_usd = 0.0
@@ -215,11 +217,14 @@ class CostBudget:
 
     def settled(self, key: str) -> Completion | None:
         """The reply of an attempt already charged under ``key`` (a resume after a crash before its event)."""
-        reply = self._ledger.settled(key)
+        if self._replies is None or not self._ledger.charged(key):
+            return None  # a kept reply without its charge line was never paid for: call again
+        reply = self._replies.get(key)
         return Completion.model_validate(reply) if reply is not None else None
 
     def forget(self, key: str) -> None:
-        self._ledger.forget(key)
+        if self._replies is not None:
+            self._replies.forget(key)
 
     def recount(self, model: str, completion: Completion) -> float:
         """Count a reused, already-ledgered reply against this process's run caps; return its cost."""
@@ -242,9 +247,10 @@ class CostBudget:
         usd = self.recount(model, completion)
         bound = self._reserved.pop(reservation, None) if reservation else None
         over = bound is not None and (completion.input_tokens > bound[0] or completion.output_tokens > bound[1])
-        reply = completion.model_dump(mode="json") if key and not over else None  # an over-size reply is not reused
+        if key and not over and self._replies is not None:  # an over-size reply is not reused
+            self._replies.keep(key, completion.model_dump(mode="json"))  # durable before the charge line
         # Every call is ledgered, $0 included, so mispriced or free models stay visible.
-        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation, key=key, reply=reply)
+        self._ledger.record(match_id, model, completion.total_tokens, usd, settles=reservation, key=key)
         if over and bound is not None:
             raise BudgetExceededError(
                 f"budget exceeded: the provider reported {completion.input_tokens} in / {completion.output_tokens} out"

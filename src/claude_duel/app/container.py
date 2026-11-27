@@ -22,6 +22,7 @@ from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileLock, FileMatchStore
 from claude_duel.adapters.store.gcs import GcloudUploader
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.replies import FileReplyStore
 from claude_duel.adapters.store.results_sql import (
     Executor,
     SqlResults,
@@ -133,6 +134,10 @@ def build_ledger(settings: Settings) -> FileSpendLedger:
     return FileSpendLedger(settings.store_dir / "ledger.jsonl")
 
 
+def build_replies(settings: Settings) -> FileReplyStore:
+    return FileReplyStore(settings.store_dir / "replies")
+
+
 def build_budget(settings: Settings, override: RunOverride | None = None) -> CostBudget:
     """One per process invocation: its run counters are what ``run_max_calls``/``run_max_usd`` cap.
 
@@ -142,7 +147,7 @@ def build_budget(settings: Settings, override: RunOverride | None = None) -> Cos
     if override is not None:
         # model_validate, not model_copy: the field validators must run on the raised value
         limits = BudgetLimits.model_validate({**limits.model_dump(), override.field: override.value})
-    return CostBudget(limits, build_ledger(settings), DEFAULT_PRICES, override)
+    return CostBudget(limits, build_ledger(settings), DEFAULT_PRICES, override, build_replies(settings))
 
 
 def gate_agent(settings: Settings, agents: tuple[AgentSpec, AgentSpec]) -> AgentSpec:

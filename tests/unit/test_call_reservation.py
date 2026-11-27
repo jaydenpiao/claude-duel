@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.replies import FileReplyStore
 from claude_duel.app.budget import (
     DEFAULT_PRICES,
     FAKE_MODEL,
@@ -30,7 +31,7 @@ WORST = (IN * 1.0 + 1000 * 2.0) / 1e6
 
 
 def _budget(path: Path) -> CostBudget:
-    return CostBudget(BudgetLimits(), FileSpendLedger(path), PRICES)
+    return CostBudget(BudgetLimits(), FileSpendLedger(path), PRICES, replies=FileReplyStore(path.parent / "replies"))
 
 
 def test_crash_between_call_and_charge_stays_counted(tmp_path: Path) -> None:
@@ -161,3 +162,15 @@ def test_one_attempt_key_holds_one_reservation_and_one_charge(tmp_path: Path) ->
     resumed.forget("k1")
     assert resumed.settled("k1") is None
     assert not list((tmp_path / "replies").iterdir())
+
+
+def test_a_kept_reply_without_its_charge_is_never_reused(tmp_path: Path) -> None:
+    """The reply is written before the charge line: a crash between them leaves a reply nobody paid for, so the
+    resume asks the provider again (and pays once) instead of reusing it for free."""
+    path = tmp_path / "ledger.jsonl"
+    budget = _budget(path)
+    budget.reserve("m1", FAKE_MODEL, REQ, key="k1")
+    FileReplyStore(tmp_path / "replies").keep(
+        "k1", Completion(text="answer", input_tokens=10, output_tokens=5).model_dump()
+    )
+    assert _budget(path).settled("k1") is None

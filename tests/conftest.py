@@ -14,6 +14,7 @@ from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.event_log import FileEventLog
 from claude_duel.adapters.store.file_store import FileMatchStore
 from claude_duel.adapters.store.ledger import FileSpendLedger
+from claude_duel.adapters.store.replies import FileReplyStore
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
 from claude_duel.app.engine import MatchEngine
 from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits
@@ -72,7 +73,12 @@ def make_engine(store: FileMatchStore, event_log: FileEventLog, store_root: Path
             store,
             event_log,
             metrics or InMemoryMetrics(),
-            CostBudget(budget or BudgetLimits(), FileSpendLedger(store_root / "ledger.jsonl"), DEFAULT_PRICES),
+            CostBudget(
+                budget or BudgetLimits(),
+                FileSpendLedger(store_root / "ledger.jsonl"),
+                DEFAULT_PRICES,
+                replies=FileReplyStore(store_root / "replies"),
+            ),
             dict.fromkeys(providers, "fake-1"),
             observer,
         )
