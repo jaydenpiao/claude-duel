@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from claude_duel.app import agents, allowance
-from claude_duel.app.budget import CostBudget
+from claude_duel.app.budget import CostBudget, vendor_of
 from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import arena_units, contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
@@ -276,9 +276,7 @@ class MatchEngine:
         arena: dict[str, object] = {}
         if state.rules.accounting == "arena":
             nbytes = arena_units.request_bytes(request.system, request.prompt, request.json_schema)
-            provider = next((a.provider for a in state.agents if a.name == agent), "")
-            ratio = state.rules.arena_ratio.get(provider, 1.0)
-            unit_in, unit_out = arena_units.units(nbytes, completion.output_tokens, ratio)
+            unit_in, unit_out = arena_units.units(nbytes, completion.output_tokens, self._ratio(state, agent))
             completion = completion.model_copy(update={"units": unit_in + unit_out})
             arena = {"input_bytes": nbytes, "units_in": unit_in, "units_out": unit_out}
         charged: dict[str, object] = {
@@ -524,6 +522,12 @@ class MatchEngine:
             completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
         return completion
 
+    def _ratio(self, state: MatchState, agent: str) -> float:
+        """The agent's vendor ratio, the same for its output cap and its output charge (M60). The gate probe is not
+        a match agent: its vendor comes from its model."""
+        provider = next((a.provider for a in state.agents if a.name == agent), None)
+        return state.rules.ratio_for(provider or vendor_of(self._models[agent]))
+
     @staticmethod
     def _fit(state: MatchState, prompt: str, left: int) -> int:
         """Output tokens that fit in ``left`` after a deterministic input estimate (bytes / 4, rounded up)."""
@@ -543,8 +547,7 @@ class MatchEngine:
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
         if state.rules.accounting == "arena":  # the cap is in arena units: send the vendor's equivalent
-            provider = next((a.provider for a in state.agents if a.name == agent), "")
-            tokens = arena_units.vendor_tokens(tokens, state.rules.arena_ratio.get(provider, 1.0))
+            tokens = arena_units.vendor_tokens(tokens, self._ratio(state, agent))
         return CompletionRequest(
             system=agents.system_prompt(state.framing_text),
             prompt=prompt,

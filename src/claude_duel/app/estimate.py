@@ -66,7 +66,7 @@ def agent_usd(rules: Rules, model: str, *, worst: bool = True) -> float:
     pin, pout = DEFAULT_PRICES[model]
     challenges = rules.rounds * rules.challenges_per_round
 
-    ratio = rules.arena_ratio.get(vendor_of(model), 1.0) if rules.accounting == "arena" else 1.0
+    ratio = rules.ratio_for(vendor_of(model))
 
     def usd(calls: int, purpose: Purpose) -> float:  # an arena-unit cap is sent as cap / ratio vendor tokens
         out = math.ceil(rules.output_cap(purpose=purpose) / ratio) if worst else OUT_TOKENS

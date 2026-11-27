@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
+from claude_duel.domain.errors import ConfigError
 from claude_duel.domain.heat_tokens import PARSE_BYTES, REF_CAP, TOKEN_CAP
 from claude_duel.domain.probes import MAX_PAYLOAD_CHARS
 
@@ -216,7 +217,7 @@ class Rules(_Frozen):
     )
     arena_ratio: dict[str, float] = Field(
         default_factory=dict,
-        description="arena units per vendor output token by provider (1.0 when absent); sets max_tokens in arena units",
+        description="arena units per vendor output token by provider (see ratio_for); sets max_tokens in arena units",
     )
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
@@ -292,6 +293,18 @@ class Rules(_Frozen):
 
             return min(cap, PARSE_BYTES, admit_bytes(self))
         return cap
+
+    def ratio_for(self, provider: str) -> float:
+        """The pinned arena units per vendor output token for ``provider`` (M60): the one ratio that both sends
+        output caps (``arena_units.vendor_tokens``) and charges output (``arena_units.units``). 1.0 in vendor
+        accounting and for the fake vendor; an arena-unit match with a vendor missing from ``arena_ratio`` raises."""
+        if self.accounting != "arena":
+            return 1.0
+        if provider in self.arena_ratio:
+            return self.arena_ratio[provider]
+        if provider == "fake":
+            return 1.0
+        raise ConfigError(f"arena units: no arena_ratio for vendor {provider!r} (known: {sorted(self.arena_ratio)})")
 
     def output_cap(self, own: int | None = None, purpose: Purpose | None = None) -> int:
         """Per-reply output tokens: an agent's own cap, else the rules' (per purpose when ``call_caps`` is set);
