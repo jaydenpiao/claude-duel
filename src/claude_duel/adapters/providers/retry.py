@@ -7,7 +7,7 @@ import random
 import time
 from collections.abc import Callable
 
-from claude_duel.domain.errors import ProviderError, RateLimitError
+from claude_duel.domain.errors import ProviderError, ProviderTimeoutError, RateLimitError
 from claude_duel.observability import log
 from claude_duel.ports import Completion, CompletionRequest, LLMProvider, Metrics
 
@@ -49,7 +49,8 @@ class RetryingProvider:
             try:
                 return self._inner.complete(request)
             except ProviderError as exc:
-                if not exc.retryable or attempt >= self._max_retries:
+                # a timeout is likely billed, so the engine retries it under a fresh reservation (S17-1)
+                if not exc.retryable or isinstance(exc, ProviderTimeoutError) or attempt >= self._max_retries:
                     self._metrics.incr("provider.failure", provider=self.name, kind=type(exc).__name__)
                     raise
                 delay = self._delay(attempt, exc, self._clock() - started)
