@@ -8,9 +8,10 @@ from typing import Any
 
 import pytest
 
+from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.app import ladder as ladder_mod
 from claude_duel.app import ladder_config as lc
-from claude_duel.app.container import build_store
+from claude_duel.app.container import build_event_log, build_store
 from claude_duel.app.duplicate import play_duplicate
 from claude_duel.app.ladder import compare_ladders, play_ladder, verify_ladder
 from claude_duel.app.ladder_config import agents
@@ -101,3 +102,52 @@ def test_two_blocks_in_a_row_pause_the_ladder_and_a_rerun_resumes(
     assert again.done()
     assert again.steps[:2] == state.steps
     assert len(again.steps) == 3
+
+
+def _block_attacks(monkeypatch: pytest.MonkeyPatch, times: int) -> list[str]:
+    """The fake vendor raises cyber_policy on its first ``times`` attack calls (as if opponent text baited it)."""
+    real, seen = FakeProvider.complete, list[str]()
+
+    def complete(self: FakeProvider, request: Any) -> Any:
+        if request.purpose == "attack" and len(seen) < times:
+            seen.append(request.prompt)
+            raise CyberPolicyError("openai cyber_policy: access limited; not retried")
+        return real(self, request)
+
+    monkeypatch.setattr(FakeProvider, "complete", complete)
+    return seen
+
+
+def test_one_policy_block_is_a_refusal_and_the_step_keeps_its_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S17-3: a cyber_policy block on one call is that agent's refusal; the step is not "blocked" (no step-down for
+    both sides, decided boards kept) and the block is logged, with whether the prompt held opponent text."""
+    _block_attacks(monkeypatch, 1)
+    settings = _settings(tmp_path)
+    state = play_ladder(settings, "lad-s173", lc.load(FAKE), InMemoryMetrics())
+    assert state.steps[0].result != "blocked"
+    assert state.paused == 0
+    log = build_event_log(settings)
+    blocked = [
+        e.data
+        for s in state.steps
+        for mid in (f"{s.duplicate_id}-b{k}{h}" for k in range(1, 40) for h in "ab")
+        for e in log.read(mid)
+        if e.type == "call_charged" and e.data.get("policy_blocked")
+    ]
+    assert len(blocked) == 1
+    assert blocked[0]["refused"] is True
+    assert blocked[0]["opponent_text"] is True  # the attack prompt fences the author's source
+    assert blocked[0]["usd"] == 0.0
+
+
+def test_repeated_policy_blocks_pause_the_ladder_after_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _block_attacks(monkeypatch, ladder_mod.POLICY_BLOCKS_TO_PAUSE)
+    state = play_ladder(_settings(tmp_path), "lad-s173p", lc.load(FAKE), InMemoryMetrics())
+    assert len(state.steps) == 1
+    assert state.steps[0].result != "blocked"  # the verdict stands
+    assert state.paused == 1
+    assert verify_ladder(_settings(tmp_path), "lad-s173p").consistent

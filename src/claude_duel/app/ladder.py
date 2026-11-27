@@ -12,6 +12,7 @@ from claude_duel.app.container import (
     build_budget,
     build_driver_lock,
     build_duplicate_log,
+    build_event_log,
     build_ladder_log,
     build_ledger,
 )
@@ -21,6 +22,7 @@ from claude_duel.app.estimate import agent_usd
 from claude_duel.app.ladder_config import Basis, LadderConfig, agents
 from claude_duel.config import Settings
 from claude_duel.domain import duplicate as dp
+from claude_duel.domain import events as ev
 from claude_duel.domain import ladder as ld
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, CyberPolicyError
 from claude_duel.ports import EventObserver, Metrics
@@ -140,6 +142,25 @@ LADDER_HALF_MAX_CALLS = 400
 LADDER_RUN_MAX_CALLS = 100_000
 
 
+POLICY_BLOCKS_TO_PAUSE = 3  # cyber_policy blocks in one step (scored as refusals) before the ladder pauses (S17-3)
+
+
+def policy_blocks(settings: Settings, dup: dp.DuplicateState) -> int:
+    """Vendor policy blocks (``call_charged.policy_blocked``) across a finished step's halves ($0, log read only)."""
+    log = build_event_log(settings)
+    halves = [dup.half_id(b.board_no, h) for b in dup.boards for h in (0, 1)]
+    return sum(1 for mid in halves for e in log.read(mid) if e.type == ev.CALL_CHARGED and e.data.get("policy_blocked"))
+
+
+def _pause_reason(settings: Settings, state: ld.LadderState, step: ld.Step, dup: dp.DuplicateState | None) -> str:
+    """Why the ladder pauses after ``step``, or "": two blocked steps in a row, or repeated policy blocks scored as
+    refusals inside one step (S17-3; the step keeps its verdict)."""
+    if step.result == "blocked":
+        return "two blocked steps in a row" if ld.breaker_trips(state.steps) else ""
+    blocks = policy_blocks(settings, dup) if dup is not None else 0
+    return f"{blocks} vendor policy blocks in step {step.step_no}" if blocks >= POLICY_BLOCKS_TO_PAUSE else ""
+
+
 def play_ladder(
     settings: Settings,
     ladder_id: str,
@@ -216,17 +237,18 @@ def play_ladder(
             )
             seq += 1
             state.steps.append(step)
-            if step.result == "blocked" and ld.breaker_trips(state.steps):
+            reason = _pause_reason(settings, state, step, dup if step.result != "blocked" else None)
+            if reason:  # `duel ladder` again resumes once a human has checked the vendor key
                 append(
                     log,
                     ladder_id,
                     schema_version=ld.LADDER_SCHEMA_VERSION,
                     seq=seq,
                     event_type=ld.LADDER_PAUSED,
-                    data={"reason": "two blocked steps in a row", "after_step": n},
+                    data={"reason": reason, "after_step": n},
                 )
                 state.paused += 1
-                return state  # `duel ladder` again resumes once the vendor block is cleared
+                return state
             if step.result == "capped":  # a hard stop cut the match short of its boards: no verdict, stop here
                 append(
                     log,

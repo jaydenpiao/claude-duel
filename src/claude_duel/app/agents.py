@@ -433,6 +433,11 @@ def parse_notes(text: str) -> str:
         return ""
 
 
+def has_fenced_text(prompt: str) -> bool:
+    """True when ``prompt`` carries opponent-authored text (an opened fence, not the rule line that names it)."""
+    return f"{_FENCE}\n" in prompt
+
+
 def fence(text: str) -> str:
     """Wrap untrusted text in markers it cannot forge or close early."""
     return f"{_FENCE}\n{_FENCE_TOKENS.sub('[fence]', text)}\n{_END}"

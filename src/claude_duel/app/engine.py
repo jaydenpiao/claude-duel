@@ -15,6 +15,7 @@ from claude_duel.app.observers import IsolatedObserver
 from claude_duel.domain import arena_units, contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
 from claude_duel.domain.errors import (
+    CyberPolicyError,
     DeadlineExceededError,
     MalformedOutputError,
     MatchCapError,
@@ -298,6 +299,9 @@ class MatchEngine:
         charged.update(arena)  # present only in arena units, so vendor-token logs stay byte-identical
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
+        if completion.policy_blocked:
+            charged["policy_blocked"] = True
+            charged["opponent_text"] = agents.has_fenced_text(request.prompt)
             self._metrics.incr("model.refused", purpose=request.purpose)
         self._checkpoint(state, ev.CALL_CHARGED, **charged)
         self._budget.forget(key)  # the event is durable now; resume will not repeat this attempt
@@ -314,6 +318,14 @@ class MatchEngine:
             reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
             try:
                 return self._providers[agent].complete(request), reservation
+            except CyberPolicyError:
+                # S17-3: an account policy block on one call is scored as that agent's refusal (spends the try, no
+                # forfeit), so opponent text that baits the classifier cannot void a decided board. The ladder pauses
+                # on repeated blocks. Nothing was generated: the reservation settles at $0 in _call.
+                self._metrics.incr("provider.policy_blocked", agent=agent, purpose=request.purpose)
+                return Completion(
+                    text="", input_tokens=0, output_tokens=0, refused=True, policy_blocked=True
+                ), reservation
             except ProviderTimeoutError:
                 self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
                 if timeouts >= TIMEOUT_RETRIES:
