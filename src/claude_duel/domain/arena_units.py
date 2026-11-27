@@ -2,9 +2,10 @@
 
 Vendors tokenize the same text differently (Claude reports about 1.59x GPT's input tokens on identical prompts), so
 a cap or stake counted in vendor tokens buys one vendor less text. Arena units fix one basis: input = request bytes
-/ 4 (rounded up); output = the vendor's output tokens x ``k``, where ``k`` = input units / reported input tokens for
-that same call. That is self-calibrating per call, logged, and replays exactly. Output caps are sent as
-``ceil(cap / ratio)`` vendor tokens, ``ratio`` being the vendor's pinned ``k`` (``Rules.arena_ratio``).
+/ 4 (rounded up); output = the vendor's output tokens x its pinned ratio (``Rules.arena_ratio``), the same ratio that
+sends output caps as ``ceil(cap / ratio)`` vendor tokens. The ratio is never taken from the call itself: a per-call
+``k`` (input bytes / input tokens) let the opponent's text in the prompt, such as whitespace runs, multiply a
+side's stake and clock debit 2.7-5.6x (security review S17-2, 2026-11-26). Logged units replay exactly.
 """
 
 from __future__ import annotations
@@ -22,11 +23,9 @@ def request_bytes(system: str, prompt: str, schema: dict[str, Any] | None = None
     return len(system.encode()) + len(prompt.encode()) + extra
 
 
-def units(input_bytes: int, input_tokens: int, output_tokens: int) -> tuple[int, int]:
-    """(input units, output units) for one call: bytes / 4 in, and output scaled by this call's own ``k``."""
-    unit_in = math.ceil(input_bytes / BYTES_PER_UNIT)
-    k = unit_in / input_tokens if input_tokens > 0 else 1.0
-    return unit_in, math.ceil(output_tokens * k)
+def units(input_bytes: int, output_tokens: int, ratio: float) -> tuple[int, int]:
+    """(input units, output units) for one call: bytes / 4 in, and output at the vendor's pinned ``ratio``."""
+    return math.ceil(input_bytes / BYTES_PER_UNIT), math.ceil(output_tokens * ratio)
 
 
 def vendor_tokens(cap_units: int, ratio: float) -> int:

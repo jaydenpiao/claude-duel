@@ -112,6 +112,9 @@ def attempt_key(state: MatchState, agent: str, request: CompletionRequest) -> st
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:32]
 
 
+TIMEOUT_RETRIES = 2  # a timed-out call is tried up to 3 times, each ledgered at its reservation (S17-1)
+
+
 class MatchEngine:
     def __init__(
         self,
@@ -266,22 +269,16 @@ class MatchEngine:
         if reused is not None:
             completion, usd = reused, self._budget.recount(model, reused)
         else:
-            reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
-            try:
-                completion = self._providers[agent].complete(request)
-            except ProviderTimeoutError:
-                self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
-                raise
-            except Exception:
-                self._budget.release(state.match_id, model, reservation)
-                raise
+            completion, reservation = self._try_call(state, agent, model, request, key)
             usd = self._budget.charge(state.match_id, model, completion, reservation, key)
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
         arena: dict[str, object] = {}
         if state.rules.accounting == "arena":
             nbytes = arena_units.request_bytes(request.system, request.prompt, request.json_schema)
-            unit_in, unit_out = arena_units.units(nbytes, completion.input_tokens, completion.output_tokens)
+            provider = next((a.provider for a in state.agents if a.name == agent), "")
+            ratio = state.rules.arena_ratio.get(provider, 1.0)
+            unit_in, unit_out = arena_units.units(nbytes, completion.output_tokens, ratio)
             completion = completion.model_copy(update={"units": unit_in + unit_out})
             arena = {"input_bytes": nbytes, "units_in": unit_in, "units_out": unit_out}
         charged: dict[str, object] = {
@@ -306,6 +303,27 @@ class MatchEngine:
         self._budget.forget(key)  # the event is durable now; resume will not repeat this attempt
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
+
+    def _try_call(
+        self, state: MatchState, agent: str, model: str, request: CompletionRequest, key: str
+    ) -> tuple[Completion, str]:
+        """One paid call, retried here (never in the provider) after a timeout so every try holds its own reservation
+        and a timed-out try is ledgered at it (likely billed; S17-1). Hard caps are re-checked before each try."""
+        timeouts = 0
+        while True:
+            reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
+            try:
+                return self._providers[agent].complete(request), reservation
+            except ProviderTimeoutError:
+                self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
+                if timeouts >= TIMEOUT_RETRIES:
+                    raise
+                timeouts += 1
+                self._metrics.incr("provider.timeout_retry", agent=agent, purpose=request.purpose)
+                self._budget.check(state)
+            except Exception:
+                self._budget.release(state.match_id, model, reservation)
+                raise
 
     def _run_challenge(
         self, source: str, stdin: str, flag: str, state: MatchState, purpose: str, limits: SandboxLimits | None = None

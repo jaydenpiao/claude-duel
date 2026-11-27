@@ -44,13 +44,14 @@ def _state(rules: Rules, provider: str = "fake") -> MatchState:
 
 
 def _alice(make_engine, rules: Rules, scale: float):  # type: ignore[no-untyped-def]
+    rules = rules.model_copy(update={"arena_ratio": {"fake": 1 / scale}})  # the vendor's pinned ratio, not per call
     state = make_engine({"alice": Tokenizer(scale), "bob": Tokenizer(1.0)}).run(_state(rules))
     tries = [a.tokens for key, run in state.attempts.items() if key.endswith(":alice") for a in run]
     return state.usage_by_agent["alice"], tries
 
 
 def test_equal_text_costs_equal_stakes_and_clock_in_arena_units(make_engine, store_root) -> None:  # type: ignore[no-untyped-def]
-    rules = preset("ladder").model_copy(update={"arena_ratio": {}})
+    rules = preset("ladder")
     assert rules.accounting == "arena"
     gpt, gpt_tries = _alice(make_engine, rules, 1.0)
     for f in store_root.rglob("*"):  # a fresh store, so the second run replays the same match from scratch
@@ -95,16 +96,11 @@ def test_output_caps_are_sent_as_each_vendors_equivalent(make_engine) -> None:  
 @given(
     text=st.integers(min_value=1, max_value=200_000),
     out=st.integers(min_value=0, max_value=24_000),
-    scale=st.floats(min_value=0.5, max_value=2.5),
+    ratio=st.sampled_from([0.63, 1.0]),
 )
-def test_units_ignore_the_tokenizer_property(text: int, out: int, scale: float) -> None:
-    """Same bytes, same reply: a tokenizer reporting ``scale`` x the tokens is charged the same units (+-1 rounding
-    of the scaled counts and +-1 for the ceiling)."""
-    base_in = max(1, text // 4)
-    ref = arena_units.units(text, base_in, out)
-    other = arena_units.units(text, max(1, round(base_in * scale)), round(out * scale))
-    assert other[0] == ref[0]
-    assert abs(other[1] - ref[1]) <= 2 + ref[1] * 2 / base_in + out * 0.01
+def test_units_use_the_pinned_ratio_property(text: int, out: int, ratio: float) -> None:
+    """Input is bytes / 4; output is the vendor's tokens x its pinned ratio, whatever the call's own tokenization."""
+    assert arena_units.units(text, out, ratio) == (math.ceil(text / 4), math.ceil(out * ratio))
 
 
 def test_vendor_tokens_round_the_cap_up() -> None:
