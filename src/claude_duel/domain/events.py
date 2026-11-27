@@ -127,7 +127,6 @@ class CallCharged(_Payload):
     reasoning_effort: str | None = None  # the effort actually sent, defaults included (#191)
     refused: bool = False  # vendor declined to answer; omitted from the log when false (older logs stay identical)
     policy_blocked: bool = False  # a cyber_policy block scored as a refusal (S17-3); omitted when false
-    opponent_text: bool = False  # the blocked prompt carried opponent-authored (fenced) text; only with policy_blocked
     purpose: str = ""  # build / attack / ... (absent in older logs)
     summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
     input_bytes: int = 0  # arena units only (absent otherwise): request bytes, units_in = ceil(bytes / 4)

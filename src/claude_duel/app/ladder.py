@@ -3,11 +3,11 @@ the two-run comparison."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 
 from claude_duel.app import calibration
-from claude_duel.app.budget import CostBudget, SpendCap
+from claude_duel.app.budget import CostBudget, SpendCap, vendor_of
 from claude_duel.app.container import (
     build_budget,
     build_driver_lock,
@@ -25,6 +25,7 @@ from claude_duel.domain import duplicate as dp
 from claude_duel.domain import events as ev
 from claude_duel.domain import ladder as ld
 from claude_duel.domain.errors import BudgetExceededError, ConfigError, CyberPolicyError
+from claude_duel.domain.flags import redact
 from claude_duel.ports import EventObserver, Metrics
 
 
@@ -142,23 +143,31 @@ LADDER_HALF_MAX_CALLS = 400
 LADDER_RUN_MAX_CALLS = 100_000
 
 
-POLICY_BLOCKS_TO_PAUSE = 3  # cyber_policy blocks in one step (scored as refusals) before the ladder pauses (S17-3)
+def policy_blocks(settings: Settings, *ladders: ld.LadderState) -> dict[str, int]:
+    """cyber_policy blocks (``call_charged.policy_blocked``, each a spent attack try) per blocked model, over every
+    board half of the ladders' steps, the paused unfinished step included ($0, log reads only). Only OpenAI has this
+    classifier, so a nonzero count is a vendor asymmetry to disclose."""
+    log, dups = build_event_log(settings), build_duplicate_log(settings)
+    counts: dict[str, int] = {}
+    for lad in ladders:
+        for n in range(1, len(lad.steps) + 2):
+            logged = dups.read(lad.step_id(n))
+            if not logged:
+                continue  # the next step has not started
+            dup = dp.fold(lad.step_id(n), logged)
+            for mid in (dup.half_id(k, h) for k in range(1, len(dup.boards) + 2) for h in (0, 1)):
+                for e in log.read(mid):
+                    if e.type == ev.CALL_CHARGED and e.data.get("policy_blocked"):
+                        model = str(e.data["model"])
+                        counts[model] = counts.get(model, 0) + 1
+    return dict(sorted(counts.items()))
 
 
-def policy_blocks(settings: Settings, dup: dp.DuplicateState) -> int:
-    """Vendor policy blocks (``call_charged.policy_blocked``) across a finished step's halves ($0, log read only)."""
-    log = build_event_log(settings)
-    halves = [dup.half_id(b.board_no, h) for b in dup.boards for h in (0, 1)]
-    return sum(1 for mid in halves for e in log.read(mid) if e.type == ev.CALL_CHARGED and e.data.get("policy_blocked"))
-
-
-def _pause_reason(settings: Settings, state: ld.LadderState, step: ld.Step, dup: dp.DuplicateState | None) -> str:
-    """Why the ladder pauses after ``step``, or "": two blocked steps in a row, or repeated policy blocks scored as
-    refusals inside one step (S17-3; the step keeps its verdict)."""
-    if step.result == "blocked":
-        return "two blocked steps in a row" if ld.breaker_trips(state.steps) else ""
-    blocks = policy_blocks(settings, dup) if dup is not None else 0
-    return f"{blocks} vendor policy blocks in step {step.step_no}" if blocks >= POLICY_BLOCKS_TO_PAUSE else ""
+def by_vendor(counts: dict[str, int]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for model, n in counts.items():
+        out[vendor_of(model)] = out.get(vendor_of(model), 0) + n
+    return dict(sorted(out.items()))
 
 
 def play_ladder(
@@ -215,18 +224,29 @@ def play_ladder(
                 SpendCap("ladder", f"{ladder_id}-", cfg.budget.ladder_max_usd),
                 SpendCap(f"match {state.step_id(n)}", f"{state.step_id(n)}-", cfg.match_cap(a, b)),
             )
+            budget.policy_blocks = {}  # S18-5: blocks are counted per step, live
             try:
                 dup = play_duplicate(
                     step_settings, state.step_id(n), cfg.duplicate_rule(a, b), metrics, observer, budget
                 )
-            except CyberPolicyError:  # a vendor policy block is an outcome of this pairing, not a pause
-                usd = spent.spent_usd(f"{state.step_id(n)}-")
-                step = ld.Step(step_no=n, a=a, b=b, duplicate_id=state.step_id(n), result="blocked", usd=usd)
-            else:
-                if not dup.done():
-                    return state  # a half failed: `duel ladder` again resumes it
-                result, usd = dup.result(), dup.spent_usd()
-                step = ld.Step(step_no=n, a=a, b=b, duplicate_id=dup.duplicate_id, result=result, usd=usd)
+            except CyberPolicyError as exc:
+                # S18-5: a non-attack block, or a vendor's 2nd block in this step, pauses at once (no further calls
+                # to a limited org). The step is not finished: its decided boards are kept and `duel ladder` again
+                # resumes it once a human has checked the vendor key. Never a forfeit, never a "blocked" step.
+                append(
+                    log,
+                    ladder_id,
+                    schema_version=ld.LADDER_SCHEMA_VERSION,
+                    seq=seq,
+                    event_type=ld.LADDER_PAUSED,
+                    data={"reason": f"vendor policy block in step {n}: {redact(str(exc))[:120]}", "after_step": n - 1},
+                )
+                state.paused += 1
+                return state
+            if not dup.done():
+                return state  # a half failed: `duel ladder` again resumes it
+            result, usd = dup.result(), dup.spent_usd()
+            step = ld.Step(step_no=n, a=a, b=b, duplicate_id=dup.duplicate_id, result=result, usd=usd)
             append(
                 log,
                 ladder_id,
@@ -237,15 +257,14 @@ def play_ladder(
             )
             seq += 1
             state.steps.append(step)
-            reason = _pause_reason(settings, state, step, dup if step.result != "blocked" else None)
-            if reason:  # `duel ladder` again resumes once a human has checked the vendor key
+            if step.result == "blocked" and ld.breaker_trips(state.steps):  # logs from before S18-5 only
                 append(
                     log,
                     ladder_id,
                     schema_version=ld.LADDER_SCHEMA_VERSION,
                     seq=seq,
                     event_type=ld.LADDER_PAUSED,
-                    data={"reason": reason, "after_step": n},
+                    data={"reason": "two blocked steps in a row", "after_step": n},
                 )
                 state.paused += 1
                 return state
@@ -307,6 +326,8 @@ class Matchup:
 class Comparison:
     matchups: list[Matchup]
     ordering: str  # "agree" when both runs took the same path with the same decided results
+    # cyber_policy blocks across both runs: (per model, per vendor); filled by the CLI from `policy_blocks`
+    policy_blocked: tuple[dict[str, int], dict[str, int]] = field(default_factory=lambda: ({}, {}))
 
 
 def compare_ladders(first: ld.LadderState, second: ld.LadderState) -> Comparison:
