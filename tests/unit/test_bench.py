@@ -69,7 +69,8 @@ def test_run_bench_skill_orders_solve_rate(tmp_path: Path) -> None:
     rates = solve_rate(results)
     assert usage.calls == sum(r.attempts for r in results)
     ledger = [json.loads(x) for x in (tmp_path / "s" / "ledger.jsonl").read_text().splitlines()]
-    assert len(ledger) == usage.calls
+    assert len(ledger) == 2 * usage.calls  # each call: a reserve line, then its settle line (S18-2)
+    assert sum("settles" in e for e in ledger) == usage.calls
     assert {e["match_id"] for e in ledger} == {"bench-t"}
     assert rates["strong"] == 1.0
     assert rates["weak"] < rates["strong"]
@@ -79,7 +80,9 @@ def test_budget_caps_stop_the_run(tmp_path: Path) -> None:
     capped = Settings(store_dir=tmp_path / "s", sandbox="subprocess", budget=BudgetLimits(match_max_calls=2))
     with pytest.raises(BudgetExceededError, match="match calls 2/2"):
         run_bench(capped, _manifest(tmp_path), 3, "bench-c")
-    assert len((tmp_path / "s" / "ledger.jsonl").read_text().splitlines()) == 2
+    lines = (tmp_path / "s" / "ledger.jsonl").read_text().splitlines()
+    assert sum('"settles"' in line for line in lines) == 2  # two calls made, each reserved then settled
+    assert len(lines) == 4
 
 
 def test_lifetime_cap_refuses_before_any_call(tmp_path: Path) -> None:

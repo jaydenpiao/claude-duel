@@ -18,7 +18,7 @@ from claude_duel.app.budget import CostBudget
 from claude_duel.app.container import build_budget, make_provider, make_sandbox
 from claude_duel.app.engine import MALFORMED
 from claude_duel.config import Settings
-from claude_duel.domain.errors import ConfigError, MalformedOutputError
+from claude_duel.domain.errors import ConfigError, MalformedOutputError, ProviderTimeoutError
 from claude_duel.domain.flags import derive_flag
 from claude_duel.domain.models import AgentSpec, MatchState, Rules, SandboxLimits, Usage
 from claude_duel.observability import NullMetrics
@@ -26,7 +26,8 @@ from claude_duel.ports import Completion, CompletionRequest, LLMProvider, Sandbo
 
 
 class MeteredProvider:
-    """Checks the budget caps before each call and charges the ledger after it, exactly as a match does."""
+    """Checks the budget caps, reserves, calls and charges exactly as a match does: the call is ledgered at its worst
+    case before it runs (a crash keeps it counted), and a timed-out call is kept at its reservation (S18-2)."""
 
     def __init__(self, inner: LLMProvider, model: str, budget: CostBudget, state: MatchState) -> None:
         self._inner, self._model, self._budget, self._state = inner, model, budget, state
@@ -34,9 +35,19 @@ class MeteredProvider:
 
     def complete(self, request: CompletionRequest) -> Completion:
         self._budget.check(self._state)
-        completion = self._inner.complete(request)
-        usd = self._budget.charge(self._state.match_id, self._model, completion)
-        usage = self._state.usage
+        mid, usage = self._state.match_id, self._state.usage
+        reservation = self._budget.reserve(mid, self._model, request)
+        try:
+            completion = self._inner.complete(request)
+        except ProviderTimeoutError:
+            before = self._budget.run_usd
+            self._budget.keep(mid, self._model, reservation)  # likely billed (S17-1): ledger the reservation
+            usage.calls, usage.usd = usage.calls + 1, usage.usd + self._budget.run_usd - before
+            raise
+        except Exception:
+            self._budget.release(mid, self._model, reservation)
+            raise
+        usd = self._budget.charge(mid, self._model, completion, reservation)
         usage.calls, usage.tokens, usage.usd = usage.calls + 1, usage.tokens + completion.total_tokens, usage.usd + usd
         return completion
 
