@@ -1,8 +1,10 @@
-"""CLI for the no-fluke commands: duplicate, ladder, ladder-compare and harness (kept apart so cli.py stays small)."""
+"""CLI for the no-fluke commands: duplicate, ladder, ladder-compare, harness and control-variate (kept apart so cli.py
+stays small)."""
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import uuid
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from claude_duel.app import ladder_config, repro
 from claude_duel.app.container import build_metrics
+from claude_duel.app.control_variate import adjust
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.harness import measure
 from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
@@ -39,6 +42,9 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     dup.add_argument("--format", choices=("text", "json"), default="text")
     _ladder_parser(sub)
     _harness_parser(sub)
+    cv = sub.add_parser("control-variate", help="$0 offline luck adjustment of a duplicate match (reported only)")
+    cv.add_argument("--duplicate-id", required=True)
+    cv.add_argument("--format", choices=("text", "json"), default="text")
 
 
 def handlers(settings: Settings, args: argparse.Namespace) -> dict[str, Callable[[], int]]:
@@ -47,6 +53,7 @@ def handlers(settings: Settings, args: argparse.Namespace) -> dict[str, Callable
         "ladder": lambda: ladder(settings, args),
         "ladder-compare": lambda: ladder_compare(settings, args),
         "harness": lambda: harness(settings, args),
+        "control-variate": lambda: control_variate(settings, args.duplicate_id, args.format),
     }
 
 
@@ -218,3 +225,16 @@ def duplicate(settings: Settings, args: argparse.Namespace) -> int:
     else:
         print("\n".join(duplicate_lines(state, report.consistent, report.mismatches)))
     return 0 if report.consistent and state.done() else 1
+
+
+def control_variate(settings: Settings, duplicate_id: str, fmt: str) -> int:
+    res = adjust(settings, duplicate_id)
+    if fmt == "json":
+        print(json.dumps(dataclasses.asdict(res)))
+        return 0
+    lo, hi = res.ci95
+    print(f"control variate {duplicate_id} (reported only; the result stays on raw boards)")
+    for n, (r, b, a) in enumerate(zip(res.raw, res.baseline, res.adjusted, strict=True), 1):
+        print(f"board {n}: raw {r:+d} · baseline {b:+d} · adjusted {a:+d}")
+    print(f"adjusted margin {sum(res.adjusted):+d} · p={res.p_value:.4f} · 95% CI [{lo:.2f}, {hi:.2f}]")
+    return 0

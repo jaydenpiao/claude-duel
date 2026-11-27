@@ -36,7 +36,10 @@ class HarnessResult:
         return self.first / max(1, self.matches)
 
 
-def _half(settings: Settings, match_id: str, agents: tuple[AgentSpec, AgentSpec], pcts: dict[str, int]) -> MatchState:
+def scripted_half(
+    settings: Settings, match_id: str, agents: tuple[AgentSpec, AgentSpec], pcts: dict[str, int]
+) -> MatchState:
+    """One match between scripted bots (capture chance per agent name) through the real engine and sandbox."""
     s = settings.model_copy(update={"agents": agents})
     store = build_store(s)
     state = open_match(store, s, match_id)
@@ -77,7 +80,7 @@ def measure(
             k = state.next_board()
             board_seed = dp.board_seed(state.seed, k)
             halves = tuple(
-                _half(
+                scripted_half(
                     settings.model_copy(update={"seed": board_seed}),
                     state.half_id(k, h),
                     dp.half_agents(SIDES, h),
