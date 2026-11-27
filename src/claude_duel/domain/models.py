@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
@@ -271,6 +272,14 @@ class Rules(_Frozen):
                 'ledger scoring needs [rules.ledger] and [rules.ledger] needs scoring kind "ledger"; '
                 'use mode = "ledger"'
             )
+        return self
+
+    @model_validator(mode="after")
+    def _arena_ratios_are_finite_and_positive(self) -> Rules:
+        """I22-1: a negative ratio would credit the clock, NaN crashes ceil, 0 divides by zero in vendor_tokens."""
+        bad = {p: r for p, r in self.arena_ratio.items() if not (math.isfinite(r) and r > 0)}
+        if bad:
+            raise ValueError(f"arena_ratio must be finite and > 0: {bad}")
         return self
 
     @model_validator(mode="after")

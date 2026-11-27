@@ -129,3 +129,10 @@ def test_an_arena_match_with_an_unknown_vendor_raises() -> None:
     with pytest.raises(ConfigError, match="no arena_ratio"):
         rules.ratio_for("acme")
     assert Rules().ratio_for("acme") == 1.0  # vendor-token accounting never scales
+
+
+@pytest.mark.parametrize("ratio", [0.0, -1.0, float("nan"), float("inf")])
+def test_arena_ratios_must_be_finite_and_positive(ratio: float) -> None:
+    """I22-1: a negative ratio would credit the clock, NaN crashes ceil, 0 divides by zero."""
+    with pytest.raises(ValueError, match="finite and > 0"):
+        Rules(arena_ratio={"openai": ratio})
