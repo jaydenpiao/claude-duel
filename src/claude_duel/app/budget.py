@@ -202,16 +202,17 @@ class CostBudget:
         self._reserved.pop(reservation, None)
         self._ledger.record(match_id, model, 0, 0.0, settles=reservation)
 
-    def keep(self, match_id: str, model: str, reservation: str) -> float:
+    def keep(self, match_id: str, model: str, reservation: str) -> tuple[int, float]:
         """The call timed out: vendors generally bill tokens generated after the client gave up, so settle its
-        reservation at the full reserved worst case instead of $0, and count it against the run caps."""
+        reservation at the full reserved worst case instead of $0, and count it against the run caps. Returns the
+        kept (tokens, usd) so the engine can fold them into the match's usage (S18-1)."""
         tokens_in, tokens_out = self._reserved.pop(reservation, (0, 0))
         pin, pout = self._prices[model]
         usd = tokens_in * pin / 1_000_000 + tokens_out * pout / 1_000_000
         self.run_calls += 1
         self.run_usd += usd
         self._ledger.record(match_id, model, tokens_in + tokens_out, usd, settles=reservation)
-        return usd
+        return tokens_in + tokens_out, usd
 
     def settled(self, key: str) -> Completion | None:
         """The reply of an attempt already charged under ``key`` (a resume after a crash before its event)."""

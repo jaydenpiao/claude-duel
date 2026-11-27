@@ -258,10 +258,7 @@ class MatchEngine:
         if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (#121)
             allowance.check(state, agent)
         self._budget.check(state)
-        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
-            raise DeadlineExceededError(
-                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
-            )
+        self._deadline(state)
         model = self._models[agent]
         key = attempt_key(state, agent, request)
         started = time.monotonic()
@@ -304,6 +301,13 @@ class MatchEngine:
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
 
+    @staticmethod
+    def _deadline(state: MatchState) -> None:
+        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
+            raise DeadlineExceededError(
+                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
+            )
+
     def _try_call(
         self, state: MatchState, agent: str, model: str, request: CompletionRequest, key: str
     ) -> tuple[Completion, str]:
@@ -312,15 +316,20 @@ class MatchEngine:
         timeouts = 0
         while True:
             reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
+            started = time.monotonic()
             try:
                 return self._providers[agent].complete(request), reservation
             except ProviderTimeoutError:
-                self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger the reservation
+                tokens, usd = self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger it
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                kept = {"agent": agent, "model": model, "tokens": tokens, "usd": usd, "elapsed_ms": elapsed_ms}
+                self._checkpoint(state, ev.CALL_TIMED_OUT, **kept, purpose=request.purpose)  # S18-1: match usage
                 if timeouts >= TIMEOUT_RETRIES:
                     raise
                 timeouts += 1
                 self._metrics.incr("provider.timeout_retry", agent=agent, purpose=request.purpose)
                 self._budget.check(state)
+                self._deadline(state)
             except Exception:
                 self._budget.release(state.match_id, model, reservation)
                 raise

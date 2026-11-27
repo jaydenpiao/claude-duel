@@ -25,6 +25,7 @@ _KEEP: Mapping[str, tuple[str, ...]] = {
     ev.MATCH_FAILED: ("reason",),
     ev.MATCH_RECOVERED: (),
     ev.CALL_CHARGED: ("agent", "model", "tokens", "usd", "elapsed_ms", "input_tokens", "output_tokens", "refused"),
+    ev.CALL_TIMED_OUT: ("agent", "model", "tokens", "usd", "elapsed_ms"),
     ev.BUILD_REJECTED: ("challenge_id", "error"),
     ev.CHALLENGE_BUILT: ("challenge",),
     ev.CHALLENGE_VALIDATED: ("validation",),
