@@ -17,3 +17,8 @@ def test_scaled_floored_and_capped() -> None:
 def test_ladder_preset_stakes_leave_room_for_reasoning() -> None:
     ledger = preset("ladder").ledger
     assert (ledger.min_alloc, ledger.attack_tokens) == (6_000, 24_000)
+
+
+def test_full_timeout_tokens_is_the_ladder_attack_budget() -> None:
+    # one source: a stake change must be a deliberate timeout change too
+    assert preset("ladder").ledger.attack_tokens == FULL_TIMEOUT_TOKENS
