@@ -1,14 +1,14 @@
 """No-fluke ladder (design-no-fluke §4.1): a pure fold over ``<id>.ladder.jsonl``.
 
 Each step is one duplicate match between side a's and side b's current models. The loser steps down its list; an
-inconclusive or void step moves both sides down. The ladder ends when either list runs out, or when the next step's
+step with no backed winner moves both sides down. The ladder ends when either list runs out, or when the next step's
 worst case could pass ``ladder_max_usd`` (capped).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,7 +19,11 @@ from claude_duel.domain.events import check_version, typed
 from claude_duel.domain.models import Event
 
 LADDER_CREATED, STEP_FINISHED, LADDER_CAPPED = "ladder_created", "step_finished", "ladder_capped"
+# two blocked steps in a row: the vendor key is likely flagged; stop for a human, resumable (never a verdict)
+LADDER_PAUSED = "ladder_paused"
 LADDER_SCHEMA_VERSION = 1  # Event.v of ladder events, versioned apart from match events
+# A pairing a vendor policy block (OpenAI cyber_policy) stopped: no verdict, excluded from claims; the ladder goes on.
+StepResult = Result | Literal["blocked"]
 
 
 class Step(BaseModel):
@@ -28,12 +32,13 @@ class Step(BaseModel):
     a: str
     b: str
     duplicate_id: str
-    result: Result  # "first" = side a won
+    result: StepResult  # "first" = side a won
     usd: float = Field(ge=0)
 
 
-def advance(tiers: tuple[int, int], result: Result) -> tuple[int, int]:
-    """The loser steps down; no backed winner moves both sides down."""
+def advance(tiers: tuple[int, int], result: StepResult) -> tuple[int, int]:
+    """The loser steps down; no backed winner (inconclusive, blocked, capped) moves both sides down (a
+    ``capped`` step also ends the ladder)."""
     i, j = tiers
     if result == "first":
         return i, j + 1
@@ -52,6 +57,7 @@ class LadderState(BaseModel):
     start: tuple[int, int]
     steps: list[Step] = Field(default_factory=list)
     capped: bool = False
+    paused: int = 0  # ladder_paused events seen (a pause ends one run; rerunning resumes)
 
     def tiers(self) -> tuple[int, int]:
         tiers = self.start
@@ -89,6 +95,9 @@ def fold(ladder_id: str, events: Iterable[Event]) -> LadderState:
         if e.type == LADDER_CAPPED and not state.capped:
             state.capped = True
             continue
+        if e.type == LADDER_PAUSED and not state.done():
+            state.paused += 1
+            continue
         if e.type != STEP_FINISHED or state.done():
             raise EventLogCorruptError(f"unexpected ladder event {e.type!r}")
         step = typed(Step, e.data)
@@ -96,3 +105,9 @@ def fold(ladder_id: str, events: Iterable[Event]) -> LadderState:
             raise EventLogCorruptError(f"ladder step {step.step_no} does not follow the ladder")
         state.steps.append(step)
     return state
+
+
+def breaker_trips(steps: list[Step]) -> bool:
+    """The vendor-policy circuit breaker: the last two steps were both ``blocked``. Each side is one vendor and only
+    OpenAI raises cyber_policy, so two in a row are the same vendor's account-level block."""
+    return len(steps) >= 2 and steps[-1].result == steps[-2].result == "blocked"

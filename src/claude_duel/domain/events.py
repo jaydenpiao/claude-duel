@@ -128,6 +128,9 @@ class CallCharged(_Payload):
     refused: bool = False  # vendor declined to answer; omitted from the log when false (older logs stay identical)
     purpose: str = ""  # build / attack / ... (absent in older logs)
     summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
+    input_bytes: int = 0  # arena units only (absent otherwise): request bytes, units_in = ceil(bytes / 4)
+    units_in: int = 0
+    units_out: int = 0  # output_tokens x (units_in / input_tokens); ``tokens`` is units_in + units_out
 
 
 class BuildRejected(_Payload):
@@ -290,6 +293,9 @@ def _charged(state: MatchState, p: CallCharged) -> None:
         u.output_tokens += p.output_tokens
         u.reasoning_tokens += p.reasoning_tokens
     clock = state.rules.clock
+    if p.units_in or p.units_out:  # arena units: the same text costs every vendor the same clock
+        mine.clock_tokens += p.units_out + p.units_in // clock.input_divisor
+        return
     split = p.output_tokens + p.input_tokens // clock.input_divisor
     mine.clock_tokens += split if (p.input_tokens or p.output_tokens) else p.tokens
 

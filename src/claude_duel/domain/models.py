@@ -206,6 +206,18 @@ class Rules(_Frozen):
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
     )
+    neutral_ids: bool = Field(
+        default=False,
+        description="prompts, memory and challenge ids name agents by seat (p1, p2), never by name, model or vendor",
+    )
+    accounting: Literal["vendor", "arena"] = Field(
+        default="vendor",
+        description="stakes, clock, wallet and output caps in vendor tokens, or vendor-neutral arena units",
+    )
+    arena_ratio: dict[str, float] = Field(
+        default_factory=dict,
+        description="arena units per vendor output token by provider (1.0 when absent); sets max_tokens in arena units",
+    )
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
     )
@@ -553,6 +565,13 @@ class MatchState(BaseModel):
     def opponent(self, name: str) -> str:
         a, b = self.agents
         return b.name if name == a.name else a.name
+
+    def seat(self, name: str) -> str:
+        """How models see ``name``: its seat ("p1" leads this match, "p2" follows) under ``rules.neutral_ids``, so no
+        prompt or challenge id carries a model or vendor name; else the agent name, as older logs recorded it."""
+        if not self.rules.neutral_ids:
+            return name
+        return "p1" if name == self.agents[0].name else "p2"
 
     def round_challenges(self, round_no: int) -> list[Challenge]:
         return [c for c in self.challenges.values() if c.round == round_no]

@@ -1,14 +1,16 @@
 """Duplicate play (no-fluke ladder): a pure fold over ``<id>.duplicate.jsonl``.
 
 A board is one seed played twice as two normal matches with the agent order swapped. Its difference is the first
-agent's net points summed over both halves, clipped to +-``board_cap``. A harness fault (a reply truncated twice)
-voids the board, which is replayed on ``replay_seed`` up to ``fault_replays`` times and then counts 0. The result is
-decided on boards only (never on spend): the sign test or the SPRT must back the winner, else it is inconclusive.
+agent's net points summed over both halves, clipped to +-``board_cap``. A reply truncated twice is the model's own
+outcome and is scored like a refusal (a build forfeit, a spent attack try); it is counted per agent on the board but
+never voids it or replays it: no board is ever void. The result is decided on boards only (never on spend): the
+stop rule's test must back the winner, else it is inconclusive.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 from collections.abc import Iterable
 from typing import Literal
 
@@ -23,8 +25,8 @@ from claude_duel.domain.models import AgentSpec, AttackAttempt, Event, MatchStat
 DUPLICATE_CREATED, BOARD_SCORED, DUPLICATE_CAPPED = "duplicate_created", "board_scored", "duplicate_capped"
 DUPLICATE_SCHEMA_VERSION = 1  # Event.v of duplicate events, versioned apart from match events (#139)
 MAX_DIFFICULTY = 3
-MAX_BOARDS = 64  # money caps bind first; this only stops a typo
-Result = Literal["first", "second", "inconclusive", "void"]
+MAX_BOARDS = 256  # money caps bind first; this only stops a typo
+Result = Literal["first", "second", "inconclusive", "capped"]
 
 
 SIGN_TEST_ALPHA = 0.05
@@ -35,8 +37,6 @@ class DuplicateRule(BaseModel):
     boards_min: int = Field(default=12, ge=1, le=MAX_BOARDS)
     boards_max: int = Field(default=48, ge=1, le=MAX_BOARDS)
     board_cap_mult: int = Field(default=2, ge=1, le=10, description="board clip = mult x max defense award")
-    fault_replays: int = Field(default=2, ge=0, le=2)
-    void_share_max_pct: int = Field(default=25, ge=0, le=100, description="more void boards => inconclusive")
     # "margin" (default): exact sign-flip test on the seat-paired board margins; stop early past boards_min only at
     # p <= early_alpha (checked every look_every boards), else call at boards_max with p <= margin_alpha. "sprt" is the
     # older win-count rule (sign test or SPRT), kept so logs that pinned it replay unchanged.
@@ -59,13 +59,11 @@ class DuplicateRule(BaseModel):
 class Board(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     board_no: int
-    seed: str  # the seed both halves were played on (the replay seed after a fault)
+    seed: str  # the seed both halves were played on
     halves: tuple[str, str]  # match ids: first agent leads, then second agent leads
     raw: int  # first agent's net points over both halves
-    diff: int  # raw clipped to +-board_cap; 0 when void
-    void: bool = False
-    fault: str = ""  # why the last try was voided (empty when scored)
-    replays: int = 0
+    diff: int  # raw clipped to +-board_cap
+    truncated: dict[str, int] = Field(default_factory=dict)  # agent -> twice-truncated builds and tries (scored)
     usd: float = 0.0
 
 
@@ -78,27 +76,21 @@ class DuplicateState(BaseModel):
     rules: Rules
     limits: SandboxLimits
     boards: list[Board] = Field(default_factory=list)
-    capped: bool = False  # the next board could pass match_max_usd: scored on the boards played (ADR 0014)
+    capped: bool = False  # the next board could pass match_max_usd: result "capped" (no verdict) before boards_max
+    cap_reason: str = ""  # cap_reason() when it stopped: next_board_over_cap or projected_over_cap
 
     def diffs(self) -> list[int]:
         return [b.diff for b in self.boards]
 
     def record(self) -> ms.Record:
-        return ms.record([b.diff for b in self.boards if not b.void])
-
-    def void_share_exceeded(self) -> bool:
-        voids = sum(b.void for b in self.boards)
-        return 100 * voids > self.rule.void_share_max_pct * max(1, len(self.boards))
+        return ms.record(self.diffs())
 
     def sprt(self) -> ms.Sprt:
         r = self.record()
         return ms.sprt(r.wins, r.losses, self.rule.sprt_p1, self.rule.alpha, self.rule.beta)
 
-    def scored(self) -> list[int]:
-        return [b.diff for b in self.boards if not b.void]
-
     def done(self) -> bool:
-        return self.capped or stop_now(self.rule, len(self.boards), self.scored())
+        return self.capped or stop_now(self.rule, len(self.boards), self.diffs())
 
     def p_value(self) -> float:
         r = self.record()
@@ -106,19 +98,20 @@ class DuplicateState(BaseModel):
 
     def margin_p(self) -> float:
         """Exact seat-paired sign-flip p on the summed board margin (what the margin rule calls on)."""
-        return ms.sign_flip_p(self.scored())
+        return ms.sign_flip_p(self.diffs())
 
     def ci(self) -> tuple[float, float]:
         return ms.bootstrap_ci(self.diffs(), self.seed)
 
     def result(self) -> Result:
         """``first``/``second`` only when the stop rule backs it (see ``verdict``: the summed-margin sign-flip by
-        default, or the sign test / SPRT for ``stop="sprt"``); spend never decides."""
+        default, or the sign test / SPRT for ``stop="sprt"``); spend never decides. A match the money cap stopped
+        before ``boards_max`` is ``capped``: no verdict, excluded from claims (price never ends a match early)."""
         if not self.done():
             raise ValueError("duplicate match is not finished")
-        if self.void_share_exceeded():
-            return "void"
-        return verdict(self.rule, self.scored(), final=len(self.boards) >= self.rule.boards_max or self.capped)
+        if self.capped and len(self.boards) < self.rule.boards_max:
+            return "capped"
+        return verdict(self.rule, self.diffs(), final=len(self.boards) >= self.rule.boards_max)
 
     def winner(self) -> str | None:
         res = self.result()
@@ -130,37 +123,55 @@ class DuplicateState(BaseModel):
     def next_board(self) -> int:
         return len(self.boards) + 1
 
-    def half_id(self, board_no: int, half: int, replay: int = 0) -> str:
-        return f"{self.duplicate_id}-b{board_no}{'ab'[half]}" + (f"-r{replay}" if replay else "")
+    def half_id(self, board_no: int, half: int) -> str:
+        return f"{self.duplicate_id}-b{board_no}{'ab'[half]}"
 
 
-def stop_now(rule: DuplicateRule, boards: int, scored: list[int]) -> bool:
-    """The stop rule after ``boards`` boards (``scored``: the non-void margins): boards_max, or an early call."""
+def stop_now(rule: DuplicateRule, boards: int, diffs: list[int]) -> bool:
+    """The stop rule after ``boards`` boards (``diffs``: their margins): boards_max, or an early call."""
     if boards >= rule.boards_max:
         return True
     if boards < rule.boards_min or rule.stop == "none":
         return False
     if rule.stop == "margin":
-        return (boards - rule.boards_min) % rule.look_every == 0 and ms.sign_flip_p(scored) <= rule.early_alpha
-    r = ms.record(scored)
+        return (boards - rule.boards_min) % rule.look_every == 0 and ms.sign_flip_p(diffs) <= rule.early_alpha
+    r = ms.record(diffs)
     return ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta) != "continue"
 
 
-def verdict(rule: DuplicateRule, scored: list[int], *, final: bool = True) -> Result:
+def verdict(rule: DuplicateRule, diffs: list[int], *, final: bool = True) -> Result:
     """A side wins only when the test backs it; otherwise the match is too close to call ("inconclusive"). Margin:
-    p <= margin_alpha at boards_max (or a cap), p <= early_alpha before. Void handling is the caller's."""
+    p <= margin_alpha at boards_max (or a cap), p <= early_alpha before."""
     if rule.stop == "margin":
-        total = sum(scored)
-        if total and ms.sign_flip_p(scored) <= (rule.margin_alpha if final else rule.early_alpha):
+        total = sum(diffs)
+        if total and ms.sign_flip_p(diffs) <= (rule.margin_alpha if final else rule.early_alpha):
             return "first" if total > 0 else "second"
         return "inconclusive"
-    r = ms.record(scored)
+    r = ms.record(diffs)
     p, test = ms.sign_test_p(r.wins, r.losses), ms.sprt(r.wins, r.losses, rule.sprt_p1, rule.alpha, rule.beta)
     if r.wins > r.losses and (p <= SIGN_TEST_ALPHA or test == "first"):
         return "first"
     if r.losses > r.wins and (p <= SIGN_TEST_ALPHA or test == "second"):
         return "second"
     return "inconclusive"
+
+
+PROJECT_FROM = 4  # boards played before the projected-cap abort may stop a fixed-board match
+
+
+def cap_reason(state: DuplicateState) -> str | None:
+    """Why the match must stop as ``capped`` before its next board, or ``None``. ``next_board_over_cap``: the dearest
+    board so far would pass the cap. ``projected_over_cap`` (fixed boards only, from board ``PROJECT_FROM`` on): the
+    mean board so far, times the scheduled boards, is over the cap, so stopping now wastes the least. Reads only
+    logged board spend, so a replay stops on the same board."""
+    if not state.boards:
+        return None
+    spent, cap, done = state.spent_usd(), state.rule.match_max_usd, len(state.boards)
+    if spent + next_board_usd(state) > cap:
+        return "next_board_over_cap"
+    if state.rule.stop == "none" and done >= PROJECT_FROM and spent / done * state.rule.boards_max > cap:
+        return "projected_over_cap"
+    return None
 
 
 def next_board_usd(state: DuplicateState) -> float:
@@ -170,11 +181,6 @@ def next_board_usd(state: DuplicateState) -> float:
 
 def board_seed(seed: str, board_no: int) -> str:
     return hashlib.sha256(f"{seed}:board:{board_no}".encode()).hexdigest()[:16]
-
-
-def replay_seed(seed: str, replay: int) -> str:
-    """The seed of a board's ``replay``-th retry after a harness fault (0 = the board seed itself)."""
-    return seed if replay == 0 else hashlib.sha256(f"{seed}:replay:{replay}".encode()).hexdigest()[:16]
 
 
 def half_agents(agents: tuple[AgentSpec, AgentSpec], half: int) -> tuple[AgentSpec, AgentSpec]:
@@ -189,26 +195,28 @@ def board_cap(rule: DuplicateRule, rules: Rules) -> int:
     return rule.board_cap_mult * rules.scoring.defense_points * MAX_DIFFICULTY * weight
 
 
-def build_fault(state: MatchState, challenge_id: str) -> bool:
-    """A build forfeited on a twice-truncated reply is a harness fault; every other forfeit is scored. Reads the
-    engine-set ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
+def build_truncated(state: MatchState, challenge_id: str) -> bool:
+    """A build forfeited on a twice-truncated reply (scored as a forfeit, counted per agent). Reads the engine-set
+    ``BuildRejected.truncated`` (folded into ``state.build_truncated``), never a reason string."""
     ch = state.challenges.get(challenge_id)
     return ch is not None and ch.spec is None and challenge_id in state.build_truncated
 
 
-def attack_fault(attempt: AttackAttempt) -> bool:
-    """An attack try whose reply was truncated twice is a harness fault; near misses and the rest are scored. Reads
-    the engine-set ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
+def attack_truncated(attempt: AttackAttempt) -> bool:
+    """An attack try whose reply was truncated twice (a spent try, counted per agent). Reads the engine-set
+    ``truncated`` field, never the output text, which is the opponent's challenge stdout."""
     return attempt.truncated
 
 
-def fault(state: MatchState) -> str:
-    """The harness fault that voids a board, or "". Every other failure is the model's own and is scored."""
-    if any(build_fault(state, cid) for cid in state.validations):
-        return "build truncated"
-    if any(attack_fault(a) for tries in state.attempts.values() for a in tries):
-        return "attack truncated"
-    return ""
+def truncations(state: MatchState) -> Counter[str]:
+    """Per agent: builds forfeited and attack tries spent on a twice-truncated reply in one half."""
+    out: Counter[str] = Counter()
+    for cid in state.validations:
+        if build_truncated(state, cid):
+            out[state.challenges[cid].author] += 1
+    for key, tries in state.attempts.items():
+        out[key.rsplit(":", 1)[-1]] += sum(attack_truncated(a) for a in tries)
+    return +out  # drops agents with no truncation
 
 
 def net(state: MatchState, name: str) -> int:
@@ -216,22 +224,18 @@ def net(state: MatchState, name: str) -> int:
     return scores[name] - scores[state.opponent(name)]
 
 
-def board_of(
-    state: DuplicateState, board_no: int, seed: str, halves: tuple[MatchState, MatchState], replays: int
-) -> Board:
-    """A board's record from its two finished halves; a faulted pair is void (diff 0)."""
-    why = next((f for f in map(fault, halves) if f), "")
+def board_of(state: DuplicateState, board_no: int, seed: str, halves: tuple[MatchState, MatchState]) -> Board:
+    """A board's record from its two finished halves: the first agent's net points, clipped."""
     raw = sum(net(h, state.agents[0].name) for h in halves)
+    cut = sum((truncations(h) for h in halves), Counter[str]())
     cap = board_cap(state.rule, state.rules)
     return Board(
         board_no=board_no,
         seed=seed,
         halves=(halves[0].match_id, halves[1].match_id),
         raw=raw,
-        diff=0 if why else max(-cap, min(cap, raw)),
-        void=bool(why),
-        fault=why,
-        replays=replays,
+        diff=max(-cap, min(cap, raw)),
+        truncated=dict(cut),
         usd=sum(h.usage.usd for h in halves),
     )
 
@@ -250,6 +254,7 @@ def fold(duplicate_id: str, events: Iterable[Event]) -> DuplicateState:
         check_version(e, DUPLICATE_SCHEMA_VERSION, "duplicate event")
         if e.type == DUPLICATE_CAPPED and not state.capped:
             state.capped = True
+            state.cap_reason = str(e.data.get("reason", ""))
             continue
         if e.type != BOARD_SCORED or state.capped:
             raise EventLogCorruptError(f"unexpected duplicate event {e.type!r}")

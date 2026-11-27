@@ -1,0 +1,24 @@
+# Pilot control: haiku vs luna over 200 fixed boards, the yardstick for how far a 34-board result moves on noise
+# alone. Hard cap $8 (calibrated $5.30); a hard stop before board 200 leaves it "capped" (no verdict).
+# Boards play one at a time (about 12 min each at effort high), so run it as shards to finish in hours: 8 ladder ids
+# with `--boards 25 --match-max-usd 0.95 --ladder-max-usd 0.95` each. Each ladder id seeds its own boards.
+run_date = "2026-11-20"
+
+[sides]
+a = ["claude-haiku-5-5"]
+b = ["gpt-6-luna"]
+
+[match]
+boards = 200  # fixed
+
+[budget]
+match_max_usd = 8.0
+ladder_max_usd = 8.0
+basis = "calibrated"
+
+[caps]
+build = 24000
+allocate = 2000
+attack = 8000
+max_attempts = 3
+effort = "high"  # sent to all 8 models (jayden, 2026-11-26)
