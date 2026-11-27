@@ -896,7 +896,9 @@ class MatchEngine:
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
             floor = state.rules.ledger.min_try_units if state.rules.ledger is not None else STAKE_FLOOR
-            if left is not None and self._fit(state, prompt, left) < floor:
+            # S18-6: the floor is on the stake's output room only. The prompt's input estimate carries the opponent's
+            # source and description, so it must not decide whether a try happens (it still shrinks max_tokens).
+            if left is not None and (left < floor or self._fit(state, prompt, left) < STAKE_FLOOR):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)

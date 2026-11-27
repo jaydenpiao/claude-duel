@@ -66,7 +66,8 @@ MODES["ladder"] = _LEDGER.model_copy(
         # so hidden reasoning used it all and 55% of attack replies truncated; 6000 leaves room for reasoning + answer
         # min_try_units (pilot run 2, 2026-11-26): 108 of 124 attack truncations were stake-bound (max_tokens cut to
         # the stake left), nearly all thinking with no answer. A try needs 5000 units of room: that skips 82 of the 108
-        # (76%; 4000 would skip 63%), and a min_alloc stake (6000 minus <= 443 input units) still gets its first try.
+        # (76%; 4000 would skip 63%). A min_alloc stake (6000) always gets its first try: the floor counts output
+        # room only, never the opponent-authored prompt bytes (S18-6).
         # No vendor lets us cap thinking inside max_tokens, so this is the vendor-neutral lever.
         "ledger": _SEALED.model_copy(
             update={"terrain": "none", "min_alloc": 6_000, "attack_tokens": 24_000, "min_try_units": 5_000}
