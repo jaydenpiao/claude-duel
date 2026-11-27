@@ -465,3 +465,27 @@ def test_resume_does_not_repay_allocate(make_engine, new_state, store, event_log
     assert alice_r1.data["fallback"] is True
     assert alice_r1.data["stakes"] == [4000, 4000, 4000]
     assert replay(done, event_log.read("resume-alloc")).consistent
+
+
+def test_a_try_needs_min_try_units_of_room_or_the_attack_ends_stake_exhausted(make_engine, new_state) -> None:  # type: ignore[no-untyped-def]
+    """Pilot 2026-11-26: tries whose max_tokens the stake left would cut below min_try_units are not made, so a
+    reasoning model is never sent a try too small to think and answer in; the attack ends "stake exhausted"."""
+    provs = {"alice": Allocating('{"stakes": [3000, 3000, 3000]}'), "bob": Allocating('{"stakes": [0, 0, 0]}')}
+    st0 = _ledger(new_state)
+    assert st0.rules.ledger is not None
+    rule = st0.rules.ledger.model_copy(update={"min_alloc": 1000, "min_try_units": 4000})
+    st0.rules = st0.rules.model_copy(update={"ledger": rule})
+    state = make_engine(providers=provs).run(st0)
+    mine = [a for a in state.attacks.values() if a.attacker == "alice"]
+    assert mine
+    assert all(a.reason == "stake exhausted" and a.attempts == 0 for a in mine)  # 3000 < 4000: no try at all
+    alloc = [p for purpose, p in provs["alice"].prompts if purpose == "allocate"]
+    assert all("at least 4000 tokens of its stake" in p for p in alloc)  # the rule is in the allocate prompt
+
+
+def test_min_try_units_at_the_old_floor_is_omitted_from_logs() -> None:
+    rules = preset("ladder")
+    assert rules.ledger is not None
+    old = rules.model_copy(update={"ledger": rules.ledger.model_copy(update={"min_try_units": 256})})
+    assert "min_try_units" not in old.dump()["ledger"]
+    assert rules.dump()["ledger"]["min_try_units"] == 5000

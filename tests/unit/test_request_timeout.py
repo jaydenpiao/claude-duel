@@ -16,7 +16,7 @@ def test_scaled_floored_and_capped() -> None:
 
 def test_ladder_preset_stakes_leave_room_for_reasoning() -> None:
     ledger = preset("ladder").ledger
-    assert (ledger.min_alloc, ledger.attack_tokens) == (6_000, 24_000)
+    assert (ledger.min_alloc, ledger.attack_tokens, ledger.min_try_units) == (6_000, 24_000, 5_000)
 
 
 def test_full_timeout_tokens_is_the_ladder_attack_budget() -> None:

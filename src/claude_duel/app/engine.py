@@ -96,7 +96,7 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
-STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
+STAKE_FLOOR = 256  # ledger: no repair call when fewer output tokens than this fit (tries: LedgerRule.min_try_units)
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
@@ -772,6 +772,7 @@ class MatchEngine:
             self._memory(state, attacker),
             own_rows,
             ghost_labels,
+            min_try=rule.min_try_units if rule.min_try_units > STAKE_FLOOR else None,
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -875,7 +876,8 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
-            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+            floor = state.rules.ledger.min_try_units if state.rules.ledger is not None else STAKE_FLOOR
+            if left is not None and self._fit(state, prompt, left) < floor:
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)

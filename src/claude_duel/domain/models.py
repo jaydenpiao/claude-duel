@@ -124,6 +124,9 @@ class LedgerRule(_Frozen):
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # a try is made only while this many output tokens fit in the stake left; otherwise the attack ends "stake
+    # exhausted" with no call. 256 is the old engine floor, so logs pinned before the field replay as written.
+    min_try_units: int = Field(default=256, ge=1)
     # Feature switches default off so a log pinned before they existed replays as written; the ledger
     # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
@@ -330,6 +333,8 @@ class Rules(_Frozen):
         ledger = data.get("ledger")
         if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
             ledger.pop("heat_token_cap", None)
+        if isinstance(ledger, dict) and ledger.get("min_try_units") == 256:
+            ledger.pop("min_try_units")  # absent at the old floor, so logs without it stay byte-identical
         if data.get("call_caps") is None:
             data.pop("call_caps", None)  # absent unless set, so logs without it stay byte-identical
         return data
