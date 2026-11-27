@@ -1,0 +1,45 @@
+# Final no-fluke ladder (jayden, 2026-11-26): the step-down ladder at 34 fixed boards a pairing, effort high for all
+# 8 models, $25 a match with larger caps for the dearer (fable, astra) pairings; ladder-a's per-call caps.
+# Budget basis "calibrated": the dry run checks the caps against each model's measured token use (app/calibration.py)
+# and refuses any pairing whose boards cannot fit match_max_usd; a per-call hard stop keeps actual spend under both
+# caps, and a match it stops early is "capped" (no verdict). Premium models: set allow_premium = true.
+# `duel ladder examples/ladder-final.toml --dry-run`; run it twice (each run has fresh seeds from its ladder id), then
+# `duel ladder-compare RUN1 RUN2`.
+run_date = "2026-11-20"  # required; drives the model cutoffs, never the wall clock
+
+[sides]  # strongest first
+a = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+b = ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"]
+
+[start_tier]
+a = 0
+b = 0
+
+[match]
+boards = 34  # fixed: every pairing plays all 34 boards, no early stop
+
+[budget]
+match_max_usd = 25.0  # any pairing not in pair_max_usd
+ladder_max_usd = 675.0  # 1.15x the calibrated dearest path ($585.79)
+basis = "calibrated"
+
+[budget.pair_max_usd]  # the dearer pairings (jayden, 2026-11-26): 1.25x the calibrated case, rounded up to $5
+"claude-fable-5-2 vs gpt-6.2-astra" = 245.0  # calibrated $192.39
+"claude-fable-5-2 vs gpt-6.2-sol" = 165.0  # calibrated $130.00
+"claude-fable-5-2 vs gpt-6.1-terra" = 150.0  # calibrated $119.60
+"claude-fable-5-2 vs gpt-6-luna" = 140.0  # calibrated $109.64
+"claude-opus-5-5 vs gpt-6.2-astra" = 135.0  # calibrated $104.78
+"claude-opus-5-5 vs gpt-6.2-sol" = 55.0  # calibrated $42.39
+"claude-opus-5-5 vs gpt-6.1-terra" = 40.0  # calibrated $31.99
+"claude-sonnet-5-5 vs gpt-6.2-astra" = 120.0  # calibrated $93.99
+"claude-sonnet-5-5 vs gpt-6.2-sol" = 40.0  # calibrated $31.59
+"claude-haiku-5-5 vs gpt-6.2-astra" = 105.0  # calibrated $83.65
+
+[caps]  # per-call output tokens, the same for both sides
+build = 24000
+allocate = 2000
+attack = 8000
+max_attempts = 3
+effort = "high"  # sent to all 8 models (jayden, 2026-11-26)
+
+[limits]  # unset: sized for the slowest model in the plan (here 900 s per request, 1800 s per call, 6660 s per half)

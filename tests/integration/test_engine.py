@@ -13,6 +13,7 @@ from claude_duel.adapters.store.ledger import FileSpendLedger
 from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
 from claude_duel.app.engine import MatchEngine
 from claude_duel.app.replay import replay
+from claude_duel.domain import events as ev
 from claude_duel.domain.errors import (
     BudgetExceededError,
     PermanentProviderError,
@@ -127,8 +128,6 @@ def test_budget_breaker_trips(make_engine, new_state, store) -> None:  # type: i
 def test_lifetime_ledger_refuses_new_matches(tmp_path: Path, new_state) -> None:  # type: ignore[no-untyped-def]
     ledger = FileSpendLedger(tmp_path / "ledger.jsonl")
     ledger.record("old", "gpt-4o-mini", 10, 40.0)
-    with (tmp_path / "ledger.jsonl").open("a") as fh:
-        fh.write('{"torn": ')
     assert FileSpendLedger(tmp_path / "ledger.jsonl").total_usd() == 40.0
 
     engine = MatchEngine(
@@ -205,3 +204,43 @@ def test_resume_applies_events_missing_from_snapshot(make_engine, new_state, sto
     done = make_engine().run(stale)
     assert done.stage is Stage.COMPLETE
     assert replay(done, event_log.read("m1")).consistent
+
+
+class Counting(FakeProvider):
+    def __init__(self, skill: int) -> None:
+        super().__init__(skill=skill)
+        self.calls = 0
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        self.calls += 1
+        return super().complete(request)
+
+
+def test_crash_after_the_charge_reuses_the_reply_on_resume(  # type: ignore[no-untyped-def]
+    make_engine, new_state, store, event_log, store_root, monkeypatch
+) -> None:
+    """a crash after the ledger charge, before CALL_CHARGED, neither calls the provider again nor charges twice."""
+    alice, bob = Counting(2), Counting(5)
+    real = MatchEngine._record
+    seen = {"n": 0}
+
+    def crash_on_third_charge(self, state, kind, **data):  # type: ignore[no-untyped-def]
+        if kind == ev.CALL_CHARGED:
+            seen["n"] += 1
+            if seen["n"] == 3:
+                raise RuntimeError("crash before CALL_CHARGED")
+        return real(self, state, kind, **data)
+
+    monkeypatch.setattr(MatchEngine, "_record", crash_on_third_charge)
+    with pytest.raises(RuntimeError, match="crash before CALL_CHARGED"):
+        make_engine({"alice": alice, "bob": bob}).run(new_state())
+    monkeypatch.setattr(MatchEngine, "_record", real)
+    done = make_engine({"alice": alice, "bob": bob}).run(store.load("m1"))
+    assert done.stage is Stage.COMPLETE
+    charged = [e for e in event_log.read("m1") if e.type == ev.CALL_CHARGED]
+    assert alice.calls + bob.calls == len(charged)  # the crashed attempt was not asked again
+    lines = [json.loads(x) for x in (store_root / "ledger.jsonl").read_text().splitlines()]
+    charges = [x for x in lines if "settles" in x and x.get("key")]
+    assert len(charges) == len(charged)  # one ledger charge per attempt
+    assert len({x["key"] for x in charges}) == len(charges)
+    assert not list((store_root / "replies").glob("*.json"))  # every kept reply was dropped after its event

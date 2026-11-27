@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from claude_duel.adapters.providers.http import raise_for_status
+from claude_duel.adapters.providers.http import raise_for_status, request_timeout
 from claude_duel.domain.errors import ProviderTimeoutError, TransientProviderError
 from claude_duel.ports import RESPONSES_MODELS, Completion, CompletionRequest
 
@@ -29,9 +29,9 @@ HTTP_BAD_REQUEST = 400
 _PROCESS_ID = uuid.uuid4().hex  # fallback when the store dir is not writable (read-only image, odd HOME)
 
 
-def install_id_path() -> Path:
-    """``install-id`` in the store dir (``DUEL_STORE_DIR``, default ``.duel``); never under HOME."""
-    return Path(os.environ.get("DUEL_STORE_DIR") or ".duel") / "install-id"
+def install_id_path(store_dir: Path = Path(".duel")) -> Path:
+    """``install-id`` in the store dir the composition root passes (``settings.store_dir``); never under HOME."""
+    return store_dir / "install-id"
 
 
 def _read_id(path: Path) -> str:
@@ -103,6 +103,7 @@ class OpenAIProvider:
         safety_identifier: str | None = None,
     ) -> None:
         self._model = model
+        self._timeout = timeout
         self._safety_identifier = safety_identifier if safety_identifier is not None else default_safety_identifier()
         self._summaries = True  # ask for reasoning summaries until the org turns out not to be verified for them
         self._client = httpx.Client(
@@ -119,10 +120,10 @@ class OpenAIProvider:
             if responses
             else ("/chat/completions", self._chat_body(request))
         )
-        resp = self._post(path, body)
+        resp = self._post(path, body, request.max_tokens)
         if responses and _summary_refused(resp, body):
             self._summaries = False  # unverified org: drop the summary request for good, retry once (400s cost nothing)
-            resp = self._post(path, self._responses_body(request))
+            resp = self._post(path, self._responses_body(request), request.max_tokens)
         raise_for_status(resp, "openai")
         try:
             data = resp.json()
@@ -133,9 +134,9 @@ class OpenAIProvider:
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise TransientProviderError("openai returned an unexpected body") from exc
 
-    def _post(self, path: str, body: dict[str, object]) -> httpx.Response:
+    def _post(self, path: str, body: dict[str, object], max_tokens: int) -> httpx.Response:
         try:
-            return self._client.post(path, json=body)
+            return self._client.post(path, json=body, timeout=request_timeout(self._timeout, max_tokens))
         except httpx.TimeoutException as exc:
             raise ProviderTimeoutError("openai timeout") from exc
         except httpx.TransportError as exc:
@@ -162,8 +163,12 @@ class OpenAIProvider:
         )
         body: dict[str, object] = {
             "model": self._model,
-            "instructions": request.system,
-            "input": request.prompt,
+            # GPT-6.2 appends top-level `instructions` after `input` and caches only a leading developer item,
+            # so the rules go first as a developer message for every Responses model.
+            "input": [
+                {"role": "developer", "content": request.system},
+                {"role": "user", "content": request.prompt},
+            ],
             "max_output_tokens": request.max_tokens,
             "text": {"format": fmt},
             "store": False,

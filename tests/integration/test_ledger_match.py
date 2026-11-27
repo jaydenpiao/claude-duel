@@ -13,7 +13,7 @@ from rich.console import Console
 from claude_duel.adapters.providers.fake import FakeProvider
 from claude_duel.adapters.sandbox.subprocess_sandbox import SubprocessSandbox
 from claude_duel.adapters.store.ledger import FileSpendLedger
-from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget
+from claude_duel.app.budget import DEFAULT_PRICES, BudgetLimits, CostBudget, reserved_input_tokens
 from claude_duel.app.engine import MatchEngine
 from claude_duel.app.estimate import estimate
 from claude_duel.app.replay import replay
@@ -339,12 +339,14 @@ def test_no_capture_points_outside_ledger() -> None:
 
 
 class Heavy(Allocating):
-    """Reports more input tokens than the engine's len/4 estimate, so spend can pass the stake."""
+    """Reports more input tokens than the engine's len/4 estimate (one per character, the most a vendor bills, so
+    still inside the call's reservation), so spend can pass the stake."""
 
     def complete(self, request: CompletionRequest) -> Completion:
         c = super().complete(request)
-        extra = 3_217 if request.purpose == "attack" else 0
-        return c.model_copy(update={"input_tokens": c.input_tokens + extra})
+        if request.purpose != "attack":
+            return c
+        return c.model_copy(update={"input_tokens": reserved_input_tokens(request)})
 
 
 def test_stake_overshoot_records_the_estimate_gap(make_engine, new_state, event_log) -> None:  # type: ignore[no-untyped-def]

@@ -1,0 +1,67 @@
+"""$0 no-fluke harness smoke: a much stronger scripted bot wins its duplicate matches; equal bots show no seat bias."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from claude_duel.adapters.providers.fake import TEMPLATES
+from claude_duel.adapters.providers.scripted import ScriptedProvider
+from claude_duel.app.harness import measure
+from claude_duel.cli import main
+from claude_duel.domain.duplicate import DuplicateRule
+from claude_duel.ports import CompletionRequest
+
+RULE = DuplicateRule(boards_min=4, boards_max=4)
+
+
+def _attack(prompt: str) -> CompletionRequest:
+    return CompletionRequest(system="s", prompt=prompt, purpose="attack", max_tokens=100)
+
+
+def test_scripted_bot_hits_at_its_rate_and_repeats() -> None:
+    prompt = f"source:\n{TEMPLATES[2].source}"
+    first = ScriptedProvider(30, "x", "b").complete(_attack(prompt)).text
+    bot = ScriptedProvider(30, "x", "b")
+    texts = [bot.complete(_attack(prompt)).text for _ in range(400)]
+    hits = sum(TEMPLATES[2].payload in t for t in texts)
+    assert 90 <= hits <= 150
+    assert texts[0] == first  # same seed, same draws
+    assert all(
+        TEMPLATES[2].payload not in ScriptedProvider(0, "y", "b").complete(_attack(prompt)).text for _ in range(20)
+    )
+
+
+def test_strong_bot_wins_and_equal_bots_split_seats(tmp_path: Path) -> None:
+    strong = measure(tmp_path / "a", 90, 10, matches=2, rule=DuplicateRule(boards_min=4, boards_max=6))
+    assert strong.first == 2
+    even = measure(tmp_path / "b", 50, 50, matches=1, rule=RULE, seed="e")
+    assert even.first + even.second + even.undecided == 1  # seat balance needs the long run, not one match
+    assert 0.0 <= even.first_seat_share <= 1.0
+
+
+def test_cli_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert (
+        main(["harness", "--pct-a", "90", "--pct-b", "10", "--matches", "1", "--boards-min", "2", "--boards-max", "2"])
+        == 0
+    )
+    assert "90% vs 10% over 1 matches" in capsys.readouterr().out
+    assert main(["harness", "--boards-min", "5", "--boards-max", "2"]) == 2
+
+
+def test_both_bots_build_the_board_template() -> None:
+    def build(name: str) -> str:
+        prompt = f"TASK: BUILD\nAGENT: {name}\nROUND: 1\nINDEX: 0\n"
+        req = CompletionRequest(system="s", prompt=prompt, purpose="build", max_tokens=100)
+        return ScriptedProvider(50, name, "board-7").complete(req).text
+
+    assert build("strong") == build("weak")
+
+
+def test_scripted_bot_draws_once_per_challenge() -> None:
+    prompt = f"CHALLENGE: c-1\nsource:\n{TEMPLATES[2].source}"
+    bot = ScriptedProvider(50, "x", "b")
+    texts = {bot.complete(_attack(prompt)).text for _ in range(20)}
+    assert len({TEMPLATES[2].payload in t for t in texts}) == 1  # retries cannot reroll a miss

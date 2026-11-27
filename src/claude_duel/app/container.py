@@ -52,7 +52,7 @@ def make_provider(agent: AgentSpec, settings: Settings, metrics: Metrics) -> LLM
     key = settings.api_keys.get(vendor.name)
     if key is None:
         raise ConfigError(f"agent uses {vendor.name} but {vendor.key_env} is not set")
-    inner = FACTORIES[vendor.name](key, model, timeout)
+    inner = FACTORIES[vendor.name](key, model, timeout, settings.store_dir)
     return RetryingProvider(
         inner, metrics, max_retries=settings.provider_max_retries, deadline_s=settings.provider_call_deadline
     )
@@ -110,6 +110,11 @@ def build_series_log(settings: Settings) -> FileEventLog:
 def build_duplicate_log(settings: Settings) -> FileEventLog:
     """Duplicate-play logs (no-fluke ladder), ``<duplicate_id>.duplicate.jsonl``, same hash chain."""
     return FileEventLog(settings.store_dir, suffix=".duplicate.jsonl")
+
+
+def build_ladder_log(settings: Settings) -> FileEventLog:
+    """No-fluke ladder logs, ``<ladder_id>.ladder.jsonl``, same hash chain."""
+    return FileEventLog(settings.store_dir, suffix=".ladder.jsonl")
 
 
 def build_metrics(settings: Settings, match_id: str, summary: Metrics) -> Metrics:

@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from claude_duel.adapters.store.event_log import FileEventLog
-from claude_duel.app.driver import SpendCap, append, check_caps, open_or_create, pinned
+from claude_duel.app.budget import SpendCap
+from claude_duel.app.driver import append, check_caps, open_or_create, pinned
 from claude_duel.config import Settings
 from claude_duel.domain.errors import BudgetExceededError, EventLogCorruptError
 from claude_duel.domain.models import Rules, SandboxLimits
