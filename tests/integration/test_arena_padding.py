@@ -1,6 +1,7 @@
 """S17-2 regression (security review 2026-11-26): the author pads its source with whitespace, which the attacker's
 vendor tokenizes cheaply. Output units used to be output_tokens x this call's k = (prompt bytes / 4) / input_tokens,
-so the opponent multiplied the attacker's stake and clock debit 2.5-2.7x. Output now uses the pinned vendor ratio.
+so the opponent multiplied the attacker's stake and clock debit (2.5-2.7x here; 2.5-5.6x in S17-2). Output now
+uses the pinned vendor ratio.
 The tokenizer stub counts a whitespace run as one token and other text as one token per 4 characters. No model calls."""
 
 from __future__ import annotations
