@@ -125,3 +125,23 @@ def test_key_from_env_only_and_wiring() -> None:
         make_provider(agent, Settings(), InMemoryMetrics())
     with pytest.raises(ConfigError, match="unknown provider"):
         make_provider(AgentSpec(name="d", provider="nope"), s, InMemoryMetrics())
+
+
+def test_effort_sent_is_logged_on_the_completion() -> None:
+    body = {"content": [{"type": "text", "text": "x"}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+    p = _claude(httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    assert p.complete(REQ.model_copy(update={"reasoning_effort": "high"})).reasoning_effort == "high"
+    assert p.complete(REQ).reasoning_effort is None  # None: the API default, logged as such
+
+
+def test_request_timeout_scales_with_the_output_cap() -> None:
+    seen: list[float] = []
+
+    def h(req: httpx.Request) -> httpx.Response:
+        seen.append(req.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "x"}], "usage": {}})
+
+    p = AnthropicProvider(KEY, "claude-haiku-5-5", timeout=300.0, transport=httpx.MockTransport(h))
+    for cap in (2_000, 12_000, 40_000):
+        p.complete(REQ.model_copy(update={"max_tokens": cap}))
+    assert seen == [60.0, 150.0, 300.0]  # floored, scaled, capped at the configured timeout

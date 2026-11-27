@@ -28,7 +28,9 @@ PROXY: dict[str, str] = {
     "gpt-6.2-sol": "gpt-6-astra",
     "gpt-6.1-terra": "gpt-6-astra",
 }
-# Floors (fairness audit R7): even fast models get room for a slow day; never below these.
+# Floors (fairness audit R7): even fast models get room for a slow day; never below these. The provider timeout is the
+# wait for a full-cap reply (FULL_TIMEOUT_TOKENS); each request waits that scaled by its own output cap, never under
+# 60 s (adapters/providers/http.request_timeout, #321), the same rule for both sides.
 MIN_PROVIDER_TIMEOUT_S = 300
 MIN_CALL_DEADLINE_S = 600
 MIN_MATCH_DEADLINE_S = 3600
@@ -38,7 +40,7 @@ CALLS_PER_HALF = 9  # both agents, one half of a ladder board (about 4.3 measure
 
 @dataclass(frozen=True)
 class Timeouts:
-    provider_timeout_s: int  # one HTTP request
+    provider_timeout_s: int  # one full-cap HTTP request; smaller caps wait proportionally less (min 60 s)
     call_deadline_s: int  # one call, retries included
     match_deadline_s: int  # recorded provider time per half (Rules.match_deadline_s)
 

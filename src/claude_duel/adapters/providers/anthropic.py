@@ -13,7 +13,7 @@ from __future__ import annotations
 import httpx
 from pydantic import SecretStr
 
-from claude_duel.adapters.providers.http import raise_for_status
+from claude_duel.adapters.providers.http import raise_for_status, request_timeout
 from claude_duel.domain.errors import ProviderTimeoutError, QuotaExceededError, TransientProviderError
 from claude_duel.ports import Completion, CompletionRequest
 
@@ -33,6 +33,7 @@ class AnthropicProvider:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._model = model
+        self._timeout = timeout
         self._client = httpx.Client(
             base_url=base_url,
             timeout=timeout,
@@ -55,7 +56,7 @@ class AnthropicProvider:
         if config:
             body["output_config"] = config
         try:
-            resp = self._client.post("/messages", json=body)
+            resp = self._client.post("/messages", json=body, timeout=request_timeout(self._timeout, request.max_tokens))
         except httpx.TimeoutException as exc:
             raise ProviderTimeoutError("anthropic timeout") from exc
         except httpx.TransportError as exc:
@@ -65,7 +66,8 @@ class AnthropicProvider:
         if resp.status_code in (400, 402, 403) and "credit balance" in resp.text:
             raise QuotaExceededError("anthropic credit balance too low; top up or raise the limit")
         raise_for_status(resp, "anthropic")
-        return _parse(resp)
+        # the effort sent (None: the API default), logged on call_charged like OpenAI's
+        return _parse(resp).model_copy(update={"reasoning_effort": request.reasoning_effort})
 
 
 def _parse(resp: httpx.Response) -> Completion:
