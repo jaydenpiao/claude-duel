@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from claude_duel.app.budget import FAKE_MODEL
+from claude_duel.app.calibration import PROXY  # one proxy table for cost and timeouts (M58)
 
 # seconds per call: (p95, max observed)
 MEASURED: dict[str, tuple[float, float]] = {
@@ -20,13 +21,6 @@ MEASURED: dict[str, tuple[float, float]] = {
     "claude-opus-5-5": (640.3, 640.3),
     "gpt-6-astra": (314.0, 781.7),
     "gpt-6-luna": (14.6, 28.8),
-}
-PROXY: dict[str, str] = {
-    "claude-fable-5-2": "claude-fable-5-1",
-    "claude-sonnet-5-5": "claude-opus-5-5",
-    "gpt-6.2-astra": "gpt-6-astra",
-    "gpt-6.2-sol": "gpt-6-astra",
-    "gpt-6.1-terra": "gpt-6-astra",
 }
 # Floors (fairness audit R7): even fast models get room for a slow day; never below these. The provider timeout is the
 # wait for a full-cap reply (FULL_TIMEOUT_TOKENS); each request waits that scaled by its own output cap, never under

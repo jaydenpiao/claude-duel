@@ -5,8 +5,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Timed-out provider tries are all ledgered (S17-1): `RetryingProvider` no longer retries `ProviderTimeoutError`; the engine retries it (`TIMEOUT_RETRIES` 2, so 3 tries), each try under its own reservation, kept at its worst case on timeout, with the caps re-checked before the next try. Before, timeouts swallowed by the wrapper never reached the ledger, so the hard stops undercounted.
+- Arena output units use the vendor's pinned `Rules.arena_ratio`, not the call's own input bytes per token (S17-2). The opponent's text in a prompt (for example whitespace padding in its source) multiplied a side's stake and clock debit 2.5-5.6x. Logged units replay unchanged; `RULES_VERSION` stays 2.
+
 ### Fixed
 - Spend ledger: kept provider replies moved out of the `SpendLedger` port into a `ReplyStore` port (`FileReplyStore`). The ledger now only counts money (`charged(key)`), the reply store holds the text; a kept reply without its charge line is never reused. Same on-disk layout (`replies/<key>.json`).
+- Docs after #322 (L124-L127): `adapters/AGENTS.md` and `app/AGENTS.md` say timeouts are retried by the engine, `docs/requirements.md` splits the timeout row, `modes.py` re-pins from logged `input_bytes`/`input_tokens`, and the S17-2 range reads 2.5-5.6x everywhere.
+- One model proxy table: `app/latency.py` uses `calibration.PROXY`, and a test checks every calibrated model has a latency row or proxy (M58). Stale comments: `TRUNCATED` is the model's own outcome, `domain/AGENTS.md` drops `fault` and names the margin stop rule, `ladder-c.toml` says truncations, not voids.
+- Findings: dropped the unreachable `dunder-string` severity entry and the escape-attribute names that `policy.INTROSPECTION_ATTR` already matches (no behavior change).
 - Ladder preset stakes (pilot 2026-11-26): `min_alloc` 1000 -> 6000 and `attack_tokens` 6000 -> 24000. An attack's `max_tokens` is cut to its stake, so at effort high the hidden reasoning used the whole 1000-token stake and 55% of attack replies truncated. Ladder-final worst case $2128.62 -> $2421.88; typical ($67.32) and calibrated ($585.79) are unchanged because they use measured reply sizes. `RULES_VERSION` stays 2: only the preset's values change, not what a `Rules` field means, and every match logs its full rules, so old logs replay unchanged.
 - Claude calls log the effort they sent on `call_charged` (it was always empty); `None` still means the API default.
 - Provider timeouts scale with each reply's output cap: the configured timeout, sized for the slowest model in the plan, is the wait for a 24000-token reply, and smaller caps wait proportionally less, never under 60 s (allocate 60 s, attack 100-160 s at the pilot's 300 s). The rule is the same for every model. In the pilot, 11 of about 225 calls stalled for the full 300 s and held their board.

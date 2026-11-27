@@ -67,7 +67,9 @@ class TestRetry:
 
     def test_retries_transient_then_succeeds(self) -> None:
         sleeps: list[float] = []
-        inner = Scripted(ProviderTimeoutError("t"), TransientProviderError("5xx"), "ok")
+        inner = Scripted(
+            TransientProviderError("reset"), TransientProviderError("5xx"), "ok"
+        )  # timeouts: engine (S17-1)
         assert self.make(inner, sleeps).complete(REQ).text == "ok"
         assert inner.calls == 3
         assert len(sleeps) == 2

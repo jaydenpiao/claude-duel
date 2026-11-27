@@ -130,7 +130,7 @@ class CallCharged(_Payload):
     summary: str = ""  # short, flag-redacted reasoning summary when the vendor returns one (absent in older logs)
     input_bytes: int = 0  # arena units only (absent otherwise): request bytes, units_in = ceil(bytes / 4)
     units_in: int = 0
-    units_out: int = 0  # output_tokens x (units_in / input_tokens); ``tokens`` is units_in + units_out
+    units_out: int = 0  # output_tokens x the vendor's pinned arena_ratio; ``tokens`` is units_in + units_out
 
 
 class BuildRejected(_Payload):
