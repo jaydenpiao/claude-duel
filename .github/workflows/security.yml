@@ -81,6 +81,14 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      - run: docker build -f docker/sandbox.Dockerfile -t claude-duel-sandbox:scan .
+      - name: trivy sandbox image (S17-4; fails on fixable high/critical)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: claude-duel-sandbox:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
       - name: trivy config (Dockerfile, workflows)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
