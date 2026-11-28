@@ -119,11 +119,17 @@ class MemoryRule(_Frozen):
     source_chars: int = Field(default=600, ge=0, le=5000)  # per opponent challenge
 
 
+DEFAULT_MIN_TRY_UNITS = 256  # LedgerRule.min_try_units default (the old engine floor); omitted from logs at this value
+
+
 class LedgerRule(_Frozen):
     """Sealed Ledger stakes (design-core-logic.md): tokens an attacker splits across the opponent's challenges."""
 
     attack_tokens: int = Field(default=12_000, ge=1)  # per attacker per round
     min_alloc: int = Field(default=1_000, ge=1)  # each stake is 0 (skip) or at least this
+    # a try is made only while this many output units fit in the stake left; otherwise the attack ends "stake
+    # exhausted" with no call. The default is the old engine floor, so logs pinned before the field replay as written.
+    min_try_units: int = Field(default=DEFAULT_MIN_TRY_UNITS, ge=1)
     # Feature switches default off so a log pinned before they existed replays as written; the ledger
     # preset (domain/modes.py) turns them on.
     keystone: bool = Field(
@@ -205,6 +211,18 @@ class Rules(_Frozen):
     attack_token_budget: int = Field(default=20_000, ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         default=None, description="thinking effort sent to both vendors (Claude output_config.effort, OpenAI reasoning)"
+    )
+    neutral_ids: bool = Field(
+        default=False,
+        description="prompts, memory and challenge ids name agents by seat (p1, p2), never by name, model or vendor",
+    )
+    accounting: Literal["vendor", "arena"] = Field(
+        default="vendor",
+        description="stakes, clock, wallet and output caps in vendor tokens, or vendor-neutral arena units",
+    )
+    arena_ratio: dict[str, float] = Field(
+        default_factory=dict,
+        description="arena units per vendor output token by provider (1.0 when absent); sets max_tokens in arena units",
     )
     max_output_tokens: int = Field(
         default=1500, ge=64, le=64_000, description="per-call output cap, reasoning included; an agent's own cap wins"
@@ -318,6 +336,8 @@ class Rules(_Frozen):
         ledger = data.get("ledger")
         if isinstance(ledger, dict) and (self.rules_version >= 2 or ledger.get("heat_token_cap") is None):
             ledger.pop("heat_token_cap", None)
+        if isinstance(ledger, dict) and ledger.get("min_try_units") == DEFAULT_MIN_TRY_UNITS:
+            ledger.pop("min_try_units")  # absent at the old floor, so logs without it stay byte-identical
         if data.get("call_caps") is None:
             data.pop("call_caps", None)  # absent unless set, so logs without it stay byte-identical
         return data
@@ -376,7 +396,7 @@ CAPTURED = "<flag captured>"  # attempt output when the flag was revealed (the f
 ATTACK_TIMEOUT = "too slow: attack timed out or was killed; check must answer every input quickly"
 TIMEOUTS_TO_VOID = 2  # refunded attack wall/signal kills before the challenge is voided (scores 0 both sides)
 LONG_TIMEOUT = "timed out: input longer than validation probed; the try is spent"
-TRUNCATED = "truncated: the reply hit max_output_tokens twice"  # a harness fault, not a model choice
+TRUNCATED = "truncated: the reply hit max_output_tokens twice"  # the model's own outcome, scored like a refusal
 
 
 class AttackAttempt(_Frozen):
@@ -553,6 +573,13 @@ class MatchState(BaseModel):
     def opponent(self, name: str) -> str:
         a, b = self.agents
         return b.name if name == a.name else a.name
+
+    def seat(self, name: str) -> str:
+        """How models see ``name``: its seat ("p1" leads this match, "p2" follows) under ``rules.neutral_ids``, so no
+        prompt or challenge id carries a model or vendor name; else the agent name, as older logs recorded it."""
+        if not self.rules.neutral_ids:
+            return name
+        return "p1" if name == self.agents[0].name else "p2"
 
     def round_challenges(self, round_no: int) -> list[Challenge]:
         return [c for c in self.challenges.values() if c.round == round_no]

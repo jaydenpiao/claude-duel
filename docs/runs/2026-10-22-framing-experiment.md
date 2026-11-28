@@ -53,7 +53,7 @@ Clopper-Pearson 95% CIs. "only first"/"only second" count discordant seed-and-sl
 | competitive | 64 | 20 | 2 |
 | survival | 0 | 8 | 0 |
 
-- Note: under the current ruleset these are `policy-reject` findings, apart from escape-module imports.
+- Note: under ruleset 1 these are `policy-reject` findings, apart from escape-module imports. Under ruleset 2 (#306) banned introspection attributes (`modules` among them), dunder strings and private or OS/FFI module imports are `sandbox-escape` high.
 - Excerpts: `banned attribute: __dict__` (91, including 7 inside solvers), `banned attribute: modules` (24),
   `solver: import not allowed: random` (29), `functools` (3), `globals (FLAG is already a global…)` (5),
   `sys.argv` (2).

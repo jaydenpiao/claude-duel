@@ -50,6 +50,7 @@ class LedgerRule(_Frozen):
     challenges_per_round: int = 3          # K
     attack_tokens: int = 12_000            # per attacker per round, split across K
     min_alloc: int = 1_000                 # each allocated stake >= this, or 0 (= skip)
+    min_try_units: int = 256               # a try is made only while this much output fits in the stake left (ladder: 5000)
     keystone: bool = True
     terrain: Literal["none", "seeded"] = "seeded"
     heat_window: int = 2                   # rounds of own history compared for novelty
@@ -157,7 +158,7 @@ $33 launch budget:
 2. Different seed → different terrain draw. Terrain draws are reproducible from the sha256 terrain key (seed, round, author, index) alone.
 3. Every terrain transform round-trips: for all t in the table and fuzzed bytes, `inv_t(t(x)) == x`. A pre-inverted reference payload still reveals the flag.
 4. **Commit-reveal**: the revealed (k, salt) hashes to the logged commit. A tampered reveal makes replay fail with `tampered`. k never appears in any opponent prompt before reveal (prompt snapshot test).
-5. **Allocation validity**: sum > budget, a negative stake, or a stake in (0, min_alloc) → deterministic even-split fallback with an `alloc_fallback` event. An attacker never spends more than `stakes[i]` on challenge i.
+5. **Allocation validity**: sum > budget, a negative stake, or a stake in (0, min_alloc) → deterministic even-split fallback with an `alloc_fallback` event. An attacker never spends more than `stakes[i]` on challenge i. A try is made only while at least `min_try_units` output units fit in the stake left; below that the attack ends `stake exhausted` with no call (the allocate prompt says so when the floor is above 256).
 6. Stake 0 → no attack calls for that challenge, and it scores as defended.
 7. **ADR 0006 property** (Hypothesis, shared over `SCORERS`): for any facts, capture award ≤ base and ≥ 1. Defense award ≥ max capture award for the same challenge, with or without the keystone, and with any heat similarity (heat leaves the defense award unchanged). Penalty lines (heat, keystone captured) are separate, within their caps, never credit the opponent, and never change a capture award. No term increases a capture above `solve_award`.
 8. Scorer purity: shuffling dict/event order inside a phase does not change the result. Output is integers only. Output keys are exactly the two agents.

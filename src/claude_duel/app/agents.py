@@ -358,6 +358,7 @@ def allocate_prompt(
     memory: str = "",
     own: list[tuple[str, str, bool]] | None = None,
     ghosted: dict[int, str] | None = None,
+    min_try: int | None = None,
 ) -> str:
     """Ledger allocation: split ``budget`` attack tokens across the opponent's challenges (id, title, source, valid)."""
     lines = [
@@ -379,6 +380,11 @@ def allocate_prompt(
         f"author), otherwise at least {min_alloc}. Stakes must sum to at most {budget}. A capture that uses less of "
         "its stake scores more. An invalid answer falls back to an even split."
     )
+    if min_try is not None:
+        lines.append(
+            f"Each try (your reasoning plus answer) is made only while at least {min_try} tokens of its stake are "
+            "left; below that the attack ends with no further try."
+        )
     if own:
         lines.append("Your own challenges this round (pick one as your keystone; your opponent sees only a hash):")
         lines += [

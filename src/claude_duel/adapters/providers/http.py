@@ -14,6 +14,18 @@ from claude_duel.domain.errors import (
     TransientProviderError,
 )
 
+# Per-request HTTP timeout: the configured timeout (sized for the slowest model in the plan) is the ceiling for a reply
+# at FULL_TIMEOUT_TOKENS; smaller output caps get a proportionally shorter wait, never under MIN_REQUEST_TIMEOUT_S.
+# The same rule for every model and vendor, so a stuck allocate or attack call is retried in about a minute instead
+# of holding a board for the full timeout (pilot 2026-11-26: 11 of ~225 calls stalled for 300 s).
+FULL_TIMEOUT_TOKENS = 24_000
+MIN_REQUEST_TIMEOUT_S = 60.0
+
+
+def request_timeout(ceiling_s: float, max_tokens: int) -> float:
+    """Seconds to wait for one reply capped at ``max_tokens``: ``ceiling_s`` scaled by the cap, floored, capped."""
+    return min(ceiling_s, max(MIN_REQUEST_TIMEOUT_S, ceiling_s * max_tokens / FULL_TIMEOUT_TOKENS))
+
 
 def _retry_after(resp: httpx.Response) -> float | None:
     raw = resp.headers.get("retry-after")

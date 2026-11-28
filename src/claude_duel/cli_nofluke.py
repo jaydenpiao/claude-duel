@@ -7,13 +7,21 @@ import json
 import sys
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from claude_duel.app import ladder_config, repro
 from claude_duel.app.container import build_metrics
 from claude_duel.app.duplicate import play_duplicate, verify_duplicate
 from claude_duel.app.harness import measure
-from claude_duel.app.ladder import compare_ladders, play_ladder, project, read_ladder, verify_ladder
+from claude_duel.app.ladder import (
+    compare_ladders,
+    play_ladder,
+    project,
+    read_ladder,
+    stake_exhausted,
+    verify_ladder,
+)
 from claude_duel.config import Settings
 from claude_duel.domain.duplicate import DuplicateRule
 from claude_duel.domain.errors import ConfigError
@@ -57,6 +65,7 @@ _LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on t
     ("--start-tier-b", "start_tier.b", int),
     ("--boards-min", "match.boards_min", int),
     ("--boards-max", "match.boards_max", int),
+    ("--boards", "match.boards", int),
     ("--match-max-usd", "budget.match_max_usd", float),
     ("--ladder-max-usd", "budget.ladder_max_usd", float),
     ("--basis", "budget.basis", str),
@@ -64,6 +73,10 @@ _LADDER_FLAGS = (  # flag, plan key, type: every plan key can be overridden on t
     ("--cap-allocate", "caps.allocate", int),
     ("--cap-attack", "caps.attack", int),
     ("--max-attempts", "caps.max_attempts", int),
+    ("--effort", "caps.effort", str),
+    ("--provider-timeout", "limits.provider_timeout_s", int),
+    ("--call-deadline", "limits.call_deadline_s", int),
+    ("--match-deadline", "limits.match_deadline_s", int),
     ("--run-date", "run_date", str),
 )
 
@@ -173,7 +186,8 @@ def _repro(args: argparse.Namespace, rule: DuplicateRule) -> int:
 
 
 def ladder_compare(settings: Settings, args: argparse.Namespace) -> int:
-    cmp = compare_ladders(read_ladder(settings, args.first), read_ladder(settings, args.second))
+    first, second = read_ladder(settings, args.first), read_ladder(settings, args.second)
+    cmp = replace(compare_ladders(first, second), stake_exhausted=stake_exhausted(settings, first, second))
     print(json.dumps(comparison_view(cmp)) if args.format == "json" else "\n".join(comparison_lines(cmp)))
     return 0
 

@@ -161,3 +161,19 @@ def test_one_attempt_key_holds_one_reservation_and_one_charge(tmp_path: Path) ->
     resumed.forget("k1")
     assert resumed.settled("k1") is None
     assert not list((tmp_path / "replies").iterdir())
+
+
+def test_a_crash_after_the_reply_before_its_charge_calls_again_and_ledgers_once(tmp_path: Path) -> None:
+    """#301 N3 (LOW, by design): if the process dies after the provider returned but before `record`, nothing
+    of that reply was kept. The resume releases the stale reservation, finds no settled reply, and calls again,
+    so the ledger holds one charge while the vendor billed two calls. This pins that known gap."""
+    path = tmp_path / "ledger.jsonl"
+    _budget(path).reserve("m1", FAKE_MODEL, REQ, key="k1")  # the provider returned; the process died here
+    assert FileSpendLedger(path).total_usd() == pytest.approx(WORST)  # still counted until the resume
+    resumed = _budget(path)
+    assert resumed.settled("k1") is None  # no kept reply, so the attempt is called again
+    rid = resumed.reserve("m1", FAKE_MODEL, REQ, key="k1")
+    resumed.charge("m1", FAKE_MODEL, Completion(text="x", input_tokens=10, output_tokens=5), rid, key="k1")
+    assert FileSpendLedger(path).total_usd() == pytest.approx(20 / 1e6)  # one charge; the lost bill is absent
+    lines = path.read_text().splitlines()
+    assert sum('"reserve"' in line for line in lines) == 2
