@@ -85,7 +85,7 @@ def measure(
                 )
                 for h in (0, 1)
             )
-            board = dp.board_of(state, k, board_seed, (halves[0], halves[1]), 0)
+            board = dp.board_of(state, k, board_seed, (halves[0], halves[1]))
             state.boards.append(board)
             for h in halves:  # side bias: who won each half, by seat
                 lead, other = (a.name for a in h.agents)
@@ -93,7 +93,7 @@ def measure(
                 decided += net != 0
                 seat_wins += net > 0
         ahead += sum(state.diffs()) > 0
-        margins += state.scored()
+        margins += state.diffs()
         res = state.result()
         if res in tally:
             tally[res] += 1

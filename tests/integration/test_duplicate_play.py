@@ -9,7 +9,7 @@ import pytest
 
 from claude_duel.app import budget
 from claude_duel.app.container import build_event_log, build_store
-from claude_duel.app.duplicate import play_duplicate, verify_duplicate
+from claude_duel.app.duplicate import play_duplicate, run_calls_for, verify_duplicate
 from claude_duel.cli import main
 from claude_duel.config import Settings
 from claude_duel.domain import duplicate as dp
@@ -84,3 +84,32 @@ def test_cli_prints_the_board_table_and_json(tmp_path: Path, monkeypatch: pytest
     assert view["sides"] == ["strong", "weak"]
     assert view["verified"] is True
     assert len(view["boards"]) == 2
+
+
+def test_projected_cap_abort_stops_a_fixed_match_at_board_4_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(budget.DEFAULT_PRICES, budget.FAKE_MODEL, (1.0, 1.0))
+    settings = _settings(tmp_path)
+    cost = play_duplicate(settings, "p0", dp.DuplicateRule(boards_min=1, boards_max=1), InMemoryMetrics()).boards[0].usd
+    # each board ~1.5x what the cap allows per scheduled board: stop at board 4, not after spending most of the cap
+    dear = dp.DuplicateRule(boards_min=12, boards_max=12, stop="none", match_max_usd=cost * 12 / 1.5)
+    state = play_duplicate(settings, "p1", dear, InMemoryMetrics())
+    assert (state.capped, state.cap_reason, len(state.boards)) == (True, "projected_over_cap", dp.PROJECT_FROM)
+    assert state.result() == "capped"
+    assert verify_duplicate(settings, "p1").consistent
+    assert play_duplicate(settings, "p1", dear, InMemoryMetrics()).boards == state.boards  # same stop on resume
+    fits = dp.DuplicateRule(boards_min=12, boards_max=12, stop="none", match_max_usd=cost * 12 * 1.3)
+    full = play_duplicate(settings, "p2", fits, InMemoryMetrics())
+    assert (full.capped, len(full.boards)) == (False, 12)
+
+
+def test_a_12_board_duplicate_is_not_stopped_by_the_flat_run_call_cap(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    assert settings.budget.run_max_calls == 200  # the one-match default the 12-board run used to hit
+    rule = dp.DuplicateRule(boards_min=12, boards_max=12, stop="none")
+    assert run_calls_for(settings, rule).budget.run_max_calls == 2 * 12 * settings.budget.match_max_calls
+    assert run_calls_for(settings, dp.DuplicateRule(boards_min=1, boards_max=1)).budget.run_max_calls == 200
+    state = play_duplicate(settings, "rc12", rule, InMemoryMetrics())
+    assert state.done()
+    assert len(state.boards) == 12

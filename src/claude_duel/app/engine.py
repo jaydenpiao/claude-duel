@@ -12,15 +12,22 @@ from typing import Any, cast
 from claude_duel.app import agents, allowance
 from claude_duel.app.budget import CostBudget
 from claude_duel.app.observers import IsolatedObserver
-from claude_duel.domain import contract, findings, ghosts, memory, policy, stakes, terrain, variety
+from claude_duel.domain import arena_units, contract, findings, ghosts, memory, policy, stakes, terrain, variety
 from claude_duel.domain import events as ev
-from claude_duel.domain.errors import DeadlineExceededError, MalformedOutputError, MatchCapError, WalletEmptyError
+from claude_duel.domain.errors import (
+    DeadlineExceededError,
+    MalformedOutputError,
+    MatchCapError,
+    ProviderTimeoutError,
+    WalletEmptyError,
+)
 from claude_duel.domain.flags import assert_no_flag, flag_of, match_flags, redact, scrub, shares_fragment
 from claude_duel.domain.heat import HeatScorer
 from claude_duel.domain.heat_bound import heavy
 from claude_duel.domain.models import (
     ATTACK_TIMEOUT,
     CAPTURED,
+    DEFAULT_MIN_TRY_UNITS,
     LONG_TIMEOUT,
     TIMEOUTS_TO_VOID,
     TRUNCATED,
@@ -90,7 +97,7 @@ def challenge_id(match_id: str, round_no: int, author: str, index: int) -> str:
     return f"r{round_no}-{author}-{index}-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
 
 
-STAKE_FLOOR = 256  # ledger: no attack call when fewer output tokens than this fit in the stake left
+STAKE_FLOOR = DEFAULT_MIN_TRY_UNITS  # ledger: no repair call below this many output units (tries: min_try_units)
 
 
 def _decoy(state: MatchState, cid: str, use: str) -> str:
@@ -104,6 +111,9 @@ def attempt_key(state: MatchState, agent: str, request: CompletionRequest) -> st
     thing at the same call count."""
     parts = (state.match_id, str(state.usage.calls), agent, request.model_dump_json())
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:32]
+
+
+TIMEOUT_RETRIES = 2  # a timed-out call is tried up to 3 times, each ledgered at its reservation (S17-1)
 
 
 class MatchEngine:
@@ -249,10 +259,7 @@ class MatchEngine:
         if agent != GATE:  # the probe is an arena cost: an empty gate wallet must not forfeit the author (#121)
             allowance.check(state, agent)
         self._budget.check(state)
-        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
-            raise DeadlineExceededError(
-                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
-            )
+        self._deadline(state)
         model = self._models[agent]
         key = attempt_key(state, agent, request)
         started = time.monotonic()
@@ -260,19 +267,22 @@ class MatchEngine:
         if reused is not None:
             completion, usd = reused, self._budget.recount(model, reused)
         else:
-            reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
-            try:
-                completion = self._providers[agent].complete(request)
-            except Exception:
-                self._budget.release(state.match_id, model, reservation)
-                raise
+            completion, reservation = self._try_call(state, agent, model, request, key)
             usd = self._budget.charge(state.match_id, model, completion, reservation, key)
         elapsed = time.monotonic() - started
         self._metrics.timing("provider.seconds", elapsed, agent=agent, purpose=request.purpose)
+        arena: dict[str, object] = {}
+        if state.rules.accounting == "arena":
+            nbytes = arena_units.request_bytes(request.system, request.prompt, request.json_schema)
+            provider = next((a.provider for a in state.agents if a.name == agent), "")
+            ratio = state.rules.arena_ratio.get(provider, 1.0)
+            unit_in, unit_out = arena_units.units(nbytes, completion.output_tokens, ratio)
+            completion = completion.model_copy(update={"units": unit_in + unit_out})
+            arena = {"input_bytes": nbytes, "units_in": unit_in, "units_out": unit_out}
         charged: dict[str, object] = {
             "agent": agent,
             "model": model,
-            "tokens": completion.total_tokens,
+            "tokens": completion.spent_tokens,
             "usd": usd,
             "elapsed_ms": round(elapsed * 1000),
             "input_tokens": completion.input_tokens,
@@ -283,6 +293,7 @@ class MatchEngine:
             "summary": self._summary(state, completion.reasoning_summary),
         }
         charged["reasoning_effort"] = completion.reasoning_effort
+        charged.update(arena)  # present only in arena units, so vendor-token logs stay byte-identical
         if completion.refused:  # omitted when false so older logs stay byte-identical
             charged["refused"] = True
             self._metrics.incr("model.refused", purpose=request.purpose)
@@ -290,6 +301,39 @@ class MatchEngine:
         self._budget.forget(key)  # the event is durable now; resume will not repeat this attempt
         self._metrics.incr("provider.tokens", completion.total_tokens, agent=agent)
         return completion
+
+    @staticmethod
+    def _deadline(state: MatchState) -> None:
+        if state.usage.elapsed_ms >= state.rules.match_deadline_s * 1000:
+            raise DeadlineExceededError(
+                f"deadline: {state.usage.elapsed_ms / 1000:.1f}s of provider time >= {state.rules.match_deadline_s}s"
+            )
+
+    def _try_call(
+        self, state: MatchState, agent: str, model: str, request: CompletionRequest, key: str
+    ) -> tuple[Completion, str]:
+        """One paid call, retried here (never in the provider) after a timeout so every try holds its own reservation
+        and a timed-out try is ledgered at it (likely billed; S17-1). Hard caps are re-checked before each try."""
+        timeouts = 0
+        while True:
+            reservation = self._budget.reserve(state.match_id, model, request, key)  # a crash keeps it counted
+            started = time.monotonic()
+            try:
+                return self._providers[agent].complete(request), reservation
+            except ProviderTimeoutError:
+                tokens, usd = self._budget.keep(state.match_id, model, reservation)  # likely billed: ledger it
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                kept = {"agent": agent, "model": model, "tokens": tokens, "usd": usd, "elapsed_ms": elapsed_ms}
+                self._checkpoint(state, ev.CALL_TIMED_OUT, **kept, purpose=request.purpose)  # S18-1: match usage
+                if timeouts >= TIMEOUT_RETRIES:
+                    raise
+                timeouts += 1
+                self._metrics.incr("provider.timeout_retry", agent=agent, purpose=request.purpose)
+                self._budget.check(state)
+                self._deadline(state)
+            except Exception:
+                self._budget.release(state.match_id, model, reservation)
+                raise
 
     def _run_challenge(
         self, source: str, stdin: str, flag: str, state: MatchState, purpose: str, limits: SandboxLimits | None = None
@@ -305,7 +349,7 @@ class MatchEngine:
     def _build(self, state: MatchState) -> None:
         for agent in state.agents:
             for index in range(state.rules.challenges_per_round):
-                cid = challenge_id(state.match_id, state.round, agent.name, index)
+                cid = challenge_id(state.match_id, state.round, state.seat(agent.name), index)
                 if cid in state.challenges:
                     continue  # idempotent resume
                 try:
@@ -339,7 +383,7 @@ class MatchEngine:
         while len(errors) <= state.rules.max_format_retries:
             error = errors[-1] if errors else None
             prompt = agents.build_prompt(
-                agent,
+                state.seat(agent),
                 state.round,
                 index,
                 state.rules,
@@ -484,7 +528,7 @@ class MatchEngine:
         if completion.truncated:
             self._metrics.incr("model.truncated", purpose=purpose)
             repair = f"{prompt}\n\n{agents.TRUNCATED_HINT}"
-            rest = None if left is None else left - completion.total_tokens
+            rest = None if left is None else left - completion.spent_tokens
             if rest is not None and self._fit(state, repair, rest) < STAKE_FLOOR:
                 return completion
             completion = self._call(state, agent, self._request(state, agent, repair, purpose, rest))
@@ -508,6 +552,9 @@ class MatchEngine:
         tokens = self._output_cap(state, agent, purpose)
         if left is not None:
             tokens = min(tokens, self._fit(state, prompt, left))
+        if state.rules.accounting == "arena":  # the cap is in arena units: send the vendor's equivalent
+            provider = next((a.provider for a in state.agents if a.name == agent), "")
+            tokens = arena_units.vendor_tokens(tokens, state.rules.arena_ratio.get(provider, 1.0))
         return CompletionRequest(
             system=agents.system_prompt(state.framing_text),
             prompt=prompt,
@@ -745,7 +792,7 @@ class MatchEngine:
         if key in state.allocate_started:
             return None, None  # already paid or started; settle without a second call
         prompt = agents.allocate_prompt(
-            attacker,
+            state.seat(attacker),
             state.round,
             rule.attack_tokens,
             rule.min_alloc,
@@ -753,6 +800,7 @@ class MatchEngine:
             self._memory(state, attacker),
             own_rows,
             ghost_labels,
+            min_try=rule.min_try_units if rule.min_try_units > STAKE_FLOOR else None,
         )
         for cid in state.challenges:
             assert_no_flag(prompt, self._flag_for(state, cid), "allocate prompt")
@@ -842,7 +890,7 @@ class MatchEngine:
                 return Attack.of(ch.id, attacker, history, solved=False, reason=empty)
             pairs = [(a.payload, a.output) for a in history]
             prompt = agents.attack_prompt(
-                attacker,
+                state.seat(attacker),
                 ch.id,
                 spec.title,
                 _with_terrain(spec.description, state.terrains.get(ch.id)),
@@ -856,7 +904,10 @@ class MatchEngine:
             )
             assert_no_flag(prompt, flag, "attack prompt")
             left = None if stake is None else stake - tokens
-            if left is not None and self._fit(state, prompt, left) < STAKE_FLOOR:
+            floor = state.rules.ledger.min_try_units if state.rules.ledger is not None else STAKE_FLOOR
+            # S18-6: the floor is on the stake's output room only. The prompt's input estimate carries the opponent's
+            # source and description, so it must not decide whether a try happens (it still shrinks max_tokens).
+            if left is not None and (left < floor or self._fit(state, prompt, left) < STAKE_FLOOR):
                 return Attack.of(ch.id, attacker, history, solved=False, reason="stake exhausted")
             self._checkpoint(state, ev.ATTACK_STARTED, key=key, try_no=used + 1)
             completion = self._complete(state, attacker, prompt, "attack", left)
@@ -895,7 +946,7 @@ class MatchEngine:
         ground: str | None = None,
     ) -> AttackAttempt:
         micros = round(self._budget.cost(self._models[agent], completion) * 1_000_000)
-        tokens = completion.total_tokens
+        tokens = completion.spent_tokens
         if completion.refused or completion.truncated:  # typed flags: challenge stdout can never claim either
             cut = not completion.refused
             if cut:
@@ -908,7 +959,7 @@ class MatchEngine:
             move = agents.parse_attack(completion.text)
         except MalformedOutputError as exc:
             self._metrics.incr("model.malformed", purpose="attack")
-            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=completion.total_tokens, usd_micros=micros)
+            return AttackAttempt(payload=MALFORMED, output=str(exc), tokens=tokens, usd_micros=micros)
         payload = move.payload
         if state.rules.attacker_solver and move.solver.strip():
             self._metrics.incr("attack.solver")
@@ -927,7 +978,7 @@ class MatchEngine:
         output = CAPTURED if flag in run.stdout else _sandbox_output(redact(run.stdout, (flag,))[:500])
         if state.rules.integrity_control:
             self._control(state, agent, payload, flag)
-        return AttackAttempt(payload=payload, output=output, tokens=completion.total_tokens, usd_micros=micros)
+        return AttackAttempt(payload=payload, output=output, tokens=tokens, usd_micros=micros)
 
     def _control(self, state: MatchState, agent: str, payload: str, flag: str) -> None:
         """Integrity control: the same payload and flag on a program that never prints it. A capture there means

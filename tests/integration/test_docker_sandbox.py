@@ -14,6 +14,7 @@ from claude_duel.adapters.sandbox.common import REAP_SECONDS, execute
 from claude_duel.adapters.sandbox.docker_sandbox import (
     DENIED_SYSCALLS,
     SECCOMP_PROFILE,
+    TIMEOUT_EXIT,
     DockerSandbox,
     docker_runtimes,
 )
@@ -219,3 +220,25 @@ def test_profile_is_dockers_default_minus_the_tracing_calls() -> None:
     allowed = {n for rule in profile["syscalls"] if rule["action"] == "SCMP_ACT_ALLOW" for n in rule["names"]}
     assert not allowed & DENIED_SYSCALLS
     assert {"read", "write", "execve", "clone", "mmap"} <= allowed
+
+
+PROC_MEM = """
+import time
+try:
+    with open("/proc/1/mem", "r+b", buffering=0):
+        print("proc-mem rw", flush=True)
+except OSError as exc:
+    print("proc-mem denied", exc.errno, flush=True)
+time.sleep(600)
+"""
+
+
+def test_proc_1_mem_never_outlives_the_wall_kill(sb: DockerSandbox, docker_cmd: tuple[str, ...]) -> None:
+    """#307 N1 (LOW, open): raw code past the runner's import gate may open /proc/1/mem read-write under runc
+    (gVisor may deny it). Whatever it does, the run ends by the host deadline and leaves no container behind."""
+    started = time.monotonic()
+    r = _raw(sb, docker_cmd, PROC_MEM)
+    assert time.monotonic() - started < HOST_DEADLINE + REAP_MARGIN
+    assert r.exit_code == TIMEOUT_EXIT or r.timed_out or r.killed_reason  # in-container watchdog, else host kill
+    assert r.stdout.startswith("proc-mem")
+    assert _leftover(docker_cmd) == ""
